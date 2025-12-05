@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use rand::prelude::*;
 
-use crate::ast::{Expr, Node, Op};
+use crate::ast::{Expr, Node, Op, TagQuery};
 use crate::library::{Library, PromptGroup, PromptOption, PromptTemplate};
 
 /// Context for evaluating a template.
@@ -60,10 +60,12 @@ impl<'a, R: Rng> EvalContext<'a, R> {
     }
 }
 
-/// Record of which option was chosen from a group.
+/// Record of which option was chosen for a query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChosenOption {
-    pub group_name: String,
+    /// The query that was evaluated.
+    pub query: TagQuery,
+    /// The text of the option that was selected.
     pub option_text: String,
 }
 
@@ -84,8 +86,14 @@ pub enum RenderError {
     #[error("group not found: {0}")]
     GroupNotFound(String),
 
+    #[error("tag not found: {0}")]
+    TagNotFound(String),
+
     #[error("group has no options: {0}")]
     EmptyGroup(String),
+
+    #[error("query matched no options: {0:?}")]
+    EmptyQueryResult(TagQuery),
 }
 
 /// Render a template using the given context.
@@ -107,8 +115,8 @@ pub fn render<R: Rng>(
                 // Comments are not included in output
             }
 
-            Node::GroupRef(group_name) => {
-                let chosen = pick_from_group(group_name, ctx)?;
+            Node::TagQuery(query) => {
+                let chosen = pick_from_query(query, ctx)?;
                 output.push_str(&chosen.option_text);
                 chosen_options.push(chosen);
             }
@@ -146,56 +154,75 @@ pub fn render<R: Rng>(
     })
 }
 
-/// Pick a random option from a group using weighted selection.
-fn pick_from_group<R: Rng>(
-    group_name: &str,
+/// Pick a random option from groups matching a tag query.
+///
+/// This collects all options from groups that have ANY of the include tags,
+/// then removes options from groups that have ANY of the exclude tags.
+fn pick_from_query<R: Rng>(
+    query: &TagQuery,
     ctx: &mut EvalContext<'_, R>,
 ) -> Result<ChosenOption, RenderError> {
-    let group = ctx
+    // Collect all matching groups
+    let matching_groups: Vec<&PromptGroup> = ctx
         .library
-        .find_group(group_name)
-        .ok_or_else(|| RenderError::GroupNotFound(group_name.to_string()))?;
+        .groups
+        .iter()
+        .filter(|group| {
+            // Include if group has ANY of the include tags
+            let has_include = query.include.iter().any(|tag| group.tags.contains(tag));
 
-    pick_option_from_group(group, ctx)
-}
+            // Exclude if group has ANY of the exclude tags
+            let has_exclude = query.exclude.iter().any(|tag| group.tags.contains(tag));
 
-/// Pick a weighted random option from a group.
-fn pick_option_from_group<R: Rng>(
-    group: &PromptGroup,
-    ctx: &mut EvalContext<'_, R>,
-) -> Result<ChosenOption, RenderError> {
-    if group.options.is_empty() {
-        return Err(RenderError::EmptyGroup(group.name.clone()));
+            has_include && !has_exclude
+        })
+        .collect();
+
+    if matching_groups.is_empty() {
+        return Err(RenderError::EmptyQueryResult(query.clone()));
     }
 
-    let option = weighted_choice(&group.options, &mut ctx.rng);
+    // Collect all options from matching groups with their source group info
+    let all_options: Vec<(&PromptGroup, &PromptOption)> = matching_groups
+        .iter()
+        .flat_map(|group| group.options.iter().map(move |opt| (*group, opt)))
+        .collect();
 
-    Ok(ChosenOption {
-        group_name: group.name.clone(),
-        option_text: option.text.clone(),
-    })
-}
+    if all_options.is_empty() {
+        return Err(RenderError::EmptyQueryResult(query.clone()));
+    }
 
-/// Weighted random selection from a slice of options.
-fn weighted_choice<'a, R: Rng>(options: &'a [PromptOption], rng: &mut R) -> &'a PromptOption {
-    let total_weight: f32 = options.iter().map(|o| o.weight).sum();
+    // Weighted selection across all options
+    let total_weight: f32 = all_options.iter().map(|(_, opt)| opt.weight).sum();
 
     if total_weight <= 0.0 {
-        // Fallback to uniform selection if weights are invalid
-        return &options[rng.random_range(0..options.len())];
+        // Fallback to uniform selection
+        let idx = ctx.rng.random_range(0..all_options.len());
+        let (_, option) = all_options[idx];
+        return Ok(ChosenOption {
+            query: query.clone(),
+            option_text: option.text.clone(),
+        });
     }
 
-    let mut pick = rng.random_range(0.0..total_weight);
+    let mut pick = ctx.rng.random_range(0.0..total_weight);
 
-    for option in options {
+    for (_, option) in &all_options {
         pick -= option.weight;
         if pick <= 0.0 {
-            return option;
+            return Ok(ChosenOption {
+                query: query.clone(),
+                option_text: option.text.clone(),
+            });
         }
     }
 
-    // Fallback (shouldn't happen with valid weights)
-    options.last().unwrap()
+    // Fallback (shouldn't happen)
+    let (_, option) = all_options.last().unwrap();
+    Ok(ChosenOption {
+        query: query.clone(),
+        option_text: option.text.clone(),
+    })
 }
 
 /// Result of evaluating an expression: (output_text, maybe_chosen_option, maybe_assignment).
@@ -208,13 +235,15 @@ fn eval_expr<R: Rng>(
 ) -> Result<ExprResult, RenderError> {
     match expr {
         Expr::Literal(text) => {
-            // A literal in an expression block refers to a group name
-            let chosen = pick_from_group(text, ctx)?;
+            // A literal in an expression block is interpreted as a tag query
+            // For now, treat the literal as a single include tag (backwards compatible)
+            let query = TagQuery::new(text.clone());
+            let chosen = pick_from_query(&query, ctx)?;
             Ok((chosen.option_text.clone(), Some(chosen), None))
         }
 
-        Expr::GroupRef(name) => {
-            let chosen = pick_from_group(name, ctx)?;
+        Expr::Query(query) => {
+            let chosen = pick_from_query(query, ctx)?;
             Ok((chosen.option_text.clone(), Some(chosen), None))
         }
 
@@ -244,16 +273,22 @@ mod tests {
     fn make_test_library() -> Library {
         let mut lib = Library::with_id("test-lib", "Test Library");
 
-        let mut hair = PromptGroup::new("Hair");
-        hair.add_text("blonde hair");
-        hair.add_text("red hair");
-        hair.add_text("black hair");
-        lib.groups.push(hair);
+        lib.groups.push(PromptGroup::new(
+            vec!["Hair".to_string()],
+            vec![
+                PromptOption::new("blonde hair"),
+                PromptOption::new("red hair"),
+                PromptOption::new("black hair"),
+            ],
+        ));
 
-        let mut eyes = PromptGroup::new("Eyes");
-        eyes.add_text("blue eyes");
-        eyes.add_text("green eyes");
-        lib.groups.push(eyes);
+        lib.groups.push(PromptGroup::new(
+            vec!["Eyes".to_string()],
+            vec![
+                PromptOption::new("blue eyes"),
+                PromptOption::new("green eyes"),
+            ],
+        ));
 
         lib
     }
@@ -285,7 +320,7 @@ mod tests {
                 || result.text.contains("black hair")
         );
         assert_eq!(result.chosen_options.len(), 1);
-        assert_eq!(result.chosen_options[0].group_name, "Hair");
+        assert_eq!(result.chosen_options[0].query.include, vec!["Hair"]);
     }
 
     #[test]
@@ -368,36 +403,44 @@ mod tests {
     }
 
     #[test]
-    fn test_render_group_not_found_error() {
+    fn test_render_tag_not_found_error() {
         let lib = make_test_library();
         let ast = parse_template("{NonExistent}").unwrap();
         let template = PromptTemplate::new("test", ast);
         let mut ctx = EvalContext::with_seed(&lib, 42);
 
         let result = render(&template, &mut ctx);
-        assert!(matches!(result, Err(RenderError::GroupNotFound(_))));
+        // When no groups match the tag query, we get EmptyQueryResult
+        assert!(matches!(result, Err(RenderError::EmptyQueryResult(_))));
     }
 
     #[test]
     fn test_render_empty_group_error() {
         let mut lib = make_test_library();
-        lib.groups.push(PromptGroup::new("Empty"));
+        lib.groups.push(PromptGroup::new(
+            vec!["Empty".to_string(), "empty-tag".to_string()],
+            vec![],
+        ));
 
-        let ast = parse_template("{Empty}").unwrap();
+        let ast = parse_template("{empty-tag}").unwrap();
         let template = PromptTemplate::new("test", ast);
         let mut ctx = EvalContext::with_seed(&lib, 42);
 
         let result = render(&template, &mut ctx);
-        assert!(matches!(result, Err(RenderError::EmptyGroup(_))));
+        // When groups match but have no options, we get EmptyQueryResult
+        assert!(matches!(result, Err(RenderError::EmptyQueryResult(_))));
     }
 
     #[test]
     fn test_weighted_selection() {
         let mut lib = Library::with_id("test", "Test");
-        let mut group = PromptGroup::new("Weighted");
-        group.options.push(PromptOption::with_weight("common", 100.0));
-        group.options.push(PromptOption::with_weight("rare", 1.0));
-        lib.groups.push(group);
+        lib.groups.push(PromptGroup::new(
+            vec!["Weighted".to_string()],
+            vec![
+                PromptOption::with_weight("common", 100.0),
+                PromptOption::with_weight("rare", 1.0),
+            ],
+        ));
 
         let ast = parse_template("{Weighted}").unwrap();
         let template = PromptTemplate::new("test", ast);

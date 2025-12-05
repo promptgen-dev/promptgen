@@ -56,9 +56,20 @@ impl Library {
         }
     }
 
-    /// Find a group by name.
-    pub fn find_group(&self, name: &str) -> Option<&PromptGroup> {
-        self.groups.iter().find(|g| g.name == name)
+    /// Find a group by tag.
+    /// Returns the first group that has the given tag.
+    pub fn find_group(&self, tag: &str) -> Option<&PromptGroup> {
+        self.groups
+            .iter()
+            .find(|g| g.tags.contains(&tag.to_string()))
+    }
+
+    /// Find all groups that have the given tag.
+    pub fn find_groups_by_tag(&self, tag: &str) -> Vec<&PromptGroup> {
+        self.groups
+            .iter()
+            .filter(|g| g.tags.contains(&tag.to_string()))
+            .collect()
     }
 
     /// Find a template by name.
@@ -68,32 +79,20 @@ impl Library {
 }
 
 /// A prompt group is a collection of related prompt options.
-/// For example, a "Hair" group might contain options like "blonde hair", "red hair", etc.
+/// Groups are identified by their tags.
+/// For example, a group with tags `["Hair", "appearance"]` can be referenced as `{Hair}` or `{appearance}`.
 #[derive(Debug, Clone)]
 pub struct PromptGroup {
-    pub name: String,
+    /// Tags that identify this group.
+    /// Tags can be any string: "Hair", "hair-color", "Character Hair", etc.
     pub tags: Vec<String>,
     pub options: Vec<PromptOption>,
 }
 
 impl PromptGroup {
-    /// Create a new group with the given name.
-    pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            tags: Vec::new(),
-            options: Vec::new(),
-        }
-    }
-
-    /// Add an option to this group.
-    pub fn add_option(&mut self, option: PromptOption) {
-        self.options.push(option);
-    }
-
-    /// Create and add a simple text option.
-    pub fn add_text(&mut self, text: impl Into<String>) {
-        self.options.push(PromptOption::new(text));
+    /// Create a new group with the given tags and options.
+    pub fn new(tags: Vec<String>, options: Vec<PromptOption>) -> Self {
+        Self { tags, options }
     }
 }
 
@@ -184,26 +183,26 @@ impl PromptTemplate {
         slots
     }
 
-    /// Extract all group references from this template.
-    /// Useful for validation (checking all referenced groups exist).
-    pub fn referenced_groups(&self) -> Vec<String> {
-        let mut groups = Vec::new();
+    /// Extract all tag references from this template.
+    /// Useful for validation (checking all referenced tags exist).
+    /// Returns all tags from both include and exclude parts of queries.
+    pub fn referenced_tags(&self) -> Vec<String> {
+        let mut tags = Vec::new();
 
         for (node, _span) in &self.ast.nodes {
             match node {
-                Node::GroupRef(name) => {
-                    groups.push(name.clone());
+                Node::TagQuery(query) => {
+                    tags.extend(query.include.clone());
+                    tags.extend(query.exclude.clone());
                 }
                 Node::ExprBlock(expr) => {
-                    if let Some(group) = extract_group_from_expr(expr) {
-                        groups.push(group);
-                    }
+                    collect_tags_from_expr(expr, &mut tags);
                 }
                 _ => {}
             }
         }
 
-        groups
+        tags
     }
 }
 
@@ -243,14 +242,20 @@ fn extract_assigned_slot(expr: &crate::ast::Expr) -> Option<TemplateSlot> {
     }
 }
 
-/// Extract the group name from an expression (from a literal that represents a group name).
-fn extract_group_from_expr(expr: &crate::ast::Expr) -> Option<String> {
+/// Collect all tag references from an expression.
+fn collect_tags_from_expr(expr: &crate::ast::Expr, tags: &mut Vec<String>) {
     use crate::ast::Expr;
 
     match expr {
-        Expr::Literal(name) => Some(name.clone()),
-        Expr::GroupRef(name) => Some(name.clone()),
-        Expr::Pipeline(base, _) => extract_group_from_expr(base),
+        Expr::Literal(name) => {
+            // A literal is interpreted as a tag name
+            tags.push(name.clone());
+        }
+        Expr::Query(query) => {
+            tags.extend(query.include.clone());
+            tags.extend(query.exclude.clone());
+        }
+        Expr::Pipeline(base, _) => collect_tags_from_expr(base, tags),
     }
 }
 
@@ -258,15 +263,7 @@ fn extract_group_from_expr(expr: &crate::ast::Expr) -> Option<String> {
 mod tests {
     use super::*;
     use crate::parser::parse_template;
-
-    #[test]
-    fn test_new_id_generates_unique_ids() {
-        let id1 = new_id();
-        let id2 = new_id();
-        assert_ne!(id1, id2);
-        assert!(!id1.is_empty());
-    }
-
+    
     #[test]
     fn test_library_new() {
         let lib = Library::new("My Library");
@@ -280,25 +277,12 @@ mod tests {
     #[test]
     fn test_library_find_group() {
         let mut lib = Library::new("Test");
-        lib.groups.push(PromptGroup::new("Hair"));
-        lib.groups.push(PromptGroup::new("Eyes"));
+        lib.groups.push(PromptGroup::new(vec!["Hair".to_string()], vec![]));
+        lib.groups.push(PromptGroup::new(vec!["Eyes".to_string()], vec![]));
 
         assert!(lib.find_group("Hair").is_some());
         assert!(lib.find_group("Eyes").is_some());
         assert!(lib.find_group("Nose").is_none());
-    }
-
-    #[test]
-    fn test_prompt_group_add_options() {
-        let mut group = PromptGroup::new("Hair");
-        group.add_text("blonde hair");
-        group.add_text("red hair");
-        group.add_option(PromptOption::with_weight("black hair", 2.0));
-
-        assert_eq!(group.options.len(), 3);
-        assert_eq!(group.options[0].text, "blonde hair");
-        assert_eq!(group.options[0].weight, 1.0);
-        assert_eq!(group.options[2].weight, 2.0);
     }
 
     #[test]
@@ -326,14 +310,26 @@ mod tests {
     }
 
     #[test]
-    fn test_template_referenced_groups() {
+    fn test_template_referenced_tags() {
         let ast = parse_template("{Hair} and {Eyes} with [[ \"Outfit\" | some ]]").unwrap();
         let template = PromptTemplate::new("test", ast);
 
-        let groups = template.referenced_groups();
-        assert_eq!(groups.len(), 3);
-        assert!(groups.contains(&"Hair".to_string()));
-        assert!(groups.contains(&"Eyes".to_string()));
-        assert!(groups.contains(&"Outfit".to_string()));
+        let tags = template.referenced_tags();
+        assert_eq!(tags.len(), 3);
+        assert!(tags.contains(&"Hair".to_string()));
+        assert!(tags.contains(&"Eyes".to_string()));
+        assert!(tags.contains(&"Outfit".to_string()));
+    }
+
+    #[test]
+    fn test_template_referenced_tags_with_exclusions() {
+        let ast = parse_template("{Eyes - anime - crazy}").unwrap();
+        let template = PromptTemplate::new("test", ast);
+
+        let tags = template.referenced_tags();
+        assert_eq!(tags.len(), 3);
+        assert!(tags.contains(&"Eyes".to_string()));
+        assert!(tags.contains(&"anime".to_string()));
+        assert!(tags.contains(&"crazy".to_string()));
     }
 }

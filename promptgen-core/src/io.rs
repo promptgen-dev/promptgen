@@ -22,33 +22,17 @@ pub enum IoError {
 
     #[error("failed to parse template '{name}': {message}")]
     TemplateParse { name: String, message: String },
-
-    #[error("library directory not found: {0}")]
-    DirectoryNotFound(String),
-
-    #[error("library manifest not found: {0}")]
-    ManifestNotFound(String),
 }
 
 // ============================================================================
 // Data Transfer Objects (DTOs) for YAML serialization
 // ============================================================================
 
-/// DTO for Library metadata (promptgen.yml).
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LibraryDto {
-    #[serde(default = "new_id")]
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub description: String,
-}
-
-/// DTO for PromptGroup (groups/*.yml).
+/// DTO for PromptGroup.
+/// Groups are identified by their tags - at least one tag is required.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GroupDto {
-    pub name: String,
-    #[serde(default)]
+    /// Tags that identify this group.
     pub tags: Vec<String>,
     #[serde(default)]
     pub options: Vec<OptionDto>,
@@ -103,7 +87,6 @@ pub struct PackDto {
 impl From<GroupDto> for PromptGroup {
     fn from(dto: GroupDto) -> Self {
         PromptGroup {
-            name: dto.name,
             tags: dto.tags,
             options: dto.options.into_iter().map(Into::into).collect(),
         }
@@ -145,7 +128,6 @@ impl TemplateDto {
 impl From<&PromptGroup> for GroupDto {
     fn from(group: &PromptGroup) -> Self {
         GroupDto {
-            name: group.name.clone(),
             tags: group.tags.clone(),
             options: group.options.iter().map(Into::into).collect(),
         }
@@ -195,9 +177,9 @@ fn template_to_source(template: &crate::ast::Template) -> String {
     for (node, _span) in &template.nodes {
         match node {
             Node::Text(text) => source.push_str(text),
-            Node::GroupRef(name) => {
+            Node::TagQuery(query) => {
                 source.push('{');
-                source.push_str(name);
+                source.push_str(&tag_query_to_source(query));
                 source.push('}');
             }
             Node::FreeformSlot(name) => {
@@ -220,12 +202,21 @@ fn template_to_source(template: &crate::ast::Template) -> String {
     source
 }
 
+/// Convert a TagQuery back to source string like "eyes - anime - crazy"
+fn tag_query_to_source(query: &crate::ast::TagQuery) -> String {
+    let mut parts = query.include.clone();
+    for exclude in &query.exclude {
+        parts.push(format!("- {}", exclude));
+    }
+    parts.join(" ")
+}
+
 fn expr_to_source(expr: &crate::ast::Expr) -> String {
     use crate::ast::Expr;
 
     match expr {
         Expr::Literal(s) => format!("\"{}\"", s),
-        Expr::GroupRef(s) => s.clone(),
+        Expr::Query(query) => format!("\"{}\"", tag_query_to_source(query)),
         Expr::Pipeline(base, ops) => {
             let mut result = expr_to_source(base);
             for op in ops {
@@ -248,129 +239,21 @@ fn op_to_source(op: &crate::ast::Op) -> String {
 }
 
 // ============================================================================
-// Directory-based Library I/O
+// Library I/O (single YAML file)
 // ============================================================================
 
-/// Load a library from a directory.
+/// Load a library from a YAML file.
 ///
-/// Expected structure:
-/// - `promptgen.yml` - library metadata
-/// - `groups/*.yml` - group definitions
-/// - `templates/*.yml` - template definitions
+/// The file should contain the complete library: metadata, groups, and templates.
 pub fn load_library(path: &Path) -> Result<Library, IoError> {
-    if !path.is_dir() {
-        return Err(IoError::DirectoryNotFound(path.display().to_string()));
-    }
-
-    // Load library manifest
-    let manifest_path = path.join("promptgen.yml");
-    if !manifest_path.exists() {
-        return Err(IoError::ManifestNotFound(
-            manifest_path.display().to_string(),
-        ));
-    }
-
-    let manifest_content = fs::read_to_string(&manifest_path)?;
-    let library_dto: LibraryDto = serde_yaml_ng::from_str(&manifest_content)?;
-
-    // Load groups
-    let groups_dir = path.join("groups");
-    let mut groups = Vec::new();
-    if groups_dir.is_dir() {
-        for entry in fs::read_dir(&groups_dir)? {
-            let entry = entry?;
-            let file_path = entry.path();
-            if file_path
-                .extension()
-                .is_some_and(|ext| ext == "yml" || ext == "yaml")
-            {
-                let content = fs::read_to_string(&file_path)?;
-                let group_dto: GroupDto = serde_yaml_ng::from_str(&content)?;
-                groups.push(group_dto.into());
-            }
-        }
-    }
-
-    // Load templates
-    let templates_dir = path.join("templates");
-    let mut templates = Vec::new();
-    if templates_dir.is_dir() {
-        for entry in fs::read_dir(&templates_dir)? {
-            let entry = entry?;
-            let file_path = entry.path();
-            if file_path
-                .extension()
-                .is_some_and(|ext| ext == "yml" || ext == "yaml")
-            {
-                let content = fs::read_to_string(&file_path)?;
-                let template_dto: TemplateDto = serde_yaml_ng::from_str(&content)?;
-                templates.push(template_dto.try_into_template()?);
-            }
-        }
-    }
-
-    Ok(Library {
-        id: library_dto.id,
-        name: library_dto.name,
-        description: library_dto.description,
-        groups,
-        templates,
-    })
+    load_pack(path)
 }
 
-/// Save a library to a directory.
+/// Save a library to a YAML file.
 ///
-/// Creates the directory structure:
-/// - `promptgen.yml` - library metadata
-/// - `groups/*.yml` - group definitions (one file per group)
-/// - `templates/*.yml` - template definitions (one file per template)
+/// Writes the complete library (metadata, groups, templates) to a single file.
 pub fn save_library(library: &Library, path: &Path) -> Result<(), IoError> {
-    // Create directories
-    fs::create_dir_all(path)?;
-    fs::create_dir_all(path.join("groups"))?;
-    fs::create_dir_all(path.join("templates"))?;
-
-    // Save library manifest
-    let library_dto = LibraryDto {
-        id: library.id.clone(),
-        name: library.name.clone(),
-        description: library.description.clone(),
-    };
-    let manifest_content = serde_yaml_ng::to_string(&library_dto)?;
-    fs::write(path.join("promptgen.yml"), manifest_content)?;
-
-    // Save groups
-    for group in &library.groups {
-        let group_dto: GroupDto = group.into();
-        let content = serde_yaml_ng::to_string(&group_dto)?;
-        let filename = sanitize_filename(&group.name) + ".yml";
-        fs::write(path.join("groups").join(filename), content)?;
-    }
-
-    // Save templates
-    for template in &library.templates {
-        let template_dto: TemplateDto = template.into();
-        let content = serde_yaml_ng::to_string(&template_dto)?;
-        let filename = sanitize_filename(&template.name) + ".yml";
-        fs::write(path.join("templates").join(filename), content)?;
-    }
-
-    Ok(())
-}
-
-/// Sanitize a name for use as a filename.
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
-                c.to_ascii_lowercase()
-            } else if c.is_whitespace() {
-                '-'
-            } else {
-                '_'
-            }
-        })
-        .collect()
+    save_pack(library, path)
 }
 
 // ============================================================================
@@ -433,23 +316,25 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    const TEST_LIBRARY_YAML: &str = r#"
+id: test-lib-id
+name: Test Library
+description: A test library
+groups:
+  - tags: [Hair, appearance]
+    options:
+      - text: blonde hair
+      - text: red hair
+templates:
+  - id: tmpl-id
+    name: Character
+    description: A character template
+    tags: [character]
+    source: "{Hair} with blue eyes"
+"#;
+
     fn make_test_library() -> Library {
-        let mut lib = Library::with_id("test-lib-id", "Test Library");
-        lib.description = "A test library".to_string();
-
-        let mut hair = PromptGroup::new("Hair");
-        hair.tags = vec!["appearance".to_string()];
-        hair.options.push(PromptOption::new("blonde hair"));
-        hair.options.push(PromptOption::new("red hair"));
-        lib.groups.push(hair);
-
-        let ast = parse_template("{Hair} with blue eyes").unwrap();
-        let mut template = PromptTemplate::with_id("tmpl-id", "Character", ast);
-        template.description = "A character template".to_string();
-        template.tags = vec!["character".to_string()];
-        lib.templates.push(template);
-
-        lib
+        parse_pack(TEST_LIBRARY_YAML).expect("TEST_LIBRARY_YAML should be valid")
     }
 
     #[test]
@@ -463,17 +348,17 @@ mod tests {
         assert_eq!(loaded.name, lib.name);
         assert_eq!(loaded.description, lib.description);
         assert_eq!(loaded.groups.len(), 1);
-        assert_eq!(loaded.groups[0].name, "Hair");
+        assert_eq!(loaded.groups[0].tags[0], "Hair");
         assert_eq!(loaded.groups[0].options.len(), 2);
         assert_eq!(loaded.templates.len(), 1);
         assert_eq!(loaded.templates[0].name, "Character");
     }
 
     #[test]
-    fn test_directory_round_trip() {
+    fn test_library_file_round_trip() {
         let lib = make_test_library();
         let dir = tempdir().unwrap();
-        let lib_path = dir.path().join("my-library");
+        let lib_path = dir.path().join("my-library.yml");
 
         save_library(&lib, &lib_path).unwrap();
         let loaded = load_library(&lib_path).unwrap();
@@ -502,7 +387,7 @@ mod tests {
         let yaml = r#"
 name: Minimal Library
 groups:
-  - name: Colors
+  - tags: [Colors]
     options:
       - text: red
       - text: blue
@@ -516,7 +401,7 @@ templates:
         // Library and Template IDs should be auto-generated
         assert!(!lib.id.is_empty());
         assert!(!lib.templates[0].id.is_empty());
-        assert_eq!(lib.groups[0].name, "Colors");
+        assert_eq!(lib.groups[0].tags[0], "Colors");
         assert_eq!(lib.groups[0].options[0].text, "red");
     }
 
@@ -532,18 +417,11 @@ templates:
     }
 
     #[test]
-    fn test_sanitize_filename() {
-        assert_eq!(sanitize_filename("Hair Colors"), "hair-colors");
-        assert_eq!(sanitize_filename("My Template!"), "my-template_");
-        assert_eq!(sanitize_filename("test-name_123"), "test-name_123");
-    }
-
-    #[test]
     fn test_weighted_options_preserved() {
         let yaml = r#"
 name: Weighted Test
 groups:
-  - name: Rarity
+  - tags: [Rarity]
     options:
       - text: common
         weight: 10.0
@@ -553,7 +431,6 @@ templates: []
 "#;
 
         let lib = parse_pack(yaml).unwrap();
-        dbg!("Library: {:?}", lib.clone());
         assert_eq!(lib.groups[0].options[0].weight, 10.0);
         assert_eq!(lib.groups[0].options[1].weight, 1.0);
     }

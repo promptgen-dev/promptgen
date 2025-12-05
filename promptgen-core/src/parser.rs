@@ -1,14 +1,34 @@
 use chumsky::prelude::*;
 use chumsky::{error::Simple, extra, span::SimpleSpan};
 
-// Assuming these exist in your crate::ast / crate::span
-use crate::ast::{Expr, Node, Op, Template};
+use crate::ast::{Expr, Node, Op, TagQuery, Template};
 use crate::span::Span;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParseError<'a> {
     #[error("parse error(s): {0:?}")]
     Chumsky(Vec<Simple<'a, char>>),
+}
+
+/// Parse a tag query string like "eyes" or "eyes - anime - crazy".
+/// Returns a TagQuery with include and exclude tags.
+pub fn parse_tag_query(s: &str) -> TagQuery {
+    let parts: Vec<&str> = s.split(" - ").map(|p| p.trim()).collect();
+
+    if parts.is_empty() || parts[0].is_empty() {
+        return TagQuery {
+            include: Vec::new(),
+            exclude: Vec::new(),
+        };
+    }
+
+    // First part is the include tag(s)
+    let include = vec![parts[0].to_string()];
+
+    // Remaining parts are exclude tags
+    let exclude: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+
+    TagQuery { include, exclude }
 }
 
 /// Helper to convert Chumsky spans to your custom Span
@@ -93,16 +113,30 @@ fn template_parser<'src>() -> impl Parser<'src, &'src str, Template, extra::Err<
         .then_ignore(just("}}"))
         .map_with(|name, e| (Node::FreeformSlot(name), to_range(e.span())));
 
-    // {GroupName}
-    let group_ref_node = just('{')
+    // {tag} or {tag - exclude1 - exclude2}
+    // Parse the content inside braces and split by ' - ' for exclusions
+    let tag_query_node = just('{')
         .ignore_then(
             none_of("}\n")
                 .repeated()
                 .collect::<String>()
-                .map(|s| s.trim().to_string()),
+                .map(|s| {
+                    let parts: Vec<&str> = s.split(" - ").map(|p| p.trim()).collect();
+                    if parts.is_empty() || parts[0].is_empty() {
+                        TagQuery {
+                            include: Vec::new(),
+                            exclude: Vec::new(),
+                        }
+                    } else {
+                        TagQuery {
+                            include: vec![parts[0].to_string()],
+                            exclude: parts[1..].iter().map(|p| p.to_string()).collect(),
+                        }
+                    }
+                }),
         )
         .then_ignore(just('}'))
-        .map_with(|name, e| (Node::GroupRef(name), to_range(e.span())));
+        .map_with(|query, e| (Node::TagQuery(query), to_range(e.span())));
 
     // # Comment
     let comment_node = just('#')
@@ -121,7 +155,7 @@ fn template_parser<'src>() -> impl Parser<'src, &'src str, Template, extra::Err<
     choice((
         expr_block_node,
         freeform_slot_node,
-        group_ref_node,
+        tag_query_node,
         comment_node,
         text_node,
     ))
@@ -135,15 +169,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_group_ref() {
+    fn parses_tag_query_simple() {
         let src = "{Hair}";
         let tmpl = parse_template(src).expect("should parse");
 
         assert_eq!(tmpl.nodes.len(), 1);
         let (node, _span) = &tmpl.nodes[0];
         match node {
-            Node::GroupRef(name) => assert_eq!(name, "Hair"),
-            other => panic!("expected GroupRef, got {:?}", other),
+            Node::TagQuery(query) => {
+                assert_eq!(query.include, vec!["Hair"]);
+                assert!(query.exclude.is_empty());
+            }
+            other => panic!("expected TagQuery, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_tag_query_with_exclusions() {
+        let src = "{Eyes - anime - crazy}";
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (node, _span) = &tmpl.nodes[0];
+        match node {
+            Node::TagQuery(query) => {
+                assert_eq!(query.include, vec!["Eyes"]);
+                assert_eq!(query.exclude, vec!["anime", "crazy"]);
+            }
+            other => panic!("expected TagQuery, got {:?}", other),
         }
     }
 
@@ -265,15 +318,15 @@ mod tests {
             .iter()
             .map(|(node, _)| match node {
                 Node::Text(_) => "Text",
-                Node::GroupRef(_) => "GroupRef",
+                Node::TagQuery(_) => "TagQuery",
                 Node::ExprBlock(_) => "ExprBlock",
                 Node::FreeformSlot(_) => "FreeformSlot",
                 Node::Comment(_) => "Comment",
             })
             .collect();
 
-        // Template starts with newline (Text), then GroupRef, etc.
-        assert!(node_types.contains(&"GroupRef"));
+        // Template starts with newline (Text), then TagQuery, etc.
+        assert!(node_types.contains(&"TagQuery"));
         assert!(node_types.contains(&"ExprBlock"));
         assert!(node_types.contains(&"FreeformSlot"));
         assert!(node_types.contains(&"Comment"));
