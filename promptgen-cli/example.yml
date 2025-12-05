@@ -1,0 +1,19 @@
+id: example
+name: example
+description: Example Prompts
+
+groups:
+  - tags: [Hair, appearance]
+    options:
+      - blonde hair
+      - red hair
+      - black hair
+  - tags: [Eyes]
+    options:
+      - blue eyes
+      - green eyes
+
+templates:
+  - name: Character
+    description: A basic character description
+    source: "{Hair}, {Eyes}"

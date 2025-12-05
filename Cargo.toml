@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "promptgen-cli",
     "promptgen-core",
 ]
 resolver = "3"
