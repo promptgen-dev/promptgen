@@ -55,18 +55,3 @@ fn groups_findable_by_any_tag() {
     assert!(by_hair_color_pretty.is_some());
 }
 
-// ============================================================================
-// Weighted Options Tests
-// ============================================================================
-
-#[test]
-fn weighted_options_loaded_correctly() {
-    let lib = load_test_library();
-
-    let style = lib.find_group("Style").expect("Style group should exist");
-    let photorealistic = style.options.iter().find(|o| o.text == "photorealistic");
-    let oil_painting = style.options.iter().find(|o| o.text == "oil painting");
-
-    assert_eq!(photorealistic.unwrap().weight, 5.0);
-    assert_eq!(oil_painting.unwrap().weight, 1.0);
-}

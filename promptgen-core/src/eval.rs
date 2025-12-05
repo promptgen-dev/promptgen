@@ -182,43 +182,20 @@ fn pick_from_query<R: Rng>(
         return Err(RenderError::EmptyQueryResult(query.clone()));
     }
 
-    // Collect all options from matching groups with their source group info
-    let all_options: Vec<(&PromptGroup, &PromptOption)> = matching_groups
+    // Collect all options from matching groups
+    let all_options: Vec<&PromptOption> = matching_groups
         .iter()
-        .flat_map(|group| group.options.iter().map(move |opt| (*group, opt)))
+        .flat_map(|group| group.options.iter())
         .collect();
 
     if all_options.is_empty() {
         return Err(RenderError::EmptyQueryResult(query.clone()));
     }
 
-    // Weighted selection across all options
-    let total_weight: f32 = all_options.iter().map(|(_, opt)| opt.weight).sum();
+    // Uniform random selection
+    let idx = ctx.rng.random_range(0..all_options.len());
+    let option = all_options[idx];
 
-    if total_weight <= 0.0 {
-        // Fallback to uniform selection
-        let idx = ctx.rng.random_range(0..all_options.len());
-        let (_, option) = all_options[idx];
-        return Ok(ChosenOption {
-            query: query.clone(),
-            option_text: option.text.clone(),
-        });
-    }
-
-    let mut pick = ctx.rng.random_range(0.0..total_weight);
-
-    for (_, option) in &all_options {
-        pick -= option.weight;
-        if pick <= 0.0 {
-            return Ok(ChosenOption {
-                query: query.clone(),
-                option_text: option.text.clone(),
-            });
-        }
-    }
-
-    // Fallback (shouldn't happen)
-    let (_, option) = all_options.last().unwrap();
     Ok(ChosenOption {
         query: query.clone(),
         option_text: option.text.clone(),
@@ -431,30 +408,4 @@ mod tests {
         assert!(matches!(result, Err(RenderError::EmptyQueryResult(_))));
     }
 
-    #[test]
-    fn test_weighted_selection() {
-        let mut lib = Library::with_id("test", "Test");
-        lib.groups.push(PromptGroup::new(
-            vec!["Weighted".to_string()],
-            vec![
-                PromptOption::with_weight("common", 100.0),
-                PromptOption::with_weight("rare", 1.0),
-            ],
-        ));
-
-        let ast = parse_template("{Weighted}").unwrap();
-        let template = PromptTemplate::new("test", ast);
-
-        let mut common_count = 0;
-        for seed in 0..100 {
-            let mut ctx = EvalContext::with_seed(&lib, seed);
-            let result = render(&template, &mut ctx).unwrap();
-            if result.text == "common" {
-                common_count += 1;
-            }
-        }
-
-        // With 100:1 weight ratio, "common" should be selected most of the time
-        assert!(common_count > 80, "common was selected {} times", common_count);
-    }
 }

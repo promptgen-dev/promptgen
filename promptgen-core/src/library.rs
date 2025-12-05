@@ -100,24 +100,12 @@ impl PromptGroup {
 #[derive(Debug, Clone)]
 pub struct PromptOption {
     pub text: String,
-    pub weight: f32,
 }
 
 impl PromptOption {
-    /// Create a new option with the given text and default weight of 1.0.
+    /// Create a new option with the given text.
     pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            weight: 1.0,
-        }
-    }
-
-    /// Create a new option with the given text and weight.
-    pub fn with_weight(text: impl Into<String>, weight: f32) -> Self {
-        Self {
-            text: text.into(),
-            weight,
-        }
+        Self { text: text.into() }
     }
 }
 

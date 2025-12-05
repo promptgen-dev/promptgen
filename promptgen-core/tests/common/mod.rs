@@ -44,17 +44,13 @@ groups:
       - text: school uniform
       - text: fantasy armor
 
-  # Style groups with weights (common vs rare)
+  # Style groups
   - tags: [Style, art-style]
     options:
       - text: photorealistic
-        weight: 5.0
       - text: anime style
-        weight: 3.0
       - text: oil painting
-        weight: 1.0
       - text: watercolor
-        weight: 1.0
 
   # Groups for exclusion testing - tagged with substyles
   - tags: [AnimeEyes, Eyes, anime]
@@ -71,11 +67,8 @@ groups:
   - tags: [Quality]
     options:
       - text: masterpiece, best quality
-        weight: 10.0
       - text: high quality
-        weight: 5.0
       - text: normal quality
-        weight: 1.0
 
   - tags: [Lighting]
     options:

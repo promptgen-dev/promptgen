@@ -42,12 +42,6 @@ pub struct GroupDto {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OptionDto {
     pub text: String,
-    #[serde(default = "default_weight")]
-    pub weight: f32,
-}
-
-fn default_weight() -> f32 {
-    1.0
 }
 
 /// DTO for PromptTemplate (templates/*.yml).
@@ -95,10 +89,7 @@ impl From<GroupDto> for PromptGroup {
 
 impl From<OptionDto> for PromptOption {
     fn from(dto: OptionDto) -> Self {
-        PromptOption {
-            text: dto.text,
-            weight: dto.weight,
-        }
+        PromptOption { text: dto.text }
     }
 }
 
@@ -138,7 +129,6 @@ impl From<&PromptOption> for OptionDto {
     fn from(option: &PromptOption) -> Self {
         OptionDto {
             text: option.text.clone(),
-            weight: option.weight,
         }
     }
 }
@@ -416,22 +406,4 @@ templates:
         assert_eq!(reparsed.nodes.len(), ast.nodes.len());
     }
 
-    #[test]
-    fn test_weighted_options_preserved() {
-        let yaml = r#"
-name: Weighted Test
-groups:
-  - tags: [Rarity]
-    options:
-      - text: common
-        weight: 10.0
-      - text: rare
-        weight: 1.0
-templates: []
-"#;
-
-        let lib = parse_pack(yaml).unwrap();
-        assert_eq!(lib.groups[0].options[0].weight, 10.0);
-        assert_eq!(lib.groups[0].options[1].weight, 1.0);
-    }
 }
