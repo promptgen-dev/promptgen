@@ -10,9 +10,16 @@ pub enum ParseError<'a> {
     Chumsky(Vec<Simple<'a, char>>),
 }
 
-/// Parse a tag query string like "eyes" or "eyes - anime - crazy".
+/// Parse a tag query string like "eyes", "a + b", or "eyes + realistic - anime".
 /// Returns a TagQuery with include and exclude tags.
+///
+/// Syntax:
+/// - `tag` - single include tag
+/// - `tag1 + tag2` - multiple include tags (OR semantics)
+/// - `tag - exclude` - include with exclusion
+/// - `tag1 + tag2 - exclude1 - exclude2` - multiple includes with exclusions
 pub fn parse_tag_query(s: &str) -> TagQuery {
+    // First split by " - " to separate includes from excludes
     let parts: Vec<&str> = s.split(" - ").map(|p| p.trim()).collect();
 
     if parts.is_empty() || parts[0].is_empty() {
@@ -22,8 +29,12 @@ pub fn parse_tag_query(s: &str) -> TagQuery {
         };
     }
 
-    // First part is the include tag(s)
-    let include = vec![parts[0].to_string()];
+    // First part contains the include tag(s), possibly separated by " + "
+    let include: Vec<String> = parts[0]
+        .split(" + ")
+        .map(|p| p.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
 
     // Remaining parts are exclude tags
     let exclude: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
@@ -113,27 +124,14 @@ fn template_parser<'src>() -> impl Parser<'src, &'src str, Template, extra::Err<
         .then_ignore(just("}}"))
         .map_with(|name, e| (Node::FreeformSlot(name), to_range(e.span())));
 
-    // {tag} or {tag - exclude1 - exclude2}
-    // Parse the content inside braces and split by ' - ' for exclusions
+    // {tag} or {tag1 + tag2} or {tag - exclude} or {tag1 + tag2 - exclude1 - exclude2}
+    // Parse the content inside braces, using parse_tag_query for the logic
     let tag_query_node = just('{')
         .ignore_then(
             none_of("}\n")
                 .repeated()
                 .collect::<String>()
-                .map(|s| {
-                    let parts: Vec<&str> = s.split(" - ").map(|p| p.trim()).collect();
-                    if parts.is_empty() || parts[0].is_empty() {
-                        TagQuery {
-                            include: Vec::new(),
-                            exclude: Vec::new(),
-                        }
-                    } else {
-                        TagQuery {
-                            include: vec![parts[0].to_string()],
-                            exclude: parts[1..].iter().map(|p| p.to_string()).collect(),
-                        }
-                    }
-                }),
+                .map(|s| parse_tag_query(&s)),
         )
         .then_ignore(just('}'))
         .map_with(|query, e| (Node::TagQuery(query), to_range(e.span())));
@@ -195,6 +193,54 @@ mod tests {
             Node::TagQuery(query) => {
                 assert_eq!(query.include, vec!["Eyes"]);
                 assert_eq!(query.exclude, vec!["anime", "crazy"]);
+            }
+            other => panic!("expected TagQuery, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_tag_query_with_inclusions() {
+        let src = "{a + b}";
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (node, _span) = &tmpl.nodes[0];
+        match node {
+            Node::TagQuery(query) => {
+                assert_eq!(query.include, vec!["a", "b"]);
+                assert!(query.exclude.is_empty());
+            }
+            other => panic!("expected TagQuery, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_tag_query_with_multiple_inclusions() {
+        let src = "{a + b + c}";
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (node, _span) = &tmpl.nodes[0];
+        match node {
+            Node::TagQuery(query) => {
+                assert_eq!(query.include, vec!["a", "b", "c"]);
+                assert!(query.exclude.is_empty());
+            }
+            other => panic!("expected TagQuery, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_tag_query_with_inclusions_and_exclusions() {
+        let src = "{a + b - exclude1 - exclude2}";
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (node, _span) = &tmpl.nodes[0];
+        match node {
+            Node::TagQuery(query) => {
+                assert_eq!(query.include, vec!["a", "b"]);
+                assert_eq!(query.exclude, vec!["exclude1", "exclude2"]);
             }
             other => panic!("expected TagQuery, got {:?}", other),
         }

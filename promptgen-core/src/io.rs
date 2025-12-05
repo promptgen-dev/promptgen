@@ -183,13 +183,14 @@ fn template_to_source(template: &crate::ast::Template) -> String {
     source
 }
 
-/// Convert a TagQuery back to source string like "eyes - anime - crazy"
+/// Convert a TagQuery back to source string like "a + b - exclude1 - exclude2"
 fn tag_query_to_source(query: &crate::ast::TagQuery) -> String {
-    let mut parts = query.include.clone();
+    let mut result = query.include.join(" + ");
     for exclude in &query.exclude {
-        parts.push(format!("- {}", exclude));
+        result.push_str(" - ");
+        result.push_str(exclude);
     }
-    parts.join(" ")
+    result
 }
 
 fn expr_to_source(expr: &crate::ast::Expr) -> String {

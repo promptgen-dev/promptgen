@@ -139,6 +139,59 @@ groups:
 }
 
 // ============================================================================
+// Tag Inclusion Tests: {Tag + include}
+// ============================================================================
+#[test]
+fn tag_inclusion_works() {
+    let lib = lib(r#"
+groups:
+  - tags: [a]
+    options: [a]
+  - tags: [b]
+    options: [b]
+"#);
+    // {a + b} should select from both groups
+    let mut found_a = false;
+    let mut found_b = false;
+    for seed in 0..100 {
+        let result = eval(&lib, "{a + b}", Some(seed));
+        if result.text == "a" {
+            found_a = true;
+        } else if result.text == "b" {
+            found_b = true;
+        }
+        if found_a && found_b {
+            break;
+        }
+    }
+    assert!(found_a, "Should have found option from group 'a'");
+    assert!(found_b, "Should have found option from group 'b'");
+}
+
+#[test]
+fn tag_inclusion_with_exclusion_works() {
+    let lib = lib(r#"
+groups:
+  - tags: [a]
+    options: [a]
+  - tags: [b]
+    options: [b]
+  - tags: [c, excluded]
+    options: [c]
+"#);
+    // {a + b + c - excluded} should select from a and b, but not c
+    for seed in 0..50 {
+        let result = eval(&lib, "{a + b + c - excluded}", Some(seed));
+        assert!(
+            result.text == "a" || result.text == "b",
+            "Seed {}: Got '{}' but expected 'a' or 'b'",
+            seed,
+            result.text
+        );
+    }
+}
+
+// ============================================================================
 // Freeform Slot Tests: {{ SlotName }}
 // ============================================================================
 
