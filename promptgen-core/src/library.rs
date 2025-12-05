@@ -3,6 +3,9 @@
 //! A Library contains reusable prompt groups and templates that can be
 //! evaluated to produce final prompts.
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::ast::{Node, Template};
 
 /// Generate a new CUID for use as an ID.
@@ -13,6 +16,8 @@ pub fn new_id() -> String {
 /// Target engine hint for a template.
 /// Determines how the final prompt should be formatted.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum EngineHint {
     #[default]
     StableDiffusion,
