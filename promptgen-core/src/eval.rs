@@ -64,8 +64,6 @@ impl<'a, R: Rng> EvalContext<'a, R> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChosenOption {
     pub group_name: String,
-    pub group_id: String,
-    pub option_id: String,
     pub option_text: String,
 }
 
@@ -174,8 +172,6 @@ fn pick_option_from_group<R: Rng>(
 
     Ok(ChosenOption {
         group_name: group.name.clone(),
-        group_id: group.id.clone(),
-        option_id: option.id.clone(),
         option_text: option.text.clone(),
     })
 }
@@ -248,13 +244,13 @@ mod tests {
     fn make_test_library() -> Library {
         let mut lib = Library::with_id("test-lib", "Test Library");
 
-        let mut hair = PromptGroup::with_id("hair-group", "Hair");
+        let mut hair = PromptGroup::new("Hair");
         hair.add_text("blonde hair");
         hair.add_text("red hair");
         hair.add_text("black hair");
         lib.groups.push(hair);
 
-        let mut eyes = PromptGroup::with_id("eyes-group", "Eyes");
+        let mut eyes = PromptGroup::new("Eyes");
         eyes.add_text("blue eyes");
         eyes.add_text("green eyes");
         lib.groups.push(eyes);
@@ -385,7 +381,7 @@ mod tests {
     #[test]
     fn test_render_empty_group_error() {
         let mut lib = make_test_library();
-        lib.groups.push(PromptGroup::with_id("empty", "Empty"));
+        lib.groups.push(PromptGroup::new("Empty"));
 
         let ast = parse_template("{Empty}").unwrap();
         let template = PromptTemplate::new("test", ast);
@@ -398,11 +394,8 @@ mod tests {
     #[test]
     fn test_weighted_selection() {
         let mut lib = Library::with_id("test", "Test");
-        let mut group = PromptGroup::with_id("weighted", "Weighted");
-        // High weight option should be selected much more often
-        group
-            .options
-            .push(PromptOption::with_weight("common", 100.0));
+        let mut group = PromptGroup::new("Weighted");
+        group.options.push(PromptOption::with_weight("common", 100.0));
         group.options.push(PromptOption::with_weight("rare", 1.0));
         lib.groups.push(group);
 

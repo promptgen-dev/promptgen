@@ -47,8 +47,6 @@ pub struct LibraryDto {
 /// DTO for PromptGroup (groups/*.yml).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GroupDto {
-    #[serde(default = "new_id")]
-    pub id: String,
     pub name: String,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -59,8 +57,6 @@ pub struct GroupDto {
 /// DTO for PromptOption.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OptionDto {
-    #[serde(default = "new_id")]
-    pub id: String,
     pub text: String,
     #[serde(default = "default_weight")]
     pub weight: f32,
@@ -107,7 +103,6 @@ pub struct PackDto {
 impl From<GroupDto> for PromptGroup {
     fn from(dto: GroupDto) -> Self {
         PromptGroup {
-            id: dto.id,
             name: dto.name,
             tags: dto.tags,
             options: dto.options.into_iter().map(Into::into).collect(),
@@ -118,7 +113,6 @@ impl From<GroupDto> for PromptGroup {
 impl From<OptionDto> for PromptOption {
     fn from(dto: OptionDto) -> Self {
         PromptOption {
-            id: dto.id,
             text: dto.text,
             weight: dto.weight,
         }
@@ -151,7 +145,6 @@ impl TemplateDto {
 impl From<&PromptGroup> for GroupDto {
     fn from(group: &PromptGroup) -> Self {
         GroupDto {
-            id: group.id.clone(),
             name: group.name.clone(),
             tags: group.tags.clone(),
             options: group.options.iter().map(Into::into).collect(),
@@ -162,7 +155,6 @@ impl From<&PromptGroup> for GroupDto {
 impl From<&PromptOption> for OptionDto {
     fn from(option: &PromptOption) -> Self {
         OptionDto {
-            id: option.id.clone(),
             text: option.text.clone(),
             weight: option.weight,
         }
@@ -445,11 +437,10 @@ mod tests {
         let mut lib = Library::with_id("test-lib-id", "Test Library");
         lib.description = "A test library".to_string();
 
-        let mut hair = PromptGroup::with_id("hair-id", "Hair");
+        let mut hair = PromptGroup::new("Hair");
         hair.tags = vec!["appearance".to_string()];
-        hair.options
-            .push(PromptOption::with_id("opt1", "blonde hair"));
-        hair.options.push(PromptOption::with_id("opt2", "red hair"));
+        hair.options.push(PromptOption::new("blonde hair"));
+        hair.options.push(PromptOption::new("red hair"));
         lib.groups.push(hair);
 
         let ast = parse_template("{Hair} with blue eyes").unwrap();
@@ -522,11 +513,11 @@ templates:
 
         let lib = parse_pack(yaml).unwrap();
 
-        // IDs should be auto-generated
+        // Library and Template IDs should be auto-generated
         assert!(!lib.id.is_empty());
-        assert!(!lib.groups[0].id.is_empty());
-        assert!(!lib.groups[0].options[0].id.is_empty());
         assert!(!lib.templates[0].id.is_empty());
+        assert_eq!(lib.groups[0].name, "Colors");
+        assert_eq!(lib.groups[0].options[0].text, "red");
     }
 
     #[test]
@@ -562,6 +553,7 @@ templates: []
 "#;
 
         let lib = parse_pack(yaml).unwrap();
+        dbg!("Library: {:?}", lib.clone());
         assert_eq!(lib.groups[0].options[0].weight, 10.0);
         assert_eq!(lib.groups[0].options[1].weight, 1.0);
     }

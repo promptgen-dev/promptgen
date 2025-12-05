@@ -71,7 +71,6 @@ impl Library {
 /// For example, a "Hair" group might contain options like "blonde hair", "red hair", etc.
 #[derive(Debug, Clone)]
 pub struct PromptGroup {
-    pub id: String,
     pub name: String,
     pub tags: Vec<String>,
     pub options: Vec<PromptOption>,
@@ -81,17 +80,6 @@ impl PromptGroup {
     /// Create a new group with the given name.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
-            id: new_id(),
-            name: name.into(),
-            tags: Vec::new(),
-            options: Vec::new(),
-        }
-    }
-
-    /// Create a new group with a specific ID.
-    pub fn with_id(id: impl Into<String>, name: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
             name: name.into(),
             tags: Vec::new(),
             options: Vec::new(),
@@ -112,7 +100,6 @@ impl PromptGroup {
 /// A single option within a prompt group.
 #[derive(Debug, Clone)]
 pub struct PromptOption {
-    pub id: String,
     pub text: String,
     pub weight: f32,
 }
@@ -121,7 +108,6 @@ impl PromptOption {
     /// Create a new option with the given text and default weight of 1.0.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
-            id: new_id(),
             text: text.into(),
             weight: 1.0,
         }
@@ -130,18 +116,8 @@ impl PromptOption {
     /// Create a new option with the given text and weight.
     pub fn with_weight(text: impl Into<String>, weight: f32) -> Self {
         Self {
-            id: new_id(),
             text: text.into(),
             weight,
-        }
-    }
-
-    /// Create a new option with a specific ID.
-    pub fn with_id(id: impl Into<String>, text: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            text: text.into(),
-            weight: 1.0,
         }
     }
 }
