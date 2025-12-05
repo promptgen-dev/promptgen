@@ -36,6 +36,7 @@ fn groups_have_correct_tags() {
     assert!(hair.tags.contains(&"Hair".to_string()));
     assert!(hair.tags.contains(&"hair-color".to_string()));
     assert!(hair.tags.contains(&"appearance".to_string()));
+    assert!(hair.tags.contains(&"Hair Color".to_string()));
 }
 
 #[test]
@@ -54,4 +55,3 @@ fn groups_findable_by_any_tag() {
     assert!(by_appearance.is_some());
     assert!(by_hair_color_pretty.is_some());
 }
-

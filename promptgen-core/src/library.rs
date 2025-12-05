@@ -115,7 +115,6 @@ pub struct PromptTemplate {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub tags: Vec<String>,
     pub engine_hint: EngineHint,
     pub ast: Template,
 }
@@ -127,7 +126,6 @@ impl PromptTemplate {
             id: new_id(),
             name: name.into(),
             description: String::new(),
-            tags: Vec::new(),
             engine_hint: EngineHint::default(),
             ast,
         }
@@ -139,7 +137,6 @@ impl PromptTemplate {
             id: id.into(),
             name: name.into(),
             description: String::new(),
-            tags: Vec::new(),
             engine_hint: EngineHint::default(),
             ast,
         }

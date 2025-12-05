@@ -50,8 +50,6 @@ pub struct TemplateDto {
     #[serde(default)]
     pub description: String,
     #[serde(default)]
-    pub tags: Vec<String>,
-    #[serde(default)]
     pub engine_hint: EngineHint,
     /// The template source text (will be parsed into AST on load).
     pub source: String,
@@ -102,7 +100,6 @@ impl TemplateDto {
             id: self.id,
             name: self.name,
             description: self.description,
-            tags: self.tags,
             engine_hint: self.engine_hint,
             ast,
         })
@@ -134,7 +131,6 @@ impl From<&PromptTemplate> for TemplateDto {
             id: template.id.clone(),
             name: template.name.clone(),
             description: template.description.clone(),
-            tags: template.tags.clone(),
             engine_hint: template.engine_hint.clone(),
             source: template_to_source(&template.ast),
         }
@@ -314,7 +310,6 @@ templates:
   - id: tmpl-id
     name: Character
     description: A character template
-    tags: [character]
     source: "{Hair} with blue eyes"
 "#;
 

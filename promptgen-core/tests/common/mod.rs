@@ -110,13 +110,11 @@ templates:
   - id: basic-character
     name: Basic Character
     description: A simple character template
-    tags: [character, simple]
     source: "{Quality}, {Hair}, {Eyes}, {Expression}"
 
   - id: full-character
     name: Full Character
     description: A comprehensive character template with all features
-    tags: [character, detailed]
     source: |
       {Quality}, {Style}
       {Hair}, {Eyes}, {Expression}
@@ -126,19 +124,16 @@ templates:
   - id: freeform-scene
     name: Freeform Scene
     description: Template with freeform slots for custom input
-    tags: [scene, custom]
     source: "{Quality}, {{ Subject }}, {{ Action }}, {Background}, {Lighting}"
 
   - id: eyes-exclusion
     name: Eyes with Exclusion
     description: Tests tag exclusion syntax
-    tags: [test, exclusion]
     source: "{Eyes - anime}"
 
   - id: expression-block
     name: Expression Block Test
     description: Tests expression block with pipeline
-    tags: [test, expression]
     source: "[[ \"Hair\" | some | assign(\"chosen_hair\") ]], {Eyes}"
 "#;
 
