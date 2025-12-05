@@ -38,11 +38,8 @@ pub struct GroupDto {
     pub options: Vec<OptionDto>,
 }
 
-/// DTO for PromptOption.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct OptionDto {
-    pub text: String,
-}
+/// DTO for PromptOption - just a plain string.
+pub type OptionDto = String;
 
 /// DTO for PromptTemplate (templates/*.yml).
 #[derive(Debug, Serialize, Deserialize)]
@@ -89,7 +86,7 @@ impl From<GroupDto> for PromptGroup {
 
 impl From<OptionDto> for PromptOption {
     fn from(dto: OptionDto) -> Self {
-        PromptOption { text: dto.text }
+        PromptOption { text: dto }
     }
 }
 
@@ -127,9 +124,7 @@ impl From<&PromptGroup> for GroupDto {
 
 impl From<&PromptOption> for OptionDto {
     fn from(option: &PromptOption) -> Self {
-        OptionDto {
-            text: option.text.clone(),
-        }
+        option.text.clone()
     }
 }
 
@@ -313,8 +308,8 @@ description: A test library
 groups:
   - tags: [Hair, appearance]
     options:
-      - text: blonde hair
-      - text: red hair
+      - blonde hair
+      - red hair
 templates:
   - id: tmpl-id
     name: Character
@@ -379,8 +374,8 @@ name: Minimal Library
 groups:
   - tags: [Colors]
     options:
-      - text: red
-      - text: blue
+      - red
+      - blue
 templates:
   - name: Simple
     source: "Pick a {Colors}"

@@ -13,7 +13,6 @@ use promptgen_core::{
 
 /// A comprehensive test library that includes:
 /// - Multiple groups with various tag configurations
-/// - Weighted options
 /// - Groups with multiple tags (aliases)
 /// - Groups designed for exclusion testing
 pub const KITCHEN_SINK_YAML: &str = r#"
@@ -25,87 +24,87 @@ groups:
   # Basic appearance groups
   - tags: [Hair, hair-color, appearance, Hair Color]
     options:
-      - text: blonde hair
-      - text: red hair
-      - text: black hair
-      - text: brown hair
+      - blonde hair
+      - red hair
+      - black hair
+      - brown hair
 
   - tags: [Eyes, eye-color, appearance]
     options:
-      - text: blue eyes
-      - text: green eyes
-      - text: brown eyes
-      - text: heterochromia
+      - blue eyes
+      - green eyes
+      - brown eyes
+      - heterochromia
 
   - tags: [Outfit, clothing]
     options:
-      - text: casual dress
-      - text: formal suit
-      - text: school uniform
-      - text: fantasy armor
+      - casual dress
+      - formal suit
+      - school uniform
+      - fantasy armor
 
   # Style groups
   - tags: [Style, art-style]
     options:
-      - text: photorealistic
-      - text: anime style
-      - text: oil painting
-      - text: watercolor
+      - photorealistic
+      - anime style
+      - oil painting
+      - watercolor
 
   # Groups for exclusion testing - tagged with substyles
   - tags: [AnimeEyes, Eyes, anime]
     options:
-      - text: large sparkling eyes
-      - text: chibi eyes
+      - large sparkling eyes
+      - chibi eyes
 
   - tags: [RealisticEyes, Eyes, realistic]
     options:
-      - text: detailed iris
-      - text: natural eye shape
+      - detailed iris
+      - natural eye shape
 
   # Quality and technical tags
   - tags: [Quality]
     options:
-      - text: masterpiece, best quality
-      - text: high quality
-      - text: normal quality
+      - masterpiece, best quality
+      - high quality
+      - normal quality
 
   - tags: [Lighting]
     options:
-      - text: soft lighting
-      - text: dramatic lighting
-      - text: natural sunlight
-      - text: studio lighting
+      - soft lighting
+      - dramatic lighting
+      - natural sunlight
+      - studio lighting
 
   # Character traits
   - tags: [Expression, emotion]
     options:
-      - text: smiling
-      - text: serious expression
-      - text: surprised look
-      - text: gentle smile
+      - smiling
+      - serious expression
+      - surprised look
+      - gentle smile
 
   - tags: [Pose]
     options:
-      - text: standing
-      - text: sitting
-      - text: walking
-      - text: dynamic pose
+      - standing
+      - sitting
+      - walking
+      - dynamic pose
 
   # Scene elements
   - tags: [Background, scene]
     options:
-      - text: simple background
-      - text: outdoors, nature
-      - text: indoor, room
-      - text: fantasy landscape
+      - simple background
+      - outdoors, nature
+      - indoor, room
+      - fantasy landscape
 
   - tags: [TimeOfDay, lighting-natural]
     options:
-      - text: daytime
-      - text: sunset
-      - text: night sky
-      - text: golden hour
+      - daytime
+      - sunset
+      - night sky
+      - golden hour
 
 templates:
   - id: basic-character
