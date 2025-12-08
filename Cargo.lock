@@ -616,6 +616,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "promptgen-core",
+ "rand 0.8.5",
+ "serde",
  "serde_json",
  "serde_yaml_ng",
 ]

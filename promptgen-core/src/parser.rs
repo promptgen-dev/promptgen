@@ -1,7 +1,7 @@
 use chumsky::prelude::*;
 use chumsky::{error::Simple, extra, span::SimpleSpan};
 
-use crate::ast::{Expr, Node, Op, TagQuery, Template};
+use crate::ast::{LibraryRef, Node, OptionItem, Template};
 use crate::span::Span;
 
 #[derive(Debug, thiserror::Error)]
@@ -10,45 +10,28 @@ pub enum ParseError<'a> {
     Chumsky(Vec<Simple<'a, char>>),
 }
 
-/// Parse a tag query string like "eyes", "a + b", or "eyes + realistic - anime".
-/// Returns a TagQuery with include and exclude tags.
-///
-/// Syntax:
-/// - `tag` - single include tag
-/// - `tag1 + tag2` - multiple include tags (OR semantics)
-/// - `tag - exclude` - include with exclusion
-/// - `tag1 + tag2 - exclude1 - exclude2` - multiple includes with exclusions
-pub fn parse_tag_query(s: &str) -> TagQuery {
-    // First split by " - " to separate includes from excludes
-    let parts: Vec<&str> = s.split(" - ").map(|p| p.trim()).collect();
-
-    if parts.is_empty() || parts[0].is_empty() {
-        return TagQuery {
-            include: Vec::new(),
-            exclude: Vec::new(),
-        };
-    }
-
-    // First part contains the include tag(s), possibly separated by " + "
-    let include: Vec<String> = parts[0]
-        .split(" + ")
-        .map(|p| p.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    // Remaining parts are exclude tags
-    let exclude: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
-
-    TagQuery { include, exclude }
-}
-
-/// Helper to convert Chumsky spans to your custom Span
+/// Helper to convert Chumsky spans to our custom Span
 fn to_range(span: SimpleSpan<usize>) -> Span {
     span.start..span.end
 }
 
+/// Parse a library reference string (the part after @ or inside quotes).
+///
+/// Examples:
+/// - `"Hair"` -> LibraryRef { library: None, group: "Hair" }
+/// - `"Eye Color"` -> LibraryRef { library: None, group: "Eye Color" }
+/// - `"MyLib:Hair"` -> LibraryRef { library: Some("MyLib"), group: "Hair" }
+fn parse_library_ref_string(s: &str) -> LibraryRef {
+    if let Some(colon_pos) = s.find(':') {
+        let library = s[..colon_pos].to_string();
+        let group = s[colon_pos + 1..].to_string();
+        LibraryRef::qualified(library, group)
+    } else {
+        LibraryRef::new(s)
+    }
+}
+
 pub fn parse_template(src: &str) -> Result<Template, ParseError<'_>> {
-    // We map the error to our custom error type
     let result = template_parser().parse(src);
 
     match result.into_result() {
@@ -59,62 +42,44 @@ pub fn parse_template(src: &str) -> Result<Template, ParseError<'_>> {
 
 fn template_parser<'src>() -> impl Parser<'src, &'src str, Template, extra::Err<Simple<'src, char>>>
 {
-    // 1. Define low-level helpers
-    //    Note: .ignored() is useful for whitespace
-    let whitespace = any().filter(|c: &char| c.is_whitespace()).repeated(); // <--- This returns a parser object, not a function
+    node_parser()
+        .repeated()
+        .collect::<Vec<_>>()
+        .map(|nodes| Template { nodes })
+}
 
-    // 2. Expression Parsing (Logic from your `expr` and `string_lit` functions)
-    //    We define this first so it can be used in the block parsers below
-    let string_lit_inner = just('"')
-        .ignore_then(none_of("\"").repeated().collect::<String>())
-        .then_ignore(just('"'));
+/// Parser for a single node. Used both at the top level and for nested parsing in options.
+fn node_parser<'src>(
+) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+    // Order matters for precedence:
+    // 1. {{ slot }} - must come before { to avoid confusion
+    // 2. { inline options } - inline options with | separator
+    // 3. @"quoted" - quoted library ref
+    // 4. @identifier - simple library ref
+    // 5. # comment - line comment
+    // 6. text - everything else
 
-    let string_lit_expr = string_lit_inner.map(Expr::Literal);
+    let slot_node = slot_parser();
+    let inline_options_node = inline_options_parser();
+    let quoted_lib_ref_node = quoted_library_ref_parser();
+    let simple_lib_ref_node = simple_library_ref_parser();
+    let comment_node = comment_parser();
+    let text_node = text_parser();
 
-    let op_some = just("some").to(Op::Some);
+    choice((
+        slot_node,
+        inline_options_node,
+        quoted_lib_ref_node,
+        simple_lib_ref_node,
+        comment_node,
+        text_node,
+    ))
+}
 
-    let op_exclude = just("excludeGroup")
-        .ignore_then(string_lit_inner.delimited_by(
-            whitespace.then(just('(')).then(whitespace),
-            whitespace.then(just(')')),
-        ))
-        .map(Op::ExcludeGroup);
-
-    let op_assign = just("assign")
-        .ignore_then(string_lit_inner.delimited_by(
-            whitespace.then(just('(')).then(whitespace),
-            whitespace.then(just(')')),
-        ))
-        .map(Op::Assign);
-
-    let pipe = just('|').padded_by(whitespace).ignored();
-    let op = choice((op_some, op_exclude, op_assign)).padded_by(whitespace);
-
-    let expr = string_lit_expr
-        .then(
-            // Parse the leading pipe and whitespace, then ignore its output (`()`),
-            // ensuring the output of `op` is the value collected by .repeated()
-            pipe.ignore_then(op).repeated().collect::<Vec<Op>>(),
-        )
-        .map(|(base, ops)| {
-            // `ops` is now Vec<Op>, so `.is_empty()` works.
-            if ops.is_empty() {
-                base
-            } else {
-                Expr::Pipeline(Box::new(base), ops)
-            }
-        });
-
-    // 3. Define the Node Parsers
-
-    // [[ expr ]]
-    let expr_block_node = just("[[")
-        .ignore_then(expr.padded_by(whitespace))
-        .then_ignore(just("]]"))
-        .map_with(|expr, e| (Node::ExprBlock(expr), to_range(e.span())));
-
-    // {{ SlotName }}
-    let freeform_slot_node = just("{{")
+/// Parse `{{ slot name }}` - user-provided slot
+fn slot_parser<'src>(
+) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+    just("{{")
         .ignore_then(
             none_of("}")
                 .repeated()
@@ -122,142 +87,270 @@ fn template_parser<'src>() -> impl Parser<'src, &'src str, Template, extra::Err<
                 .map(|s| s.trim().to_string()),
         )
         .then_ignore(just("}}"))
-        .map_with(|name, e| (Node::FreeformSlot(name), to_range(e.span())));
+        .map_with(|name, e| (Node::Slot(name), to_range(e.span())))
+}
 
-    // {tag} or {tag1 + tag2} or {tag - exclude} or {tag1 + tag2 - exclude1 - exclude2}
-    // Parse the content inside braces, using parse_tag_query for the logic
-    let tag_query_node = just('{')
+/// Parse `{a|b|c}` - inline options
+/// Options can contain nested grammar (like @Hair)
+fn inline_options_parser<'src>(
+) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+    just('{')
         .ignore_then(
-            none_of("}\n")
-                .repeated()
-                .collect::<String>()
-                .map(|s| parse_tag_query(&s)),
+            // Parse content between braces, split by |
+            none_of("}").repeated().collect::<String>(),
         )
         .then_ignore(just('}'))
-        .map_with(|query, e| (Node::TagQuery(query), to_range(e.span())));
+        .map_with(|content, e| {
+            // Split by | and parse each option
+            let options: Vec<OptionItem> = content
+                .split('|')
+                .map(|opt| {
+                    let opt = opt.trim();
+                    // Check if option contains grammar (@ for lib refs)
+                    if opt.contains('@') {
+                        // For now, treat as text - nested parsing will be added later
+                        // TODO: Parse nested grammar in options
+                        OptionItem::Text(opt.to_string())
+                    } else {
+                        OptionItem::Text(opt.to_string())
+                    }
+                })
+                .collect();
 
-    // # Comment
-    let comment_node = just('#')
+            (Node::InlineOptions(options), to_range(e.span()))
+        })
+}
+
+/// Parse `@"Name"` or `@"Lib:Name"` - quoted library reference
+fn quoted_library_ref_parser<'src>(
+) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+    just("@\"")
+        .ignore_then(none_of("\"").repeated().collect::<String>())
+        .then_ignore(just('"'))
+        .map_with(|name, e| {
+            let lib_ref = parse_library_ref_string(&name);
+            (Node::LibraryRef(lib_ref), to_range(e.span()))
+        })
+}
+
+/// Parse `@Name` - simple library reference (no spaces allowed in name)
+fn simple_library_ref_parser<'src>(
+) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+    just('@')
+        .ignore_then(
+            // Identifier: starts with letter or underscore, followed by letters, digits, underscores, hyphens
+            any()
+                .filter(|c: &char| c.is_alphabetic() || *c == '_')
+                .then(
+                    any()
+                        .filter(|c: &char| c.is_alphanumeric() || *c == '_' || *c == '-')
+                        .repeated()
+                        .collect::<String>(),
+                )
+                .map(|(first, rest)| format!("{}{}", first, rest)),
+        )
+        .map_with(|name, e| {
+            let lib_ref = LibraryRef::new(name);
+            (Node::LibraryRef(lib_ref), to_range(e.span()))
+        })
+}
+
+/// Parse `# comment to end of line`
+fn comment_parser<'src>(
+) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+    just('#')
         .ignore_then(none_of("\n").repeated().collect::<String>())
-        .map_with(|text, e| (Node::Comment(text.trim().to_string()), to_range(e.span())));
+        .map_with(|text, e| (Node::Comment(text.trim().to_string()), to_range(e.span())))
+}
 
-    // Plain text
-    // Stops at special chars: {, [, #
-    let text_node = none_of("{[#")
+/// Parse plain text - everything that's not a special construct
+fn text_parser<'src>(
+) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+    // Stop at special chars: {, @, #
+    // Also stop at } to avoid consuming closing braces
+    none_of("{@#}")
         .repeated()
         .at_least(1)
         .collect::<String>()
-        .map_with(|value, e| (Node::Text(value), to_range(e.span())));
-
-    // 4. Combine them into the final sequence
-    choice((
-        expr_block_node,
-        freeform_slot_node,
-        tag_query_node,
-        comment_node,
-        text_node,
-    ))
-    .repeated()
-    .collect::<Vec<_>>()
-    .map(|nodes| Template { nodes })
+        .map_with(|value, e| (Node::Text(value), to_range(e.span())))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // =========================================================================
+    // Slot tests
+    // =========================================================================
+
     #[test]
-    fn parses_tag_query_simple() {
-        let src = "{Hair}";
+    fn parses_slot() {
+        let src = "{{ scene description }}";
         let tmpl = parse_template(src).expect("should parse");
 
         assert_eq!(tmpl.nodes.len(), 1);
         let (node, _span) = &tmpl.nodes[0];
         match node {
-            Node::TagQuery(query) => {
-                assert_eq!(query.include, vec!["Hair"]);
-                assert!(query.exclude.is_empty());
+            Node::Slot(name) => assert_eq!(name, "scene description"),
+            other => panic!("expected Slot, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_slot_with_simple_name() {
+        let src = "{{ name }}";
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (node, _span) = &tmpl.nodes[0];
+        match node {
+            Node::Slot(name) => assert_eq!(name, "name"),
+            other => panic!("expected Slot, got {:?}", other),
+        }
+    }
+
+    // =========================================================================
+    // Inline options tests
+    // =========================================================================
+
+    #[test]
+    fn parses_inline_options_simple() {
+        let src = "{red|blue|green}";
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (node, _span) = &tmpl.nodes[0];
+        match node {
+            Node::InlineOptions(options) => {
+                assert_eq!(options.len(), 3);
+                assert!(matches!(&options[0], OptionItem::Text(t) if t == "red"));
+                assert!(matches!(&options[1], OptionItem::Text(t) if t == "blue"));
+                assert!(matches!(&options[2], OptionItem::Text(t) if t == "green"));
             }
-            other => panic!("expected TagQuery, got {:?}", other),
+            other => panic!("expected InlineOptions, got {:?}", other),
         }
     }
 
     #[test]
-    fn parses_tag_query_with_exclusions() {
-        let src = "{Eyes - anime - crazy}";
+    fn parses_inline_options_with_spaces() {
+        let src = "{hot weather | cold weather}";
         let tmpl = parse_template(src).expect("should parse");
 
         assert_eq!(tmpl.nodes.len(), 1);
         let (node, _span) = &tmpl.nodes[0];
         match node {
-            Node::TagQuery(query) => {
-                assert_eq!(query.include, vec!["Eyes"]);
-                assert_eq!(query.exclude, vec!["anime", "crazy"]);
+            Node::InlineOptions(options) => {
+                assert_eq!(options.len(), 2);
+                assert!(matches!(&options[0], OptionItem::Text(t) if t == "hot weather"));
+                assert!(matches!(&options[1], OptionItem::Text(t) if t == "cold weather"));
             }
-            other => panic!("expected TagQuery, got {:?}", other),
+            other => panic!("expected InlineOptions, got {:?}", other),
         }
     }
 
+    // =========================================================================
+    // Library reference tests
+    // =========================================================================
+
     #[test]
-    fn parses_tag_query_with_inclusions() {
-        let src = "{a + b}";
+    fn parses_simple_library_ref() {
+        let src = "@Hair";
         let tmpl = parse_template(src).expect("should parse");
 
         assert_eq!(tmpl.nodes.len(), 1);
         let (node, _span) = &tmpl.nodes[0];
         match node {
-            Node::TagQuery(query) => {
-                assert_eq!(query.include, vec!["a", "b"]);
-                assert!(query.exclude.is_empty());
+            Node::LibraryRef(lib_ref) => {
+                assert_eq!(lib_ref.library, None);
+                assert_eq!(lib_ref.group, "Hair");
             }
-            other => panic!("expected TagQuery, got {:?}", other),
+            other => panic!("expected LibraryRef, got {:?}", other),
         }
     }
 
     #[test]
-    fn parses_tag_query_with_multiple_inclusions() {
-        let src = "{a + b + c}";
+    fn parses_simple_library_ref_with_underscore() {
+        let src = "@Hair_Color";
         let tmpl = parse_template(src).expect("should parse");
 
         assert_eq!(tmpl.nodes.len(), 1);
         let (node, _span) = &tmpl.nodes[0];
         match node {
-            Node::TagQuery(query) => {
-                assert_eq!(query.include, vec!["a", "b", "c"]);
-                assert!(query.exclude.is_empty());
+            Node::LibraryRef(lib_ref) => {
+                assert_eq!(lib_ref.library, None);
+                assert_eq!(lib_ref.group, "Hair_Color");
             }
-            other => panic!("expected TagQuery, got {:?}", other),
+            other => panic!("expected LibraryRef, got {:?}", other),
         }
     }
 
     #[test]
-    fn parses_tag_query_with_inclusions_and_exclusions() {
-        let src = "{a + b - exclude1 - exclude2}";
+    fn parses_simple_library_ref_with_hyphen() {
+        let src = "@hair-color";
         let tmpl = parse_template(src).expect("should parse");
 
         assert_eq!(tmpl.nodes.len(), 1);
         let (node, _span) = &tmpl.nodes[0];
         match node {
-            Node::TagQuery(query) => {
-                assert_eq!(query.include, vec!["a", "b"]);
-                assert_eq!(query.exclude, vec!["exclude1", "exclude2"]);
+            Node::LibraryRef(lib_ref) => {
+                assert_eq!(lib_ref.library, None);
+                assert_eq!(lib_ref.group, "hair-color");
             }
-            other => panic!("expected TagQuery, got {:?}", other),
+            other => panic!("expected LibraryRef, got {:?}", other),
         }
     }
 
     #[test]
-    fn parses_freeform_slot() {
-        let src = "{{ SceneDescription }}";
+    fn parses_quoted_library_ref() {
+        let src = r#"@"Eye Color""#;
         let tmpl = parse_template(src).expect("should parse");
 
         assert_eq!(tmpl.nodes.len(), 1);
         let (node, _span) = &tmpl.nodes[0];
         match node {
-            Node::FreeformSlot(name) => assert_eq!(name, "SceneDescription"),
-            other => panic!("expected FreeformSlot, got {:?}", other),
+            Node::LibraryRef(lib_ref) => {
+                assert_eq!(lib_ref.library, None);
+                assert_eq!(lib_ref.group, "Eye Color");
+            }
+            other => panic!("expected LibraryRef, got {:?}", other),
         }
     }
+
+    #[test]
+    fn parses_qualified_library_ref() {
+        let src = r#"@"MyLib:Hair""#;
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (node, _span) = &tmpl.nodes[0];
+        match node {
+            Node::LibraryRef(lib_ref) => {
+                assert_eq!(lib_ref.library, Some("MyLib".to_string()));
+                assert_eq!(lib_ref.group, "Hair");
+            }
+            other => panic!("expected LibraryRef, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_qualified_library_ref_with_spaces() {
+        let src = r#"@"My Library:Eye Color""#;
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (node, _span) = &tmpl.nodes[0];
+        match node {
+            Node::LibraryRef(lib_ref) => {
+                assert_eq!(lib_ref.library, Some("My Library".to_string()));
+                assert_eq!(lib_ref.group, "Eye Color");
+            }
+            other => panic!("expected LibraryRef, got {:?}", other),
+        }
+    }
+
+    // =========================================================================
+    // Comment tests
+    // =========================================================================
 
     #[test]
     fn parses_comment() {
@@ -272,6 +365,10 @@ mod tests {
         }
     }
 
+    // =========================================================================
+    // Plain text tests
+    // =========================================================================
+
     #[test]
     fn parses_plain_text() {
         let src = "Plain text here";
@@ -285,97 +382,132 @@ mod tests {
         }
     }
 
-    #[test]
-    fn parses_expr_block_literal() {
-        let src = r#"[[ "Eyes" ]]"#;
-        let tmpl = parse_template(src).expect("should parse");
-
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
-        match node {
-            Node::ExprBlock(Expr::Literal(value)) => assert_eq!(value, "Eyes"),
-            other => panic!("expected ExprBlock with Literal, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_expr_block_with_pipeline() {
-        let src = r#"[[ "Eyes" | some | assign("eyes") ]]"#;
-        let tmpl = parse_template(src).expect("should parse");
-
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
-        match node {
-            Node::ExprBlock(Expr::Pipeline(base, ops)) => {
-                match base.as_ref() {
-                    Expr::Literal(value) => assert_eq!(value, "Eyes"),
-                    other => panic!("expected Literal base, got {:?}", other),
-                }
-                assert_eq!(ops.len(), 2);
-                assert!(matches!(ops[0], Op::Some));
-                match &ops[1] {
-                    Op::Assign(name) => assert_eq!(name, "eyes"),
-                    other => panic!("expected Assign op, got {:?}", other),
-                }
-            }
-            other => panic!("expected ExprBlock with Pipeline, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_expr_block_with_exclude_group() {
-        let src = r#"[[ "Hair" | excludeGroup("blonde") ]]"#;
-        let tmpl = parse_template(src).expect("should parse");
-
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
-        match node {
-            Node::ExprBlock(Expr::Pipeline(base, ops)) => {
-                match base.as_ref() {
-                    Expr::Literal(value) => assert_eq!(value, "Hair"),
-                    other => panic!("expected Literal base, got {:?}", other),
-                }
-                assert_eq!(ops.len(), 1);
-                match &ops[0] {
-                    Op::ExcludeGroup(name) => assert_eq!(name, "blonde"),
-                    other => panic!("expected ExcludeGroup op, got {:?}", other),
-                }
-            }
-            other => panic!("expected ExprBlock with Pipeline, got {:?}", other),
-        }
-    }
+    // =========================================================================
+    // Mixed template tests
+    // =========================================================================
 
     #[test]
     fn parses_mixed_template() {
-        let src = r#"
-        {Hair}
-        [[ "Eyes" | some | assign("eyes") ]]
-        {{ SceneDescription }}
-        # this is a comment
-        Plain text here
-        "#;
-
+        let src = "@Hair, @Eyes, with {red|blue} accents";
         let tmpl = parse_template(src).expect("should parse");
-        assert!(!tmpl.nodes.is_empty());
 
-        // Verify we have the expected node types in order
+        // Should have: @Hair, Text(", "), @Eyes, Text(", with "), InlineOptions, Text(" accents")
         let node_types: Vec<&str> = tmpl
             .nodes
             .iter()
             .map(|(node, _)| match node {
                 Node::Text(_) => "Text",
-                Node::TagQuery(_) => "TagQuery",
-                Node::ExprBlock(_) => "ExprBlock",
-                Node::FreeformSlot(_) => "FreeformSlot",
+                Node::InlineOptions(_) => "InlineOptions",
+                Node::LibraryRef(_) => "LibraryRef",
+                Node::Slot(_) => "Slot",
                 Node::Comment(_) => "Comment",
             })
             .collect();
 
-        // Template starts with newline (Text), then TagQuery, etc.
-        assert!(node_types.contains(&"TagQuery"));
-        assert!(node_types.contains(&"ExprBlock"));
-        assert!(node_types.contains(&"FreeformSlot"));
-        assert!(node_types.contains(&"Comment"));
+        assert!(node_types.contains(&"LibraryRef"));
+        assert!(node_types.contains(&"InlineOptions"));
         assert!(node_types.contains(&"Text"));
+    }
+
+    #[test]
+    fn parses_template_with_slot() {
+        let src = "A {{ character type }} with @Hair stands in {{ scene }}.";
+        let tmpl = parse_template(src).expect("should parse");
+
+        let node_types: Vec<&str> = tmpl
+            .nodes
+            .iter()
+            .map(|(node, _)| match node {
+                Node::Text(_) => "Text",
+                Node::InlineOptions(_) => "InlineOptions",
+                Node::LibraryRef(_) => "LibraryRef",
+                Node::Slot(_) => "Slot",
+                Node::Comment(_) => "Comment",
+            })
+            .collect();
+
+        assert!(node_types.contains(&"LibraryRef"));
+        assert!(node_types.contains(&"Slot"));
+        assert!(node_types.contains(&"Text"));
+
+        // Count slots
+        let slot_count = tmpl
+            .nodes
+            .iter()
+            .filter(|(node, _)| matches!(node, Node::Slot(_)))
+            .count();
+        assert_eq!(slot_count, 2);
+    }
+
+    #[test]
+    fn parses_template_with_inline_comment() {
+        let src = "@Hair, @Eyes  # inline comment";
+        let tmpl = parse_template(src).expect("should parse");
+
+        let has_comment = tmpl
+            .nodes
+            .iter()
+            .any(|(node, _)| matches!(node, Node::Comment(_)));
+        assert!(has_comment);
+
+        let has_lib_ref = tmpl
+            .nodes
+            .iter()
+            .any(|(node, _)| matches!(node, Node::LibraryRef(_)));
+        assert!(has_lib_ref);
+    }
+
+    #[test]
+    fn parses_complex_template() {
+        let src = r#"# Random character
+@Hair, @"Eye Color"
+A {big|small} {cat|dog}
+{{ description }}
+"#;
+        let tmpl = parse_template(src).expect("should parse");
+
+        let node_types: Vec<&str> = tmpl
+            .nodes
+            .iter()
+            .map(|(node, _)| match node {
+                Node::Text(_) => "Text",
+                Node::InlineOptions(_) => "InlineOptions",
+                Node::LibraryRef(_) => "LibraryRef",
+                Node::Slot(_) => "Slot",
+                Node::Comment(_) => "Comment",
+            })
+            .collect();
+
+        assert!(node_types.contains(&"Comment"));
+        assert!(node_types.contains(&"LibraryRef"));
+        assert!(node_types.contains(&"InlineOptions"));
+        assert!(node_types.contains(&"Slot"));
+        assert!(node_types.contains(&"Text"));
+    }
+
+    // =========================================================================
+    // Span tests
+    // =========================================================================
+
+    #[test]
+    fn spans_are_correct_for_library_ref() {
+        let src = "@Hair";
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (_node, span) = &tmpl.nodes[0];
+        assert_eq!(span.start, 0);
+        assert_eq!(span.end, 5);
+    }
+
+    #[test]
+    fn spans_are_correct_for_inline_options() {
+        let src = "{a|b}";
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (_node, span) = &tmpl.nodes[0];
+        assert_eq!(span.start, 0);
+        assert_eq!(span.end, 5);
     }
 }

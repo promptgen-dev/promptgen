@@ -1,9 +1,9 @@
 //! Grammar and syntax tests for the template language.
 //!
-//! Tests all the different syntactic constructs:
-//! - Tag queries: `{Tag}`, `{Tag - exclude}`
-//! - Freeform slots: `{{ SlotName }}`
-//! - Expression blocks: `[[ "Tag" | op ]]`
+//! Tests the new grammar syntax:
+//! - Library refs: `@Name` or `@"Name with spaces"` or `@"Lib:Name"`
+//! - Inline options: `{a|b|c}`
+//! - Slots: `{{ slot name }}`
 //! - Comments: `# comment`
 
 mod common;
@@ -11,21 +11,21 @@ mod common;
 use common::{eval, eval_with_slots, lib};
 
 // ============================================================================
-// Basic Tag Query Tests: {Tag}
+// Library Reference Tests: @Name
 // ============================================================================
 
 #[test]
-fn simple_tag_query_renders() {
+fn simple_library_ref_renders() {
     let lib = lib(r#"
 groups:
-  - tags: [Hair]
+  - name: Hair
     options:
       - blonde hair
       - red hair
       - black hair
       - brown hair
 "#);
-    let result = eval(&lib, "{Hair}", None);
+    let result = eval(&lib, "@Hair", None);
 
     let valid_options = ["blonde hair", "red hair", "black hair", "brown hair"];
     assert!(
@@ -37,48 +37,90 @@ groups:
 }
 
 #[test]
-fn multiple_tag_queries_render() {
+fn quoted_library_ref_renders() {
     let lib = lib(r#"
 groups:
-  - tags: [Hair]
-    options: [blonde, red, black]
-  - tags: [Eyes]
-    options: [blue, green, brown]
+  - name: Hair Color
+    options:
+      - blonde
+      - red
 "#);
-    let result = eval(&lib, "{Hair}, {Eyes}", None);
+    let result = eval(&lib, r#"@"Hair Color""#, None);
 
-    assert!(result.text.contains(", "));
-    assert_eq!(result.chosen_options.len(), 2);
+    let valid_options = ["blonde", "red"];
+    assert!(
+        valid_options.contains(&result.text.as_str()),
+        "Result '{}' should be one of {:?}",
+        result.text,
+        valid_options
+    );
 }
 
 #[test]
-fn tag_query_via_alias_works() {
+fn library_ref_with_surrounding_text() {
     let lib = lib(r#"
 groups:
-  - tags: [Hair, hair-color]
+  - name: Hair
     options:
       - blonde hair
-      - red hair
 "#);
-    let result1 = eval(&lib, "{Hair}", Some(123));
-    let result2 = eval(&lib, "{hair-color}", Some(123));
+    let result = eval(&lib, "A person with @Hair, looking happy", Some(42));
 
-    // Same seed, same underlying group = same result
-    assert_eq!(result1.text, result2.text);
+    assert_eq!(result.text, "A person with blonde hair, looking happy");
 }
 
 #[test]
-fn tag_with_spaces_works() {
+fn multiple_library_refs_render() {
     let lib = lib(r#"
 groups:
-  - tags: [Hair Color]
+  - name: Hair
     options:
       - blonde hair
-      - red hair
+  - name: Eyes
+    options:
+      - blue eyes
 "#);
-    let result = eval(&lib, "{Hair Color}", Some(42));
+    let result = eval(&lib, "@Hair with @Eyes", Some(42));
 
-    let valid_options = ["blonde hair", "red hair"];
+    assert_eq!(result.text, "blonde hair with blue eyes");
+}
+
+// ============================================================================
+// Inline Options Tests: {a|b|c}
+// ============================================================================
+
+#[test]
+fn inline_options_render() {
+    let lib = lib("groups: []");
+    let result = eval(&lib, "{happy|sad}", None);
+
+    let valid_options = ["happy", "sad"];
+    assert!(
+        valid_options.contains(&result.text.as_str()),
+        "Result '{}' should be one of {:?}",
+        result.text,
+        valid_options
+    );
+}
+
+#[test]
+fn inline_options_with_text() {
+    let lib = lib("groups: []");
+    let result = eval(&lib, "feeling {happy|sad} today", Some(42));
+
+    // With seed 42, we should get deterministic output
+    assert!(
+        result.text == "feeling happy today" || result.text == "feeling sad today",
+        "Result should be valid inline option choice"
+    );
+}
+
+#[test]
+fn inline_options_three_choices() {
+    let lib = lib("groups: []");
+    let result = eval(&lib, "{red|green|blue}", None);
+
+    let valid_options = ["red", "green", "blue"];
     assert!(
         valid_options.contains(&result.text.as_str()),
         "Result '{}' should be one of {:?}",
@@ -88,185 +130,56 @@ groups:
 }
 
 // ============================================================================
-// Tag Exclusion Tests: {Tag - exclude}
+// Slot Tests: {{ Name }}
 // ============================================================================
 
 #[test]
-fn tag_exclusion_filters_groups() {
-    let lib = lib(r#"
-groups:
-  - tags: [Eyes]
-    options: [blue eyes, green eyes]
-  - tags: [Eyes, anime]
-    options: [sparkling eyes, chibi eyes]
-"#);
-    // {Eyes - anime} should exclude the anime-tagged group
-    for seed in 0..50 {
-        let result = eval(&lib, "{Eyes - anime}", Some(seed));
+fn slot_without_override_preserved() {
+    let lib = lib("groups: []");
+    let result = eval(&lib, "Hello {{ Name }}", None);
 
-        assert!(
-            !result.text.contains("sparkling") && !result.text.contains("chibi"),
-            "Seed {}: Got anime eyes '{}' despite exclusion",
-            seed,
-            result.text
-        );
-    }
+    assert_eq!(result.text, "Hello {{ Name }}");
 }
 
 #[test]
-fn multiple_exclusions_work() {
-    let lib = lib(r#"
-groups:
-  - tags: [Eyes]
-    options: [blue eyes, green eyes]
-  - tags: [Eyes, anime]
-    options: [sparkling eyes]
-  - tags: [Eyes, realistic]
-    options: [detailed iris]
-"#);
-    // {Eyes - anime - realistic} should only get base Eyes options
-    for seed in 0..50 {
-        let result = eval(&lib, "{Eyes - anime - realistic}", Some(seed));
+fn slot_with_override_renders() {
+    let lib = lib("groups: []");
+    let result = eval_with_slots(&lib, "Hello {{ Name }}", &[("Name", "Alice")], None);
 
-        let valid = ["blue eyes", "green eyes"];
-        assert!(
-            valid.contains(&result.text.as_str()),
-            "Seed {}: Got '{}' which isn't from base Eyes group",
-            seed,
-            result.text
-        );
-    }
-}
-
-// ============================================================================
-// Tag Inclusion Tests: {Tag + include}
-// ============================================================================
-#[test]
-fn tag_inclusion_works() {
-    let lib = lib(r#"
-groups:
-  - tags: [a]
-    options: [a]
-  - tags: [b]
-    options: [b]
-"#);
-    // {a + b} should select from both groups
-    let mut found_a = false;
-    let mut found_b = false;
-    for seed in 0..100 {
-        let result = eval(&lib, "{a + b}", Some(seed));
-        if result.text == "a" {
-            found_a = true;
-        } else if result.text == "b" {
-            found_b = true;
-        }
-        if found_a && found_b {
-            break;
-        }
-    }
-    assert!(found_a, "Should have found option from group 'a'");
-    assert!(found_b, "Should have found option from group 'b'");
+    assert_eq!(result.text, "Hello Alice");
 }
 
 #[test]
-fn tag_inclusion_with_exclusion_works() {
-    let lib = lib(r#"
-groups:
-  - tags: [a]
-    options: [a]
-  - tags: [b]
-    options: [b]
-  - tags: [c, excluded]
-    options: [c]
-"#);
-    // {a + b + c - excluded} should select from a and b, but not c
-    for seed in 0..50 {
-        let result = eval(&lib, "{a + b + c - excluded}", Some(seed));
-        assert!(
-            result.text == "a" || result.text == "b",
-            "Seed {}: Got '{}' but expected 'a' or 'b'",
-            seed,
-            result.text
-        );
-    }
-}
-
-// ============================================================================
-// Freeform Slot Tests: {{ SlotName }}
-// ============================================================================
-
-#[test]
-fn freeform_slot_with_override() {
+fn multiple_slots_render() {
     let lib = lib("groups: []");
     let result = eval_with_slots(
         &lib,
-        "A {{ Subject }} in the scene",
-        &[("Subject", "small cat")],
+        "{{ Name }} lives in {{ Place }}",
+        &[("Name", "Alice"), ("Place", "Wonderland")],
         None,
     );
-    assert_eq!(result.text, "A small cat in the scene");
+
+    assert_eq!(result.text, "Alice lives in Wonderland");
 }
 
 #[test]
-fn freeform_slot_without_override_preserved() {
-    let lib = lib("groups: []");
-    let result = eval(&lib, "A {{ Subject }} in the scene", None);
-    assert_eq!(result.text, "A {{ Subject }} in the scene");
-}
+fn slot_with_grammar_in_value() {
+    let lib = lib(r#"
+groups:
+  - name: Color
+    options:
+      - red
+      - blue
+"#);
+    let result = eval_with_slots(&lib, "The sky is {{ Color }}", &[("Color", "@Color")], None);
 
-#[test]
-fn multiple_freeform_slots() {
-    let lib = lib("groups: []");
-    let result = eval_with_slots(
-        &lib,
-        "{{ Subject }} doing {{ Action }}",
-        &[("Subject", "a knight"), ("Action", "fighting a dragon")],
-        None,
+    let valid_options = ["The sky is red", "The sky is blue"];
+    assert!(
+        valid_options.contains(&result.text.as_str()),
+        "Result '{}' should be one of {:?}",
+        result.text,
+        valid_options
     );
-    assert_eq!(result.text, "a knight doing fighting a dragon");
-}
-
-// ============================================================================
-// Expression Block Tests: [[ expr ]]
-// ============================================================================
-
-#[test]
-fn expression_block_selects_from_group() {
-    let lib = lib(r#"
-groups:
-  - tags: [Hair]
-    options: [blonde hair, red hair, black hair]
-"#);
-    let result = eval(&lib, r#"[[ "Hair" ]]"#, None);
-
-    let valid_options = ["blonde hair", "red hair", "black hair"];
-    assert!(valid_options.contains(&result.text.as_str()));
-}
-
-#[test]
-fn expression_block_with_some_operator() {
-    let lib = lib(r#"
-groups:
-  - tags: [Style]
-    options: [photorealistic, anime style, oil painting]
-"#);
-    let result = eval(&lib, r#"[[ "Style" | some ]]"#, None);
-
-    let valid = ["photorealistic", "anime style", "oil painting"];
-    assert!(valid.contains(&result.text.as_str()));
-}
-
-#[test]
-fn expression_block_with_assign_records_value() {
-    let lib = lib(r#"
-groups:
-  - tags: [Hair]
-    options: [blonde, red, black]
-"#);
-    let result = eval(&lib, r#"[[ "Hair" | some | assign("hair_choice") ]]"#, None);
-
-    assert!(result.slot_values.contains_key("hair_choice"));
-    assert_eq!(result.slot_values["hair_choice"], result.text);
 }
 
 // ============================================================================
@@ -274,35 +187,104 @@ groups:
 // ============================================================================
 
 #[test]
-fn comments_not_in_output() {
-    let lib = lib(r#"
-groups:
-  - tags: [Hair]
-    options: [blonde]
-  - tags: [Eyes]
-    options: [blue]
-"#);
-    let result = eval(&lib, "{Hair} # this selects hair\n{Eyes}", None);
+fn comment_not_included_in_output() {
+    let lib = lib("groups: []");
+    let result = eval(&lib, "# This is a comment", None);
 
-    assert!(!result.text.contains("this selects hair"));
-    assert!(!result.text.contains("#"));
+    assert_eq!(result.text, "");
 }
 
 // ============================================================================
-// Edge Cases and Error Handling
+// Nested Grammar Tests
+// ============================================================================
+
+#[test]
+fn nested_library_ref_in_group_option() {
+    let lib = lib(r#"
+groups:
+  - name: Color
+    options:
+      - red
+      - blue
+  - name: Description
+    options:
+      - "@Color car"
+"#);
+    let result = eval(&lib, "@Description", None);
+
+    let valid_options = ["red car", "blue car"];
+    assert!(
+        valid_options.contains(&result.text.as_str()),
+        "Result '{}' should be one of {:?}",
+        result.text,
+        valid_options
+    );
+}
+
+#[test]
+fn nested_inline_options_in_group() {
+    let lib = lib(r#"
+groups:
+  - name: Size
+    options:
+      - "{big|small} thing"
+"#);
+    let result = eval(&lib, "@Size", None);
+
+    let valid_options = ["big thing", "small thing"];
+    assert!(
+        valid_options.contains(&result.text.as_str()),
+        "Result '{}' should be one of {:?}",
+        result.text,
+        valid_options
+    );
+}
+
+// ============================================================================
+// Mixed Grammar Tests
+// ============================================================================
+
+#[test]
+fn complex_template_with_all_features() {
+    let lib = lib(r#"
+groups:
+  - name: Hair
+    options:
+      - blonde hair
+  - name: Eyes
+    options:
+      - blue eyes
+"#);
+    let result = eval_with_slots(
+        &lib,
+        "@Hair, @Eyes, {happy|cheerful} expression, {{ Extra }}",
+        &[("Extra", "high quality")],
+        Some(42),
+    );
+
+    // Should contain the expected parts
+    assert!(result.text.contains("blonde hair"));
+    assert!(result.text.contains("blue eyes"));
+    assert!(result.text.contains("expression"));
+    assert!(result.text.contains("high quality"));
+}
+
+// ============================================================================
+// Edge Cases
 // ============================================================================
 
 #[test]
 fn empty_template_renders_empty() {
     let lib = lib("groups: []");
     let result = eval(&lib, "", None);
+
     assert_eq!(result.text, "");
 }
 
 #[test]
-fn plain_text_only_renders_unchanged() {
+fn plain_text_only() {
     let lib = lib("groups: []");
-    let result = eval(&lib, "Just some plain text without any tags", None);
-    assert_eq!(result.text, "Just some plain text without any tags");
-    assert!(result.chosen_options.is_empty());
+    let result = eval(&lib, "Just plain text, no grammar", None);
+
+    assert_eq!(result.text, "Just plain text, no grammar");
 }

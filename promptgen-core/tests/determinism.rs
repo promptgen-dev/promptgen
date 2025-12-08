@@ -1,12 +1,10 @@
 //! Tests for deterministic rendering.
 //!
-//! Verifies that:
-//! - Same seed produces same results
-//! - Different seeds produce variation
+//! Verifies that using the same seed produces identical results.
 
 mod common;
 
-use common::{eval, eval_template, lib};
+use common::{eval, lib};
 use std::collections::HashSet;
 
 // ============================================================================
@@ -17,76 +15,123 @@ use std::collections::HashSet;
 fn same_seed_produces_same_result() {
     let lib = lib(r#"
 groups:
-  - tags: [Hair]
+  - name: Hair
     options:
-      - short black hair
-      - long blonde hair
-      - curly red hair
-  - tags: [Eyes]
+      - blonde hair
+      - red hair
+      - black hair
+      - brown hair
+"#);
+
+    let result1 = eval(&lib, "@Hair", Some(12345));
+    let result2 = eval(&lib, "@Hair", Some(12345));
+
+    assert_eq!(result1.text, result2.text, "Same seed should produce same result");
+}
+
+#[test]
+fn different_seeds_produce_different_results_eventually() {
+    let lib = lib(r#"
+groups:
+  - name: Color
+    options:
+      - red
+      - green
+      - blue
+      - yellow
+      - purple
+"#);
+
+    // Try many seeds, should eventually get different results
+    let mut results: HashSet<String> = HashSet::new();
+    for seed in 0..100 {
+        let result = eval(&lib, "@Color", Some(seed));
+        results.insert(result.text);
+    }
+
+    // With 5 options and 100 trials, we should see multiple different results
+    assert!(
+        results.len() > 1,
+        "Different seeds should produce different results. Got: {:?}",
+        results
+    );
+}
+
+#[test]
+fn inline_options_are_deterministic() {
+    let lib = lib("groups: []");
+
+    let result1 = eval(&lib, "{a|b|c|d|e}", Some(999));
+    let result2 = eval(&lib, "{a|b|c|d|e}", Some(999));
+
+    assert_eq!(result1.text, result2.text, "Inline options with same seed should match");
+}
+
+#[test]
+fn complex_template_is_deterministic() {
+    let lib = lib(r#"
+groups:
+  - name: Hair
+    options:
+      - blonde hair
+      - red hair
+  - name: Eyes
     options:
       - blue eyes
       - green eyes
-      - brown eyes
-templates:
-  - name: Full Character
-    source: "{Hair}, {Eyes}"
 "#);
-    let result1 = eval_template(&lib, "Full Character", Some(12345));
-    let result2 = eval_template(&lib, "Full Character", Some(12345));
 
-    println!("Result 1: {}", result1.text);
-    println!("Result 2: {}", result2.text);
-    assert_eq!(result1.text, result2.text);
+    let template = "@Hair, @Eyes, {happy|sad} expression";
+    let result1 = eval(&lib, template, Some(42));
+    let result2 = eval(&lib, template, Some(42));
+
+    assert_eq!(result1.text, result2.text, "Complex template with same seed should match");
 }
 
 #[test]
 fn same_options_produce_different_results_in_single_prompt() {
-    // append {Hair} to a string 100 times with the same seed,
-    // and verify that we get different hair results
     let lib = lib(r#"
 groups:
-  - tags: [Hair]
+  - name: Color
     options:
-      - short black hair
-      - long blonde hair
-      - curly red hair
+      - red
+      - green
+      - blue
 "#);
-    let hair = "{Hair} ".repeat(100);
-    let result = eval(&lib, &hair, Some(42));
-    let hairs: HashSet<_> = result.text.split_whitespace().collect();
-    assert!(hairs.len() > 1, "Expected variation in hair results");
+
+    // With multiple references to the same group, we should potentially get different choices
+    let mut found_different = false;
+    for seed in 0..100 {
+        let result = eval(&lib, "@Color and @Color", Some(seed));
+        let parts: Vec<&str> = result.text.split(" and ").collect();
+        if parts.len() == 2 && parts[0] != parts[1] {
+            found_different = true;
+            break;
+        }
+    }
+
+    assert!(
+        found_different,
+        "Multiple references to same group should sometimes produce different choices"
+    );
 }
 
 #[test]
-fn different_seeds_usually_produce_different_results() {
+fn nested_grammar_is_deterministic() {
     let lib = lib(r#"
 groups:
-  - tags: [Hair]
+  - name: Size
     options:
-      - short black hair
-      - long blonde hair
-      - curly red hair
-  - tags: [Eyes]
+      - big
+      - small
+  - name: Thing
     options:
-      - blue eyes
-      - green eyes
-      - brown eyes
-templates:
-  - name: Full Character
-    source: "{Hair}, {Eyes}"
+      - "@Size dog"
+      - "@Size cat"
 "#);
-    let mut results = Vec::new();
-    for seed in 0..10 {
-        let result = eval_template(&lib, "Full Character", Some(seed));
-        results.push(result.text);
-    }
 
-    // With so many random choices, we should get at least a few unique results
-    let unique: HashSet<_> = results.iter().collect();
+    let result1 = eval(&lib, "@Thing", Some(777));
+    let result2 = eval(&lib, "@Thing", Some(777));
 
-    assert!(
-        unique.len() > 1,
-        "Expected variation across seeds, got {} unique results",
-        unique.len()
-    );
+    assert_eq!(result1.text, result2.text, "Nested grammar with same seed should match");
 }

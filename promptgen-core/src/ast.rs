@@ -1,81 +1,70 @@
 use crate::span::Span;
 
+/// A parsed template containing a sequence of nodes.
 #[derive(Debug, Clone)]
 pub struct Template {
     pub nodes: Vec<Spanned<Node>>,
 }
 
+/// A value paired with its source location.
 pub type Spanned<T> = (T, Span);
 
-/// A query that selects options from groups by tags.
+/// A reference to a library group.
 ///
 /// Examples:
-/// - `{eyes}` -> include: ["eyes"], exclude: []
-/// - `{eyes - anime}` -> include: ["eyes"], exclude: ["anime"]
-/// - `{eyes - anime - crazy}` -> include: ["eyes"], exclude: ["anime", "crazy"]
+/// - `@Hair` -> library: None, group: "Hair"
+/// - `@"Eye Color"` -> library: None, group: "Eye Color"
+/// - `@"MyLib:Hair"` -> library: Some("MyLib"), group: "Hair"
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TagQuery {
-    /// Tags to include (selects groups that have ANY of these tags).
-    pub include: Vec<String>,
-    /// Tags to exclude (removes groups that have ANY of these tags).
-    pub exclude: Vec<String>,
+pub struct LibraryRef {
+    /// Optional library name qualifier. None means search all libraries.
+    pub library: Option<String>,
+    /// The group name to reference.
+    pub group: String,
 }
 
-impl TagQuery {
-    /// Create a new query with a single include tag.
-    pub fn new(tag: impl Into<String>) -> Self {
+impl LibraryRef {
+    /// Create a simple library reference (no library qualifier).
+    pub fn new(group: impl Into<String>) -> Self {
         Self {
-            include: vec![tag.into()],
-            exclude: Vec::new(),
+            library: None,
+            group: group.into(),
         }
     }
 
-    /// Create a query from include and exclude tags.
-    pub fn with_exclude(include: Vec<String>, exclude: Vec<String>) -> Self {
-        Self { include, exclude }
-    }
-
-    /// Add an exclude tag.
-    pub fn exclude(mut self, tag: impl Into<String>) -> Self {
-        self.exclude.push(tag.into());
-        self
+    /// Create a qualified library reference.
+    pub fn qualified(library: impl Into<String>, group: impl Into<String>) -> Self {
+        Self {
+            library: Some(library.into()),
+            group: group.into(),
+        }
     }
 }
 
-#[derive(Debug, Clone)]
+/// An item within inline options `{a|b|c}`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OptionItem {
+    /// Plain text option.
+    Text(String),
+    /// Option containing nested grammar (e.g., `{@Hair|bald}` where `@Hair` is nested).
+    Nested(Vec<Spanned<Node>>),
+}
+
+/// Template node types.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Node {
-    /// Plain literal text
+    /// Plain literal text.
     Text(String),
 
-    /// `{tag}` or `{tag - exclude}` – tag-based query
-    TagQuery(TagQuery),
+    /// `{a|b|c}` – inline options, pick one randomly.
+    InlineOptions(Vec<OptionItem>),
 
-    /// `[[ ... ]]` expression block
-    ExprBlock(Expr),
+    /// `@Name` or `@"Name"` or `@"Lib:Name"` – reference to a library group.
+    LibraryRef(LibraryRef),
 
-    /// `{{ SlotName }}` – freeform area
-    FreeformSlot(String),
+    /// `{{ name }}` – user-provided slot value.
+    Slot(String),
 
-    /// `# comment to end of line`
+    /// `# comment to end of line` – ignored in output.
     Comment(String),
-}
-
-#[derive(Debug, Clone)]
-pub enum Expr {
-    /// `"literal string"` inside expressions – interpreted as a tag query
-    Literal(String),
-
-    /// A tag query (parsed from a string like "eyes - anime")
-    Query(TagQuery),
-
-    /// Base expression + chain of operations: `"Hair" | some | assign("hair")`
-    Pipeline(Box<Expr>, Vec<Op>),
-}
-
-#[derive(Debug, Clone)]
-pub enum Op {
-    Some,
-    ExcludeGroup(String),
-    Assign(String),
-    // Later: If/When/etc
 }

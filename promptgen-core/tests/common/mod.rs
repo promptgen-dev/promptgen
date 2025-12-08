@@ -1,8 +1,4 @@
 //! Shared test utilities for promptgen tests.
-//!
-//! Provides helper functions for:
-//! - Creating small inline test libraries from YAML
-//! - Evaluating templates against libraries
 
 #![allow(dead_code)]
 
@@ -23,7 +19,7 @@ use promptgen_core::{
 /// ```ignore
 /// let lib = lib(r#"
 /// groups:
-///   - tags: [Color]
+///   - name: Color
 ///     options:
 ///       - red
 ///       - blue
@@ -35,17 +31,6 @@ pub fn lib(yaml: &str) -> Library {
 }
 
 /// Evaluate a template source against a library.
-///
-/// # Example
-/// ```ignore
-/// let lib = lib(r#"
-/// groups:
-///   - tags: [Color]
-///     options: [red, blue, green]
-/// "#);
-/// let result = eval(&lib, "{Color}", None);
-/// assert!(["red", "blue", "green"].contains(&result.text.as_str()));
-/// ```
 pub fn eval(library: &Library, source: &str, seed: Option<u64>) -> RenderResult {
     eval_with_slots(library, source, &[], seed)
 }
@@ -70,7 +55,7 @@ pub fn eval_with_slots(
     let template = PromptTemplate::new("test", ast);
     let mut ctx = EvalContext::with_seed(library, seed.unwrap_or(42));
     for (name, value) in slots {
-        ctx.set_slot(*name, *value);
+        ctx.set_slot(*name, (*value).to_string());
     }
     render(&template, &mut ctx).expect("Template should render")
 }

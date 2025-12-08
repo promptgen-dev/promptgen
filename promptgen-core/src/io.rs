@@ -8,7 +8,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::library::{EngineHint, Library, PromptGroup, PromptOption, PromptTemplate, new_id};
+use crate::ast::{LibraryRef, Node, OptionItem};
+use crate::library::{EngineHint, Library, PromptGroup, PromptTemplate, new_id};
 use crate::parser::parse_template;
 
 /// Error type for I/O operations.
@@ -22,6 +23,9 @@ pub enum IoError {
 
     #[error("failed to parse template '{name}': {message}")]
     TemplateParse { name: String, message: String },
+
+    #[error("duplicate group name: '{0}'")]
+    DuplicateGroupName(String),
 }
 
 // ============================================================================
@@ -29,19 +33,17 @@ pub enum IoError {
 // ============================================================================
 
 /// DTO for PromptGroup.
-/// Groups are identified by their tags - at least one tag is required.
+/// Groups are identified by their unique name.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GroupDto {
-    /// Tags that identify this group.
-    pub tags: Vec<String>,
+    /// Unique name for this group.
+    pub name: String,
+    /// Options as strings (may contain nested grammar).
     #[serde(default)]
-    pub options: Vec<OptionDto>,
+    pub options: Vec<String>,
 }
 
-/// DTO for PromptOption - just a plain string.
-pub type OptionDto = String;
-
-/// DTO for PromptTemplate (templates/*.yml).
+/// DTO for PromptTemplate.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TemplateDto {
     #[serde(default = "new_id")]
@@ -76,15 +78,9 @@ pub struct PackDto {
 impl From<GroupDto> for PromptGroup {
     fn from(dto: GroupDto) -> Self {
         PromptGroup {
-            tags: dto.tags,
-            options: dto.options.into_iter().map(Into::into).collect(),
+            name: dto.name,
+            options: dto.options,
         }
-    }
-}
-
-impl From<OptionDto> for PromptOption {
-    fn from(dto: OptionDto) -> Self {
-        PromptOption { text: dto }
     }
 }
 
@@ -113,15 +109,9 @@ impl TemplateDto {
 impl From<&PromptGroup> for GroupDto {
     fn from(group: &PromptGroup) -> Self {
         GroupDto {
-            tags: group.tags.clone(),
-            options: group.options.iter().map(Into::into).collect(),
+            name: group.name.clone(),
+            options: group.options.clone(),
         }
-    }
-}
-
-impl From<&PromptOption> for OptionDto {
-    fn from(option: &PromptOption) -> Self {
-        option.text.clone()
     }
 }
 
@@ -151,72 +141,78 @@ impl From<&Library> for PackDto {
 
 /// Reconstruct source text from a parsed template AST.
 fn template_to_source(template: &crate::ast::Template) -> String {
-    use crate::ast::Node;
-
     let mut source = String::new();
 
     for (node, _span) in &template.nodes {
-        match node {
-            Node::Text(text) => source.push_str(text),
-            Node::TagQuery(query) => {
-                source.push('{');
-                source.push_str(&tag_query_to_source(query));
-                source.push('}');
-            }
-            Node::FreeformSlot(name) => {
-                source.push_str("{{ ");
-                source.push_str(name);
-                source.push_str(" }}");
-            }
-            Node::Comment(text) => {
-                source.push_str("# ");
-                source.push_str(text);
-            }
-            Node::ExprBlock(expr) => {
-                source.push_str("[[ ");
-                source.push_str(&expr_to_source(expr));
-                source.push_str(" ]]");
-            }
-        }
+        node_to_source(node, &mut source);
     }
 
     source
 }
 
-/// Convert a TagQuery back to source string like "a + b - exclude1 - exclude2"
-fn tag_query_to_source(query: &crate::ast::TagQuery) -> String {
-    let mut result = query.include.join(" + ");
-    for exclude in &query.exclude {
-        result.push_str(" - ");
-        result.push_str(exclude);
-    }
-    result
-}
+/// Convert a single node to its source representation.
+fn node_to_source(node: &Node, output: &mut String) {
+    match node {
+        Node::Text(text) => output.push_str(text),
 
-fn expr_to_source(expr: &crate::ast::Expr) -> String {
-    use crate::ast::Expr;
+        Node::Comment(text) => {
+            output.push_str("# ");
+            output.push_str(text);
+        }
 
-    match expr {
-        Expr::Literal(s) => format!("\"{}\"", s),
-        Expr::Query(query) => format!("\"{}\"", tag_query_to_source(query)),
-        Expr::Pipeline(base, ops) => {
-            let mut result = expr_to_source(base);
-            for op in ops {
-                result.push_str(" | ");
-                result.push_str(&op_to_source(op));
+        Node::Slot(name) => {
+            output.push_str("{{ ");
+            output.push_str(name);
+            output.push_str(" }}");
+        }
+
+        Node::LibraryRef(lib_ref) => {
+            library_ref_to_source(lib_ref, output);
+        }
+
+        Node::InlineOptions(options) => {
+            output.push('{');
+            for (i, option) in options.iter().enumerate() {
+                if i > 0 {
+                    output.push('|');
+                }
+                option_item_to_source(option, output);
             }
-            result
+            output.push('}');
         }
     }
 }
 
-fn op_to_source(op: &crate::ast::Op) -> String {
-    use crate::ast::Op;
+/// Convert a library reference to source.
+fn library_ref_to_source(lib_ref: &LibraryRef, output: &mut String) {
+    output.push('@');
 
-    match op {
-        Op::Some => "some".to_string(),
-        Op::ExcludeGroup(name) => format!("excludeGroup(\"{}\")", name),
-        Op::Assign(name) => format!("assign(\"{}\")", name),
+    let needs_quotes = lib_ref.library.is_some()
+        || lib_ref.group.contains(' ')
+        || lib_ref.group.contains(':');
+
+    if needs_quotes {
+        output.push('"');
+        if let Some(lib) = &lib_ref.library {
+            output.push_str(lib);
+            output.push(':');
+        }
+        output.push_str(&lib_ref.group);
+        output.push('"');
+    } else {
+        output.push_str(&lib_ref.group);
+    }
+}
+
+/// Convert an option item to source.
+fn option_item_to_source(item: &OptionItem, output: &mut String) {
+    match item {
+        OptionItem::Text(text) => output.push_str(text),
+        OptionItem::Nested(nodes) => {
+            for (node, _span) in nodes {
+                node_to_source(node, output);
+            }
+        }
     }
 }
 
@@ -273,6 +269,14 @@ pub fn save_pack(library: &Library, path: &Path) -> Result<(), IoError> {
 pub fn parse_pack(yaml: &str) -> Result<Library, IoError> {
     let pack: PackDto = serde_yaml_ng::from_str(yaml)?;
 
+    // Check for duplicate group names
+    let mut seen_names = std::collections::HashSet::new();
+    for group in &pack.groups {
+        if !seen_names.insert(&group.name) {
+            return Err(IoError::DuplicateGroupName(group.name.clone()));
+        }
+    }
+
     let mut templates = Vec::new();
     for template_dto in pack.templates {
         templates.push(template_dto.try_into_template()?);
@@ -303,7 +307,7 @@ id: test-lib-id
 name: Test Library
 description: A test library
 groups:
-  - tags: [Hair, appearance]
+  - name: Hair
     options:
       - blonde hair
       - red hair
@@ -311,7 +315,7 @@ templates:
   - id: tmpl-id
     name: Character
     description: A character template
-    source: "{Hair} with blue eyes"
+    source: "@Hair with blue eyes"
 "#;
 
     fn make_test_library() -> Library {
@@ -329,7 +333,7 @@ templates:
         assert_eq!(loaded.name, lib.name);
         assert_eq!(loaded.description, lib.description);
         assert_eq!(loaded.groups.len(), 1);
-        assert_eq!(loaded.groups[0].tags[0], "Hair");
+        assert_eq!(loaded.groups[0].name, "Hair");
         assert_eq!(loaded.groups[0].options.len(), 2);
         assert_eq!(loaded.templates.len(), 1);
         assert_eq!(loaded.templates[0].name, "Character");
@@ -368,13 +372,13 @@ templates:
         let yaml = r#"
 name: Minimal Library
 groups:
-  - tags: [Colors]
+  - name: Colors
     options:
       - red
       - blue
 templates:
   - name: Simple
-    source: "Pick a {Colors}"
+    source: "Pick a {red|blue}"
 "#;
 
         let lib = parse_pack(yaml).unwrap();
@@ -382,13 +386,13 @@ templates:
         // Library and Template IDs should be auto-generated
         assert!(!lib.id.is_empty());
         assert!(!lib.templates[0].id.is_empty());
-        assert_eq!(lib.groups[0].tags[0], "Colors");
-        assert_eq!(lib.groups[0].options[0].text, "red");
+        assert_eq!(lib.groups[0].name, "Colors");
+        assert_eq!(lib.groups[0].options[0], "red");
     }
 
     #[test]
     fn test_template_source_reconstruction() {
-        let source = r#"{Hair} with {{ EyeColor }} and [[ "Outfit" | some | assign("outfit") ]]"#;
+        let source = r#"@Hair with {{ EyeColor }} and {red|blue|green}"#;
         let ast = parse_template(source).unwrap();
         let reconstructed = template_to_source(&ast);
 
@@ -397,4 +401,58 @@ templates:
         assert_eq!(reparsed.nodes.len(), ast.nodes.len());
     }
 
+    #[test]
+    fn test_template_source_reconstruction_qualified_ref() {
+        let source = r#"@"MyLib:Hair Color" with @Eyes"#;
+        let ast = parse_template(source).unwrap();
+        let reconstructed = template_to_source(&ast);
+
+        // Verify the qualified reference is preserved
+        assert!(reconstructed.contains(r#"@"MyLib:Hair Color""#));
+        assert!(reconstructed.contains("@Eyes"));
+    }
+
+    #[test]
+    fn test_template_source_reconstruction_inline_options() {
+        let source = r#"A {big|small} {red|blue|green} car"#;
+        let ast = parse_template(source).unwrap();
+        let reconstructed = template_to_source(&ast);
+
+        assert_eq!(reconstructed, source);
+    }
+
+    #[test]
+    fn test_template_source_reconstruction_slot() {
+        let source = r#"Hello {{ Name }}, welcome!"#;
+        let ast = parse_template(source).unwrap();
+        let reconstructed = template_to_source(&ast);
+
+        assert_eq!(reconstructed, source);
+    }
+
+    #[test]
+    fn test_template_source_reconstruction_comment() {
+        let source = "# This is a comment";
+        let ast = parse_template(source).unwrap();
+        let reconstructed = template_to_source(&ast);
+
+        assert_eq!(reconstructed, source);
+    }
+
+    #[test]
+    fn test_duplicate_group_name_error() {
+        let yaml = r#"
+name: Test Library
+groups:
+  - name: Color
+    options:
+      - red
+  - name: Color
+    options:
+      - blue
+"#;
+
+        let result = parse_pack(yaml);
+        assert!(matches!(result, Err(IoError::DuplicateGroupName(name)) if name == "Color"));
+    }
 }
