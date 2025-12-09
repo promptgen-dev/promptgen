@@ -1,0 +1,19 @@
+{
+  "name": "promptgen-client",
+  "private": true,
+  "scripts": {
+    "dev:desktop": "pnpm --filter @promptgen/desktop dev",
+    "dev:web": "pnpm --filter @promptgen/web dev",
+    "build:desktop": "pnpm --filter @promptgen/desktop build",
+    "build:web": "pnpm --filter @promptgen/web build"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "pnpm": {
+    "overrides": {
+      "react": "^19.2.1",
+      "react-dom": "^19.2.1"
+    }
+  }
+}

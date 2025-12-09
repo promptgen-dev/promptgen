@@ -2,5 +2,6 @@
 members = [
     "promptgen-cli",
     "promptgen-core",
+    "client/apps/desktop/src-tauri",
 ]
 resolver = "3"
