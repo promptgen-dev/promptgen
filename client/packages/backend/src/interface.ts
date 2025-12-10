@@ -14,11 +14,16 @@ import type {
  * Implementations: DesktopBackend (Tauri), WebBackend (fetch)
  */
 export interface PromptgenBackend {
+  // Library home (workspace) operations
+  setLibraryHome?(path: string): Promise<void>;
+  getLibraryHome?(): Promise<string | null>;
+  pickFolder?(): Promise<string | null>;
+
   // Library operations
   listLibraries(): Promise<LibrarySummary[]>;
   loadLibrary(id: string): Promise<Library>;
   saveLibrary(lib: Library): Promise<void>;
-  createLibrary(name: string, path: string): Promise<Library>;
+  createLibrary(name: string): Promise<Library>;
   deleteLibrary(id: string): Promise<void>;
 
   // Template operations

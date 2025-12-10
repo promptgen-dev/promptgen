@@ -5,15 +5,61 @@ import { useLibraryStore } from "../stores/useLibraryStore";
 export function useLibraries() {
   const backend = useBackend();
   const {
+    libraryHome,
     libraries,
     activeLibrary,
+    selectedTemplateId,
     isLoading,
     error,
+    setLibraryHome: setLibraryHomeState,
     setLibraries,
     setActiveLibrary,
+    setSelectedTemplateId,
     setLoading,
     setError,
   } = useLibraryStore();
+
+  const loadLibraryHome = useCallback(async () => {
+    if (!backend.getLibraryHome) return;
+    try {
+      const home = await backend.getLibraryHome();
+      setLibraryHomeState(home);
+    } catch (e) {
+      console.error("Failed to get library home:", e);
+    }
+  }, [backend, setLibraryHomeState]);
+
+  const setLibraryHome = useCallback(
+    async (path: string) => {
+      if (!backend.setLibraryHome) return;
+      setLoading(true);
+      setError(null);
+      try {
+        await backend.setLibraryHome(path);
+        setLibraryHomeState(path);
+        // Clear current state and reload libraries from new home
+        setActiveLibrary(null);
+        setSelectedTemplateId(null);
+        const libs = await backend.listLibraries();
+        setLibraries(libs);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to set library home");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [backend, setLibraryHomeState, setLibraries, setActiveLibrary, setSelectedTemplateId, setLoading, setError]
+  );
+
+  const pickFolder = useCallback(async () => {
+    if (!backend.pickFolder) return null;
+    try {
+      return await backend.pickFolder();
+    } catch (e) {
+      console.error("Failed to pick folder:", e);
+      return null;
+    }
+  }, [backend]);
 
   const loadLibraries = useCallback(async () => {
     setLoading(true);
@@ -35,22 +81,29 @@ export function useLibraries() {
       try {
         const lib = await backend.loadLibrary(id);
         setActiveLibrary(lib);
+        // Select first template if available
+        if (lib.templates.length > 0) {
+          setSelectedTemplateId(lib.templates[0].id);
+        } else {
+          setSelectedTemplateId(null);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load library");
       } finally {
         setLoading(false);
       }
     },
-    [backend, setActiveLibrary, setLoading, setError]
+    [backend, setActiveLibrary, setSelectedTemplateId, setLoading, setError]
   );
 
   const createLibrary = useCallback(
-    async (name: string, path: string) => {
+    async (name: string) => {
       setLoading(true);
       setError(null);
       try {
-        const lib = await backend.createLibrary(name, path);
+        const lib = await backend.createLibrary(name);
         setActiveLibrary(lib);
+        setSelectedTemplateId(null);
         await loadLibraries();
         return lib;
       } catch (e) {
@@ -60,7 +113,7 @@ export function useLibraries() {
         setLoading(false);
       }
     },
-    [backend, setActiveLibrary, setLoading, setError, loadLibraries]
+    [backend, setActiveLibrary, setSelectedTemplateId, setLoading, setError, loadLibraries]
   );
 
   const saveLibrary = useCallback(async () => {
@@ -85,6 +138,7 @@ export function useLibraries() {
         await backend.deleteLibrary(id);
         if (activeLibrary?.id === id) {
           setActiveLibrary(null);
+          setSelectedTemplateId(null);
         }
         await loadLibraries();
       } catch (e) {
@@ -93,18 +147,31 @@ export function useLibraries() {
         setLoading(false);
       }
     },
-    [backend, activeLibrary, setActiveLibrary, setLoading, setError, loadLibraries]
+    [backend, activeLibrary, setActiveLibrary, setSelectedTemplateId, setLoading, setError, loadLibraries]
+  );
+
+  const selectTemplate = useCallback(
+    (templateId: string | null) => {
+      setSelectedTemplateId(templateId);
+    },
+    [setSelectedTemplateId]
   );
 
   return {
+    libraryHome,
     libraries,
     activeLibrary,
+    selectedTemplateId,
     isLoading,
     error,
+    loadLibraryHome,
+    setLibraryHome,
+    pickFolder,
     loadLibraries,
     loadLibrary,
     createLibrary,
     saveLibrary,
     deleteLibrary,
+    selectTemplate,
   };
 }

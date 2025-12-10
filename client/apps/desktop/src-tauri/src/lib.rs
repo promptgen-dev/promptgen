@@ -21,12 +21,15 @@ use promptgen_core::{
 pub struct AppState {
     /// Map of library ID -> (Library, path)
     libraries: Mutex<HashMap<String, (Library, PathBuf)>>,
+    /// Current library home directory
+    library_home: Mutex<Option<PathBuf>>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
             libraries: Mutex::new(HashMap::new()),
+            library_home: Mutex::new(None),
         }
     }
 }
@@ -178,18 +181,52 @@ fn parse_error_to_dto(err: &ParseError) -> ParseErrorDto {
 // Tauri Commands
 // ============================================================================
 
-/// Get the default library directory.
-fn get_libraries_dir() -> PathBuf {
-    dirs::document_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")))
-        .join("PromptGen")
-        .join("libraries")
+/// Get the library home directory from state, or return None if not set.
+fn get_library_home(state: &tauri::State<AppState>) -> Option<PathBuf> {
+    state.library_home.lock().unwrap().clone()
 }
 
-/// List all libraries in the default directory.
+/// Set the library home directory.
+#[tauri::command]
+fn set_library_home(path: String, state: tauri::State<AppState>) -> Result<(), String> {
+    let lib_path = PathBuf::from(&path);
+
+    if !lib_path.exists() {
+        return Err(format!("Directory does not exist: {}", path));
+    }
+
+    if !lib_path.is_dir() {
+        return Err(format!("Path is not a directory: {}", path));
+    }
+
+    // Clear existing libraries when changing home
+    {
+        let mut libs = state.libraries.lock().unwrap();
+        libs.clear();
+    }
+
+    // Set the new home
+    {
+        let mut home = state.library_home.lock().unwrap();
+        *home = Some(lib_path);
+    }
+
+    Ok(())
+}
+
+/// Get the current library home directory.
+#[tauri::command]
+fn get_library_home_cmd(state: tauri::State<AppState>) -> Option<String> {
+    get_library_home(&state).map(|p| p.to_string_lossy().to_string())
+}
+
+/// List all libraries in the library home directory.
 #[tauri::command]
 fn list_libraries(state: tauri::State<AppState>) -> Result<Vec<LibrarySummary>, String> {
-    let libs_dir = get_libraries_dir();
+    let libs_dir = match get_library_home(&state) {
+        Some(dir) => dir,
+        None => return Ok(vec![]), // No home set yet
+    };
 
     if !libs_dir.exists() {
         return Ok(vec![]);
@@ -288,23 +325,47 @@ fn save_library(lib: LibraryDto, state: tauri::State<AppState>) -> Result<(), St
     }
 }
 
-/// Create a new library.
+/// Create a new library in the library home directory.
 #[tauri::command]
-fn create_library(name: String, path: String) -> Result<LibraryDto, String> {
-    let lib = Library::new(&name);
-    let lib_path = PathBuf::from(&path);
+fn create_library(name: String, state: tauri::State<AppState>) -> Result<LibraryDto, String> {
+    let libs_dir = get_library_home(&state)
+        .ok_or_else(|| "No library home set. Please select a folder first.".to_string())?;
 
-    // Create parent directory if needed
-    if let Some(parent) = lib_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let lib = Library::new(&name);
+
+    // Create filename from name (sanitize for filesystem)
+    let filename = format!("{}.yaml", sanitize_filename(&name));
+    let lib_path = libs_dir.join(&filename);
+
+    // Check if file already exists
+    if lib_path.exists() {
+        return Err(format!("A library named '{}' already exists", name));
     }
 
     // Save the library
     core_save_library(&lib, &lib_path).map_err(|e| e.to_string())?;
 
+    // Store in state
+    {
+        let mut libs = state.libraries.lock().unwrap();
+        libs.insert(lib.id.clone(), (lib.clone(), lib_path.clone()));
+    }
+
     let mut dto = LibraryDto::from(&lib);
-    dto.path = path;
+    dto.path = lib_path.to_string_lossy().to_string();
     Ok(dto)
+}
+
+/// Sanitize a string for use as a filename.
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => c,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 /// Delete a library.
@@ -410,6 +471,8 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
+            set_library_home,
+            get_library_home_cmd,
             list_libraries,
             load_library,
             save_library,
