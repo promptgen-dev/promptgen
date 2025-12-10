@@ -1,6 +1,8 @@
 import type {
   LibrarySummary,
   Library,
+  Template,
+  PromptGroup,
   ParseResult,
   RenderInput,
   RenderResult,
@@ -26,7 +28,18 @@ export interface PromptgenBackend {
   createLibrary(name: string): Promise<Library>;
   deleteLibrary(id: string): Promise<void>;
 
-  // Template operations
+  // Prompt group operations
+  createPromptGroup?(libraryId: string, name: string): Promise<PromptGroup>;
+  updatePromptGroup?(libraryId: string, name: string, options: string[]): Promise<PromptGroup>;
+  renamePromptGroup?(libraryId: string, oldName: string, newName: string): Promise<PromptGroup>;
+  deletePromptGroup?(libraryId: string, name: string): Promise<void>;
+
+  // Template CRUD operations
+  createTemplate?(libraryId: string, name: string, content: string): Promise<Template>;
+  updateTemplate?(libraryId: string, templateId: string, name: string, content: string): Promise<Template>;
+  deleteTemplate?(libraryId: string, templateId: string): Promise<void>;
+
+  // Template parsing/rendering
   parseTemplate(text: string): Promise<ParseResult>;
   renderTemplate(input: RenderInput): Promise<RenderResult>;
 

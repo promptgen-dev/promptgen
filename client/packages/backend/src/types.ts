@@ -22,6 +22,11 @@ export interface Template {
   bindings?: Record<string, BindingValue>;
 }
 
+export interface PromptGroup {
+  name: string;
+  options: string[];
+}
+
 export type BindingValue =
   | { type: "literal"; value: string }
   | { type: "wildcard"; path: string }

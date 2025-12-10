@@ -1,4 +1,4 @@
-import { LibrarySidebar } from "./components/LibrarySidebar";
+import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { TemplateEditor } from "./components/TemplateEditor";
 import { PromptPreview } from "./components/PromptPreview";
 
@@ -6,7 +6,7 @@ export function App() {
   return (
     <div className="flex h-screen bg-background text-foreground">
       {/* Sidebar */}
-      <LibrarySidebar />
+      <WorkspaceSidebar />
 
       {/* Main content area */}
       <div className="flex flex-1 flex-col">

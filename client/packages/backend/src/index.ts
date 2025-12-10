@@ -3,6 +3,7 @@ export type {
   LibrarySummary,
   Library,
   Template,
+  PromptGroup,
   BindingValue,
   ParseResult,
   AstNode,

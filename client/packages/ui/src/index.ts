@@ -2,7 +2,7 @@
 export { App } from "./App";
 
 // Components
-export { LibrarySidebar } from "./components/LibrarySidebar";
+export { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 export { TemplateEditor } from "./components/TemplateEditor";
 export { PromptPreview } from "./components/PromptPreview";
 
@@ -15,6 +15,7 @@ export { Separator } from "./components/ui/separator";
 export { useLibraryStore } from "./stores/useLibraryStore";
 export { useTemplateStore } from "./stores/useTemplateStore";
 export { useBindingsStore } from "./stores/useBindingsStore";
+export { useUIStore } from "./stores/useUIStore";
 
 // Hooks
 export { useLibraries } from "./hooks/useLibraries";

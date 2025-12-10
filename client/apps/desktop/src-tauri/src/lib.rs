@@ -35,6 +35,43 @@ impl Default for AppState {
 }
 
 // ============================================================================
+// Config persistence
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct AppConfig {
+    library_home: Option<String>,
+}
+
+/// Get the path to the config file in the app data directory.
+fn get_config_path() -> Option<PathBuf> {
+    dirs::data_dir().map(|p| p.join("promptgen").join("config.json"))
+}
+
+/// Load the app config from disk.
+fn load_config() -> AppConfig {
+    get_config_path()
+        .and_then(|path| fs::read_to_string(&path).ok())
+        .and_then(|content| serde_json::from_str(&content).ok())
+        .unwrap_or_default()
+}
+
+/// Save the app config to disk.
+fn save_config(config: &AppConfig) -> Result<(), String> {
+    let path = get_config_path().ok_or("Could not determine config path")?;
+
+    // Create parent directories if they don't exist
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    fs::write(&path, content).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+// ============================================================================
 // DTOs for frontend communication
 // ============================================================================
 
@@ -186,7 +223,7 @@ fn get_library_home(state: &tauri::State<AppState>) -> Option<PathBuf> {
     state.library_home.lock().unwrap().clone()
 }
 
-/// Set the library home directory.
+/// Set the library home directory and persist it to config.
 #[tauri::command]
 fn set_library_home(path: String, state: tauri::State<AppState>) -> Result<(), String> {
     let lib_path = PathBuf::from(&path);
@@ -205,19 +242,44 @@ fn set_library_home(path: String, state: tauri::State<AppState>) -> Result<(), S
         libs.clear();
     }
 
-    // Set the new home
+    // Set the new home in state
     {
         let mut home = state.library_home.lock().unwrap();
         *home = Some(lib_path);
     }
 
+    // Persist to config file
+    let config = AppConfig {
+        library_home: Some(path),
+    };
+    save_config(&config)?;
+
     Ok(())
 }
 
 /// Get the current library home directory.
+/// If not set in state, tries to load from persisted config.
 #[tauri::command]
 fn get_library_home_cmd(state: tauri::State<AppState>) -> Option<String> {
-    get_library_home(&state).map(|p| p.to_string_lossy().to_string())
+    // First check if we have it in state
+    if let Some(path) = get_library_home(&state) {
+        return Some(path.to_string_lossy().to_string());
+    }
+
+    // Try to load from persisted config
+    let config = load_config();
+    if let Some(ref path_str) = config.library_home {
+        let path = PathBuf::from(path_str);
+        // Verify the directory still exists
+        if path.exists() && path.is_dir() {
+            // Update state with the loaded value
+            let mut home = state.library_home.lock().unwrap();
+            *home = Some(path);
+            return Some(path_str.clone());
+        }
+    }
+
+    None
 }
 
 /// List all libraries in the library home directory.
@@ -460,6 +522,231 @@ fn open_file(path: String, state: tauri::State<AppState>) -> Result<LibraryDto, 
 }
 
 // ============================================================================
+// Prompt Group Commands
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptGroupDto {
+    pub name: String,
+    pub options: Vec<String>,
+}
+
+/// Create a new prompt group in a library.
+#[tauri::command]
+fn create_prompt_group(
+    library_id: String,
+    name: String,
+    state: tauri::State<AppState>,
+) -> Result<PromptGroupDto, String> {
+    let mut libs = state.libraries.lock().unwrap();
+
+    if let Some((lib, path)) = libs.get_mut(&library_id) {
+        // Check if group already exists
+        if lib.find_group(&name).is_some() {
+            return Err(format!("A group named '{}' already exists", name));
+        }
+
+        // Create new group
+        let group = promptgen_core::PromptGroup::new(&name, vec![]);
+        lib.groups.push(group);
+
+        // Save to disk
+        core_save_library(lib, path).map_err(|e| e.to_string())?;
+
+        Ok(PromptGroupDto {
+            name,
+            options: vec![],
+        })
+    } else {
+        Err(format!("Library not found: {}", library_id))
+    }
+}
+
+/// Update a prompt group's options.
+#[tauri::command]
+fn update_prompt_group(
+    library_id: String,
+    name: String,
+    options: Vec<String>,
+    state: tauri::State<AppState>,
+) -> Result<PromptGroupDto, String> {
+    let mut libs = state.libraries.lock().unwrap();
+
+    if let Some((lib, path)) = libs.get_mut(&library_id) {
+        // Find and update the group
+        if let Some(group) = lib.groups.iter_mut().find(|g| g.name == name) {
+            group.options = options.clone();
+
+            // Save to disk
+            core_save_library(lib, path).map_err(|e| e.to_string())?;
+
+            Ok(PromptGroupDto { name, options })
+        } else {
+            Err(format!("Group not found: {}", name))
+        }
+    } else {
+        Err(format!("Library not found: {}", library_id))
+    }
+}
+
+/// Rename a prompt group.
+#[tauri::command]
+fn rename_prompt_group(
+    library_id: String,
+    old_name: String,
+    new_name: String,
+    state: tauri::State<AppState>,
+) -> Result<PromptGroupDto, String> {
+    let mut libs = state.libraries.lock().unwrap();
+
+    if let Some((lib, path)) = libs.get_mut(&library_id) {
+        // Check if new name already exists
+        if lib.find_group(&new_name).is_some() {
+            return Err(format!("A group named '{}' already exists", new_name));
+        }
+
+        // Find and rename the group
+        if let Some(group) = lib.groups.iter_mut().find(|g| g.name == old_name) {
+            group.name = new_name.clone();
+            let options = group.options.clone();
+
+            // Save to disk
+            core_save_library(lib, path).map_err(|e| e.to_string())?;
+
+            Ok(PromptGroupDto {
+                name: new_name,
+                options,
+            })
+        } else {
+            Err(format!("Group not found: {}", old_name))
+        }
+    } else {
+        Err(format!("Library not found: {}", library_id))
+    }
+}
+
+/// Delete a prompt group.
+#[tauri::command]
+fn delete_prompt_group(
+    library_id: String,
+    name: String,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    let mut libs = state.libraries.lock().unwrap();
+
+    if let Some((lib, path)) = libs.get_mut(&library_id) {
+        let initial_len = lib.groups.len();
+        lib.groups.retain(|g| g.name != name);
+
+        if lib.groups.len() == initial_len {
+            return Err(format!("Group not found: {}", name));
+        }
+
+        // Save to disk
+        core_save_library(lib, path).map_err(|e| e.to_string())?;
+
+        Ok(())
+    } else {
+        Err(format!("Library not found: {}", library_id))
+    }
+}
+
+// ============================================================================
+// Template Commands
+// ============================================================================
+
+/// Create a new template in a library.
+#[tauri::command]
+fn create_template(
+    library_id: String,
+    name: String,
+    content: String,
+    state: tauri::State<AppState>,
+) -> Result<TemplateDto, String> {
+    let mut libs = state.libraries.lock().unwrap();
+
+    if let Some((lib, path)) = libs.get_mut(&library_id) {
+        // Parse the content
+        let ast = parse_template(&content).map_err(|e| e.to_string())?;
+
+        // Create new template
+        let template = PromptTemplate::new(&name, ast);
+        let id = template.id.clone();
+        lib.templates.push(template);
+
+        // Save to disk
+        core_save_library(lib, path).map_err(|e| e.to_string())?;
+
+        Ok(TemplateDto { id, name, content })
+    } else {
+        Err(format!("Library not found: {}", library_id))
+    }
+}
+
+/// Update a template's content.
+#[tauri::command]
+fn update_template(
+    library_id: String,
+    template_id: String,
+    name: String,
+    content: String,
+    state: tauri::State<AppState>,
+) -> Result<TemplateDto, String> {
+    let mut libs = state.libraries.lock().unwrap();
+
+    if let Some((lib, path)) = libs.get_mut(&library_id) {
+        // Parse the content
+        let ast = parse_template(&content).map_err(|e| e.to_string())?;
+
+        // Find and update the template
+        if let Some(template) = lib.templates.iter_mut().find(|t| t.id == template_id) {
+            template.name = name.clone();
+            template.ast = ast;
+
+            // Save to disk
+            core_save_library(lib, path).map_err(|e| e.to_string())?;
+
+            Ok(TemplateDto {
+                id: template_id,
+                name,
+                content,
+            })
+        } else {
+            Err(format!("Template not found: {}", template_id))
+        }
+    } else {
+        Err(format!("Library not found: {}", library_id))
+    }
+}
+
+/// Delete a template.
+#[tauri::command]
+fn delete_template(
+    library_id: String,
+    template_id: String,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    let mut libs = state.libraries.lock().unwrap();
+
+    if let Some((lib, path)) = libs.get_mut(&library_id) {
+        let initial_len = lib.templates.len();
+        lib.templates.retain(|t| t.id != template_id);
+
+        if lib.templates.len() == initial_len {
+            return Err(format!("Template not found: {}", template_id));
+        }
+
+        // Save to disk
+        core_save_library(lib, path).map_err(|e| e.to_string())?;
+
+        Ok(())
+    } else {
+        Err(format!("Library not found: {}", library_id))
+    }
+}
+
+// ============================================================================
 // Tauri App Entry Point
 // ============================================================================
 
@@ -481,6 +768,15 @@ pub fn run() {
             parse_template_cmd,
             render_template,
             open_file,
+            // Prompt group commands
+            create_prompt_group,
+            update_prompt_group,
+            rename_prompt_group,
+            delete_prompt_group,
+            // Template commands
+            create_template,
+            update_template,
+            delete_template,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

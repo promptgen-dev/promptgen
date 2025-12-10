@@ -5,6 +5,8 @@ import {
   type PromptgenBackend,
   type Library,
   type LibrarySummary,
+  type Template,
+  type PromptGroup,
   type ParseResult,
   type RenderInput,
   type RenderResult,
@@ -40,7 +42,30 @@ const desktopBackend: PromptgenBackend = {
 
   deleteLibrary: (id) => invoke<void>("delete_library", { id }),
 
-  // Template operations
+  // Prompt group operations
+  createPromptGroup: (libraryId, name) =>
+    invoke<PromptGroup>("create_prompt_group", { libraryId, name }),
+
+  updatePromptGroup: (libraryId, name, options) =>
+    invoke<PromptGroup>("update_prompt_group", { libraryId, name, options }),
+
+  renamePromptGroup: (libraryId, oldName, newName) =>
+    invoke<PromptGroup>("rename_prompt_group", { libraryId, oldName, newName }),
+
+  deletePromptGroup: (libraryId, name) =>
+    invoke<void>("delete_prompt_group", { libraryId, name }),
+
+  // Template CRUD operations
+  createTemplate: (libraryId, name, content) =>
+    invoke<Template>("create_template", { libraryId, name, content }),
+
+  updateTemplate: (libraryId, templateId, name, content) =>
+    invoke<Template>("update_template", { libraryId, templateId, name, content }),
+
+  deleteTemplate: (libraryId, templateId) =>
+    invoke<void>("delete_template", { libraryId, templateId }),
+
+  // Template parsing/rendering
   parseTemplate: (text) => invoke<ParseResult>("parse_template_cmd", { text }),
 
   renderTemplate: (input: RenderInput) =>

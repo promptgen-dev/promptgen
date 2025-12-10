@@ -157,6 +157,162 @@ export function useLibraries() {
     [setSelectedTemplateId]
   );
 
+  // Prompt Group CRUD operations
+  const createPromptGroup = useCallback(
+    async (name: string) => {
+      if (!activeLibrary || !backend.createPromptGroup) return null;
+      setLoading(true);
+      setError(null);
+      try {
+        const group = await backend.createPromptGroup(activeLibrary.id, name);
+        // Reload the library to get updated groups
+        const lib = await backend.loadLibrary(activeLibrary.id);
+        setActiveLibrary(lib);
+        return group;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to create prompt group");
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [backend, activeLibrary, setActiveLibrary, setLoading, setError]
+  );
+
+  const updatePromptGroup = useCallback(
+    async (name: string, options: string[]) => {
+      if (!activeLibrary || !backend.updatePromptGroup) return null;
+      setLoading(true);
+      setError(null);
+      try {
+        const group = await backend.updatePromptGroup(activeLibrary.id, name, options);
+        // Reload the library to get updated groups
+        const lib = await backend.loadLibrary(activeLibrary.id);
+        setActiveLibrary(lib);
+        return group;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to update prompt group");
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [backend, activeLibrary, setActiveLibrary, setLoading, setError]
+  );
+
+  const renamePromptGroup = useCallback(
+    async (oldName: string, newName: string) => {
+      if (!activeLibrary || !backend.renamePromptGroup) return null;
+      setLoading(true);
+      setError(null);
+      try {
+        const group = await backend.renamePromptGroup(activeLibrary.id, oldName, newName);
+        // Reload the library to get updated groups
+        const lib = await backend.loadLibrary(activeLibrary.id);
+        setActiveLibrary(lib);
+        return group;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to rename prompt group");
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [backend, activeLibrary, setActiveLibrary, setLoading, setError]
+  );
+
+  const deletePromptGroup = useCallback(
+    async (name: string) => {
+      if (!activeLibrary || !backend.deletePromptGroup) return;
+      setLoading(true);
+      setError(null);
+      try {
+        await backend.deletePromptGroup(activeLibrary.id, name);
+        // Reload the library to get updated groups
+        const lib = await backend.loadLibrary(activeLibrary.id);
+        setActiveLibrary(lib);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to delete prompt group");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [backend, activeLibrary, setActiveLibrary, setLoading, setError]
+  );
+
+  // Template CRUD operations
+  const createTemplate = useCallback(
+    async (name: string, content: string = "") => {
+      if (!activeLibrary || !backend.createTemplate) return null;
+      setLoading(true);
+      setError(null);
+      try {
+        const template = await backend.createTemplate(activeLibrary.id, name, content);
+        // Reload the library to get updated templates
+        const lib = await backend.loadLibrary(activeLibrary.id);
+        setActiveLibrary(lib);
+        setSelectedTemplateId(template.id);
+        await loadLibraries();
+        return template;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to create template");
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [backend, activeLibrary, setActiveLibrary, setSelectedTemplateId, setLoading, setError, loadLibraries]
+  );
+
+  const updateTemplate = useCallback(
+    async (templateId: string, name: string, content: string) => {
+      if (!activeLibrary || !backend.updateTemplate) return null;
+      setLoading(true);
+      setError(null);
+      try {
+        const template = await backend.updateTemplate(activeLibrary.id, templateId, name, content);
+        // Reload the library to get updated templates
+        const lib = await backend.loadLibrary(activeLibrary.id);
+        setActiveLibrary(lib);
+        return template;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to update template");
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [backend, activeLibrary, setActiveLibrary, setLoading, setError]
+  );
+
+  const deleteTemplate = useCallback(
+    async (templateId: string) => {
+      if (!activeLibrary || !backend.deleteTemplate) return;
+      setLoading(true);
+      setError(null);
+      try {
+        await backend.deleteTemplate(activeLibrary.id, templateId);
+        // Reload the library to get updated templates
+        const lib = await backend.loadLibrary(activeLibrary.id);
+        setActiveLibrary(lib);
+        // Select another template if the deleted one was selected
+        if (selectedTemplateId === templateId) {
+          if (lib.templates.length > 0) {
+            setSelectedTemplateId(lib.templates[0].id);
+          } else {
+            setSelectedTemplateId(null);
+          }
+        }
+        await loadLibraries();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to delete template");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [backend, activeLibrary, selectedTemplateId, setActiveLibrary, setSelectedTemplateId, setLoading, setError, loadLibraries]
+  );
+
   return {
     libraryHome,
     libraries,
@@ -173,5 +329,14 @@ export function useLibraries() {
     saveLibrary,
     deleteLibrary,
     selectTemplate,
+    // Prompt Group CRUD
+    createPromptGroup,
+    updatePromptGroup,
+    renamePromptGroup,
+    deletePromptGroup,
+    // Template CRUD
+    createTemplate,
+    updateTemplate,
+    deleteTemplate,
   };
 }
