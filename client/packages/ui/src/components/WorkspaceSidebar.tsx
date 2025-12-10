@@ -17,6 +17,13 @@ import { Separator } from "./ui/separator";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -49,6 +56,7 @@ export function WorkspaceSidebar() {
     libraryHome,
     libraries,
     activeLibrary,
+    selectedLibraryId,
     selectedTemplateId,
     isLoading,
     loadLibraryHome,
@@ -64,14 +72,12 @@ export function WorkspaceSidebar() {
     renamePromptGroup,
     deletePromptGroup,
     createTemplate,
+    updateTemplate,
     deleteTemplate,
   } = useLibraries();
 
   const { sidebarWidth, setSidebarWidth, sidebarViewMode, setSidebarViewMode } = useUIStore();
 
-  const [expandedLibraries, setExpandedLibraries] = useState<Set<string>>(
-    new Set()
-  );
   const [newLibraryDialogOpen, setNewLibraryDialogOpen] = useState(false);
   const [newLibraryName, setNewLibraryName] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -83,6 +89,9 @@ export function WorkspaceSidebar() {
   const [newTemplateName, setNewTemplateName] = useState("");
   const [deleteTemplateDialogOpen, setDeleteTemplateDialogOpen] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState<string | null>(null);
+  const [editTemplateDialogOpen, setEditTemplateDialogOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<{ id: string; name: string } | null>(null);
+  const [editTemplateName, setEditTemplateName] = useState("");
 
   // Prompt Group state
   const [newGroupDialogOpen, setNewGroupDialogOpen] = useState(false);
@@ -108,12 +117,16 @@ export function WorkspaceSidebar() {
     }
   }, [libraryHome, loadLibraries]);
 
-  // Auto-expand active library
+  // Auto-load persisted library selection
   useEffect(() => {
-    if (activeLibrary) {
-      setExpandedLibraries((prev) => new Set(prev).add(activeLibrary.id));
+    if (libraries.length > 0 && selectedLibraryId && !activeLibrary) {
+      // Check if the persisted library still exists
+      const libraryExists = libraries.some((lib) => lib.id === selectedLibraryId);
+      if (libraryExists) {
+        loadLibrary(selectedLibraryId);
+      }
     }
-  }, [activeLibrary]);
+  }, [libraries, selectedLibraryId, activeLibrary, loadLibrary]);
 
   // Resize handling
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -165,29 +178,10 @@ export function WorkspaceSidebar() {
     setDeleteDialogOpen(false);
   };
 
-  const toggleLibraryExpanded = (id: string) => {
-    setExpandedLibraries((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  const handleLibraryClick = (id: string) => {
-    if (activeLibrary?.id !== id) {
+  const handleLibraryChange = (id: string) => {
+    if (id && activeLibrary?.id !== id) {
       loadLibrary(id);
     }
-    toggleLibraryExpanded(id);
-  };
-
-  const confirmDeleteLibrary = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setLibraryToDelete(id);
-    setDeleteDialogOpen(true);
   };
 
   // Template handlers
@@ -205,10 +199,27 @@ export function WorkspaceSidebar() {
     setDeleteTemplateDialogOpen(false);
   };
 
-  const confirmDeleteTemplate = (id: string, e: React.MouseEvent) => {
+  const openEditTemplateDialog = (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setTemplateToDelete(id);
-    setDeleteTemplateDialogOpen(true);
+    setEditingTemplate({ id, name });
+    setEditTemplateName(name);
+    setEditTemplateDialogOpen(true);
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!editingTemplate) return;
+    const trimmedName = editTemplateName.trim();
+    if (!trimmedName) return;
+
+    // Get the current template content to preserve it
+    const template = activeLibrary?.templates.find(t => t.id === editingTemplate.id);
+    if (template) {
+      await updateTemplate(editingTemplate.id, trimmedName, template.content);
+    }
+
+    setEditTemplateDialogOpen(false);
+    setEditingTemplate(null);
+    setEditTemplateName("");
   };
 
   // Prompt Group handlers
@@ -224,12 +235,6 @@ export function WorkspaceSidebar() {
     await deletePromptGroup(groupToDelete);
     setGroupToDelete(null);
     setDeleteGroupDialogOpen(false);
-  };
-
-  const confirmDeleteGroup = (name: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setGroupToDelete(name);
-    setDeleteGroupDialogOpen(true);
   };
 
   const toggleVariableExpanded = (name: string, e: React.MouseEvent) => {
@@ -348,15 +353,6 @@ export function WorkspaceSidebar() {
       {libraryHome && (
         <div className="flex px-3 pb-2 gap-1">
           <Button
-            variant={sidebarViewMode === "templates" ? "secondary" : "ghost"}
-            size="sm"
-            className="flex-1 h-7 text-xs"
-            onClick={() => setSidebarViewMode("templates")}
-          >
-            <FileText className="h-3 w-3 mr-1" />
-            Templates
-          </Button>
-          <Button
             variant={sidebarViewMode === "variables" ? "secondary" : "ghost"}
             size="sm"
             className="flex-1 h-7 text-xs"
@@ -365,12 +361,40 @@ export function WorkspaceSidebar() {
             <AtSign className="h-3 w-3 mr-1" />
             Variables
           </Button>
+          <Button
+            variant={sidebarViewMode === "templates" ? "secondary" : "ghost"}
+            size="sm"
+            className="flex-1 h-7 text-xs"
+            onClick={() => setSidebarViewMode("templates")}
+          >
+            <FileText className="h-3 w-3 mr-1" />
+            Templates
+          </Button>
+        </div>
+      )}
+
+      {/* Library Selector */}
+      {libraryHome && libraries.length > 0 && (
+        <div className="px-3 pb-2">
+          <Select value={activeLibrary?.id || ""} onValueChange={handleLibraryChange}>
+            <SelectTrigger className="h-8 text-xs">
+              <FolderOpen className="h-3.5 w-3.5 mr-2 shrink-0" />
+              <SelectValue placeholder="Select a library" />
+            </SelectTrigger>
+            <SelectContent>
+              {[...libraries].sort((a, b) => a.name.localeCompare(b.name)).map((lib) => (
+                <SelectItem key={lib.id} value={lib.id}>
+                  {lib.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       )}
 
       <Separator />
 
-      {/* Libraries List */}
+      {/* Content Area */}
       <ScrollArea className="flex-1">
         <div className="p-2">
           {!libraryHome ? (
@@ -387,166 +411,119 @@ export function WorkspaceSidebar() {
               <p>No libraries yet</p>
               <p className="mt-1 text-xs">Click + to create one</p>
             </div>
+          ) : !activeLibrary ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">
+              <p>Select a library above</p>
+            </div>
           ) : (
-            <div className="space-y-1">
-              {libraries.map((lib) => {
-                const isExpanded = expandedLibraries.has(lib.id);
-                const isActive = activeLibrary?.id === lib.id;
-
-                return (
-                  <div key={lib.id}>
-                    {/* Library Row */}
+            <div className="space-y-0.5">
+              {/* Templates view */}
+              {sidebarViewMode === "templates" && (
+                <>
+                  {[...activeLibrary.templates].sort((a, b) => a.name.localeCompare(b.name)).map((template) => (
                     <div
+                      key={template.id}
+                      onClick={() => selectTemplate(template.id)}
                       className={cn(
-                        "group flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-sm transition-colors cursor-pointer",
+                        "group/template flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm transition-colors cursor-pointer",
                         "hover:bg-accent hover:text-accent-foreground",
-                        isActive && "bg-accent text-accent-foreground"
+                        selectedTemplateId === template.id &&
+                        "bg-primary/10 text-primary"
                       )}
-                      onClick={() => handleLibraryClick(lib.id)}
                     >
-                      {isExpanded ? (
-                        <ChevronDown className="h-4 w-4 shrink-0" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4 shrink-0" />
-                      )}
-                      <FolderOpen className="h-4 w-4 shrink-0" />
-                      <span className="flex-1 truncate">{lib.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {lib.templateCount}
-                      </span>
+                      <FileText className="h-3.5 w-3.5 shrink-0" />
+                      <span className="flex-1 truncate">{template.name}</span>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 opacity-0 group-hover:opacity-100"
-                        onClick={(e) => confirmDeleteLibrary(lib.id, e)}
+                        className="h-5 w-5 opacity-0 group-hover/template:opacity-100"
+                        onClick={(e) => openEditTemplateDialog(template.id, template.name, e)}
+                        title="Edit template"
                       >
-                        <Trash2 className="h-3 w-3" />
+                        <Pencil className="h-3 w-3" />
                       </Button>
                     </div>
+                  ))}
+                  {/* Add template button */}
+                  <button
+                    onClick={() => setNewTemplateDialogOpen(true)}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5 shrink-0" />
+                    <span>New template</span>
+                  </button>
+                </>
+              )}
 
-                    {/* Expanded library content */}
-                    {isExpanded && isActive && (
-                      <div className="ml-6 mt-1 space-y-0.5">
-                        {/* Templates view */}
-                        {sidebarViewMode === "templates" && (
-                          <>
-                            {activeLibrary.templates.map((template) => (
-                              <div
-                                key={template.id}
-                                onClick={() => selectTemplate(template.id)}
-                                className={cn(
-                                  "group/template flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm transition-colors cursor-pointer",
-                                  "hover:bg-accent hover:text-accent-foreground",
-                                  selectedTemplateId === template.id &&
-                                  "bg-primary/10 text-primary"
-                                )}
-                              >
-                                <FileText className="h-3.5 w-3.5 shrink-0" />
-                                <span className="flex-1 truncate">{template.name}</span>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-5 w-5 opacity-0 group-hover/template:opacity-100"
-                                  onClick={(e) => confirmDeleteTemplate(template.id, e)}
+              {/* Variables view */}
+              {sidebarViewMode === "variables" && (
+                <>
+                  {Object.entries(activeLibrary.wildcards).sort(([a], [b]) => a.localeCompare(b)).map(([name, options]) => {
+                    const isVariableExpanded = expandedVariables.has(name);
+                    return (
+                      <div key={name}>
+                        <div
+                          className="group/group flex w-full items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-accent hover:text-accent-foreground cursor-pointer"
+                          onClick={(e) => toggleVariableExpanded(name, e)}
+                        >
+                          {isVariableExpanded ? (
+                            <ChevronDown className="h-3 w-3 shrink-0" />
+                          ) : (
+                            <ChevronRight className="h-3 w-3 shrink-0" />
+                          )}
+                          <AtSign className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span className="flex-1 truncate">{name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {options.length}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5 opacity-0 group-hover/group:opacity-100"
+                            onClick={(e) => openEditGroupDialog(name, options, e)}
+                            title="Edit variable"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        {/* Expanded options */}
+                        {isVariableExpanded && (
+                          <div className="ml-6 mt-0.5 space-y-0.5">
+                            {options.length === 0 ? (
+                              <p className="px-2 py-1 text-xs text-muted-foreground italic">
+                                No options yet
+                              </p>
+                            ) : (
+                              options.slice(0, 10).map((option, idx) => (
+                                <div
+                                  key={idx}
+                                  className="px-2 py-0.5 text-xs text-muted-foreground truncate"
+                                  title={option}
                                 >
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            ))}
-                            {/* Add template button */}
-                            <button
-                              onClick={() => setNewTemplateDialogOpen(true)}
-                              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-                            >
-                              <Plus className="h-3.5 w-3.5 shrink-0" />
-                              <span>New template</span>
-                            </button>
-                          </>
-                        )}
-
-                        {/* Variables view */}
-                        {sidebarViewMode === "variables" && (
-                          <>
-                            {Object.entries(activeLibrary.wildcards).map(([name, options]) => {
-                              const isVariableExpanded = expandedVariables.has(name);
-                              return (
-                                <div key={name}>
-                                  <div
-                                    className="group/group flex w-full items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-accent hover:text-accent-foreground cursor-pointer"
-                                    onClick={(e) => toggleVariableExpanded(name, e)}
-                                  >
-                                    {isVariableExpanded ? (
-                                      <ChevronDown className="h-3 w-3 shrink-0" />
-                                    ) : (
-                                      <ChevronRight className="h-3 w-3 shrink-0" />
-                                    )}
-                                    <AtSign className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                    <span className="flex-1 truncate">{name}</span>
-                                    <span className="text-xs text-muted-foreground">
-                                      {options.length}
-                                    </span>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-5 w-5 opacity-0 group-hover/group:opacity-100"
-                                      onClick={(e) => openEditGroupDialog(name, options, e)}
-                                      title="Edit variable"
-                                    >
-                                      <Pencil className="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-5 w-5 opacity-0 group-hover/group:opacity-100"
-                                      onClick={(e) => confirmDeleteGroup(name, e)}
-                                      title="Delete variable"
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                  {/* Expanded options */}
-                                  {isVariableExpanded && (
-                                    <div className="ml-6 mt-0.5 space-y-0.5">
-                                      {options.length === 0 ? (
-                                        <p className="px-2 py-1 text-xs text-muted-foreground italic">
-                                          No options yet
-                                        </p>
-                                      ) : (
-                                        options.slice(0, 10).map((option, idx) => (
-                                          <div
-                                            key={idx}
-                                            className="px-2 py-0.5 text-xs text-muted-foreground truncate"
-                                            title={option}
-                                          >
-                                            {option}
-                                          </div>
-                                        ))
-                                      )}
-                                      {options.length > 10 && (
-                                        <p className="px-2 py-0.5 text-xs text-muted-foreground italic">
-                                          +{options.length - 10} more...
-                                        </p>
-                                      )}
-                                    </div>
-                                  )}
+                                  {option}
                                 </div>
-                              );
-                            })}
-                            {/* Add variable button */}
-                            <button
-                              onClick={() => setNewGroupDialogOpen(true)}
-                              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-                            >
-                              <Plus className="h-3.5 w-3.5 shrink-0" />
-                              <span>New variable</span>
-                            </button>
-                          </>
+                              ))
+                            )}
+                            {options.length > 10 && (
+                              <p className="px-2 py-0.5 text-xs text-muted-foreground italic">
+                                +{options.length - 10} more...
+                              </p>
+                            )}
+                          </div>
                         )}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                  {/* Add variable button */}
+                  <button
+                    onClick={() => setNewGroupDialogOpen(true)}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5 shrink-0" />
+                    <span>New variable</span>
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -682,6 +659,63 @@ export function WorkspaceSidebar() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Edit Template Dialog */}
+      <Dialog open={editTemplateDialogOpen} onOpenChange={setEditTemplateDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Template</DialogTitle>
+            <DialogDescription>
+              Rename this template.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              placeholder="Template name"
+              value={editTemplateName}
+              onChange={(e) => setEditTemplateName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  handleSaveTemplate();
+                }
+              }}
+              autoFocus
+            />
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (editingTemplate) {
+                  setTemplateToDelete(editingTemplate.id);
+                  setEditTemplateDialogOpen(false);
+                  setDeleteTemplateDialogOpen(true);
+                }
+              }}
+              className="sm:mr-auto"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEditTemplateDialogOpen(false);
+                setEditingTemplate(null);
+                setEditTemplateName("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveTemplate}
+              disabled={!editTemplateName.trim()}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Create Variable Dialog */}
       <Dialog open={newGroupDialogOpen} onOpenChange={setNewGroupDialogOpen}>
         <DialogContent>
@@ -777,7 +811,21 @@ export function WorkspaceSidebar() {
               <p className="text-sm text-destructive">{editGroupError}</p>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (editingGroup) {
+                  setGroupToDelete(editingGroup.name);
+                  setEditGroupDialogOpen(false);
+                  setDeleteGroupDialogOpen(true);
+                }
+              }}
+              className="sm:mr-auto"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete
+            </Button>
             <Button
               variant="outline"
               onClick={() => {

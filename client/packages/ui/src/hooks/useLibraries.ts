@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useBackend } from "@promptgen/backend";
 import { useLibraryStore } from "../stores/useLibraryStore";
+import { useUIStore } from "../stores/useUIStore";
 
 export function useLibraries() {
   const backend = useBackend();
@@ -18,6 +19,8 @@ export function useLibraries() {
     setLoading,
     setError,
   } = useLibraryStore();
+
+  const { selectedLibraryId, setSelectedLibraryId } = useUIStore();
 
   const loadLibraryHome = useCallback(async () => {
     if (!backend.getLibraryHome) return;
@@ -81,6 +84,7 @@ export function useLibraries() {
       try {
         const lib = await backend.loadLibrary(id);
         setActiveLibrary(lib);
+        setSelectedLibraryId(id); // Persist selection
         // Select first template if available
         if (lib.templates.length > 0) {
           setSelectedTemplateId(lib.templates[0].id);
@@ -93,7 +97,7 @@ export function useLibraries() {
         setLoading(false);
       }
     },
-    [backend, setActiveLibrary, setSelectedTemplateId, setLoading, setError]
+    [backend, setActiveLibrary, setSelectedLibraryId, setSelectedTemplateId, setLoading, setError]
   );
 
   const createLibrary = useCallback(
@@ -103,6 +107,7 @@ export function useLibraries() {
       try {
         const lib = await backend.createLibrary(name);
         setActiveLibrary(lib);
+        setSelectedLibraryId(lib.id); // Persist selection
         setSelectedTemplateId(null);
         await loadLibraries();
         return lib;
@@ -113,7 +118,7 @@ export function useLibraries() {
         setLoading(false);
       }
     },
-    [backend, setActiveLibrary, setSelectedTemplateId, setLoading, setError, loadLibraries]
+    [backend, setActiveLibrary, setSelectedLibraryId, setSelectedTemplateId, setLoading, setError, loadLibraries]
   );
 
   const saveLibrary = useCallback(async () => {
@@ -138,6 +143,7 @@ export function useLibraries() {
         await backend.deleteLibrary(id);
         if (activeLibrary?.id === id) {
           setActiveLibrary(null);
+          setSelectedLibraryId(null); // Clear persisted selection
           setSelectedTemplateId(null);
         }
         await loadLibraries();
@@ -147,7 +153,7 @@ export function useLibraries() {
         setLoading(false);
       }
     },
-    [backend, activeLibrary, setActiveLibrary, setSelectedTemplateId, setLoading, setError, loadLibraries]
+    [backend, activeLibrary, setActiveLibrary, setSelectedLibraryId, setSelectedTemplateId, setLoading, setError, loadLibraries]
   );
 
   const selectTemplate = useCallback(
@@ -317,6 +323,7 @@ export function useLibraries() {
     libraryHome,
     libraries,
     activeLibrary,
+    selectedLibraryId,
     selectedTemplateId,
     isLoading,
     error,

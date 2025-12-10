@@ -9,6 +9,9 @@ interface UIState {
   setSidebarWidth: (width: number) => void;
   sidebarViewMode: SidebarViewMode;
   setSidebarViewMode: (mode: SidebarViewMode) => void;
+  // Selected library (persisted)
+  selectedLibraryId: string | null;
+  setSelectedLibraryId: (id: string | null) => void;
 }
 
 const MIN_SIDEBAR_WIDTH = 180;
@@ -25,12 +28,15 @@ export const useUIStore = create<UIState>()(
         }),
       sidebarViewMode: "templates" as SidebarViewMode,
       setSidebarViewMode: (mode) => set({ sidebarViewMode: mode }),
+      selectedLibraryId: null,
+      setSelectedLibraryId: (id) => set({ selectedLibraryId: id }),
     }),
     {
       name: "promptgen-ui-settings",
       partialize: (state) => ({
         sidebarWidth: state.sidebarWidth,
         sidebarViewMode: state.sidebarViewMode,
+        selectedLibraryId: state.selectedLibraryId,
       }),
     }
   )
