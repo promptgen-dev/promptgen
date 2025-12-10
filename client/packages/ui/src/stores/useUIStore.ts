@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type SidebarViewMode = "templates" | "wildcards";
+export type SidebarViewMode = "templates" | "variables";
 
 interface UIState {
   // Sidebar

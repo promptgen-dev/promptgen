@@ -7,7 +7,6 @@ import {
   FolderCog,
   ChevronRight,
   ChevronDown,
-  Braces,
   Pencil,
   AtSign,
 } from "lucide-react";
@@ -90,7 +89,7 @@ export function WorkspaceSidebar() {
   const [newGroupName, setNewGroupName] = useState("");
   const [deleteGroupDialogOpen, setDeleteGroupDialogOpen] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<string | null>(null);
-  const [expandedWildcards, setExpandedWildcards] = useState<Set<string>>(new Set());
+  const [expandedVariables, setExpandedVariables] = useState<Set<string>>(new Set());
   const [editGroupDialogOpen, setEditGroupDialogOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<{ name: string; options: string[] } | null>(null);
   const [editGroupName, setEditGroupName] = useState("");
@@ -233,9 +232,9 @@ export function WorkspaceSidebar() {
     setDeleteGroupDialogOpen(true);
   };
 
-  const toggleWildcardExpanded = (name: string, e: React.MouseEvent) => {
+  const toggleVariableExpanded = (name: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setExpandedWildcards((prev) => {
+    setExpandedVariables((prev) => {
       const next = new Set(prev);
       if (next.has(name)) {
         next.delete(name);
@@ -265,7 +264,7 @@ export function WorkspaceSidebar() {
 
     const trimmedName = editGroupName.trim();
     if (!trimmedName) {
-      setEditGroupError("Wildcard name cannot be empty");
+      setEditGroupError("Variable name cannot be empty");
       return;
     }
 
@@ -358,13 +357,13 @@ export function WorkspaceSidebar() {
             Templates
           </Button>
           <Button
-            variant={sidebarViewMode === "wildcards" ? "secondary" : "ghost"}
+            variant={sidebarViewMode === "variables" ? "secondary" : "ghost"}
             size="sm"
             className="flex-1 h-7 text-xs"
-            onClick={() => setSidebarViewMode("wildcards")}
+            onClick={() => setSidebarViewMode("variables")}
           >
-            <Braces className="h-3 w-3 mr-1" />
-            Wildcards
+            <AtSign className="h-3 w-3 mr-1" />
+            Variables
           </Button>
         </div>
       )}
@@ -465,18 +464,18 @@ export function WorkspaceSidebar() {
                           </>
                         )}
 
-                        {/* Wildcards view */}
-                        {sidebarViewMode === "wildcards" && (
+                        {/* Variables view */}
+                        {sidebarViewMode === "variables" && (
                           <>
                             {Object.entries(activeLibrary.wildcards).map(([name, options]) => {
-                              const isWildcardExpanded = expandedWildcards.has(name);
+                              const isVariableExpanded = expandedVariables.has(name);
                               return (
                                 <div key={name}>
                                   <div
                                     className="group/group flex w-full items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-accent hover:text-accent-foreground cursor-pointer"
-                                    onClick={(e) => toggleWildcardExpanded(name, e)}
+                                    onClick={(e) => toggleVariableExpanded(name, e)}
                                   >
-                                    {isWildcardExpanded ? (
+                                    {isVariableExpanded ? (
                                       <ChevronDown className="h-3 w-3 shrink-0" />
                                     ) : (
                                       <ChevronRight className="h-3 w-3 shrink-0" />
@@ -491,7 +490,7 @@ export function WorkspaceSidebar() {
                                       size="icon"
                                       className="h-5 w-5 opacity-0 group-hover/group:opacity-100"
                                       onClick={(e) => openEditGroupDialog(name, options, e)}
-                                      title="Edit wildcard"
+                                      title="Edit variable"
                                     >
                                       <Pencil className="h-3 w-3" />
                                     </Button>
@@ -500,13 +499,13 @@ export function WorkspaceSidebar() {
                                       size="icon"
                                       className="h-5 w-5 opacity-0 group-hover/group:opacity-100"
                                       onClick={(e) => confirmDeleteGroup(name, e)}
-                                      title="Delete wildcard"
+                                      title="Delete variable"
                                     >
                                       <Trash2 className="h-3 w-3" />
                                     </Button>
                                   </div>
                                   {/* Expanded options */}
-                                  {isWildcardExpanded && (
+                                  {isVariableExpanded && (
                                     <div className="ml-6 mt-0.5 space-y-0.5">
                                       {options.length === 0 ? (
                                         <p className="px-2 py-1 text-xs text-muted-foreground italic">
@@ -533,13 +532,13 @@ export function WorkspaceSidebar() {
                                 </div>
                               );
                             })}
-                            {/* Add wildcard button */}
+                            {/* Add variable button */}
                             <button
                               onClick={() => setNewGroupDialogOpen(true)}
                               className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
                             >
                               <Plus className="h-3.5 w-3.5 shrink-0" />
-                              <span>New wildcard</span>
+                              <span>New variable</span>
                             </button>
                           </>
                         )}
@@ -683,18 +682,18 @@ export function WorkspaceSidebar() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Create Prompt Group Dialog */}
+      {/* Create Variable Dialog */}
       <Dialog open={newGroupDialogOpen} onOpenChange={setNewGroupDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create New Wildcard</DialogTitle>
+            <DialogTitle>Create New Variable</DialogTitle>
             <DialogDescription>
-              Enter a name for your new wildcard group. You can add options after creating it.
+              Enter a name for your new variable. You can add options after creating it.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <Input
-              placeholder="Wildcard name (e.g., colors, animals)"
+              placeholder="Variable name (e.g., colors, animals)"
               value={newGroupName}
               onChange={(e) => setNewGroupName(e.target.value)}
               onKeyDown={(e) => {
@@ -722,13 +721,13 @@ export function WorkspaceSidebar() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Prompt Group Confirmation Dialog */}
+      {/* Delete Variable Confirmation Dialog */}
       <AlertDialog open={deleteGroupDialogOpen} onOpenChange={setDeleteGroupDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Wildcard</AlertDialogTitle>
+            <AlertDialogTitle>Delete Variable</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete the wildcard "{groupToDelete}"? This action cannot be undone.
+              Are you sure you want to delete the variable "{groupToDelete}"? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -743,20 +742,20 @@ export function WorkspaceSidebar() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Edit Wildcard Dialog */}
+      {/* Edit Variable Dialog */}
       <Dialog open={editGroupDialogOpen} onOpenChange={setEditGroupDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Edit Wildcard</DialogTitle>
+            <DialogTitle>Edit Variable</DialogTitle>
             <DialogDescription>
-              Edit the name and options for this wildcard.
+              Edit the name and options for this variable.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Name</label>
               <Input
-                placeholder="Wildcard name"
+                placeholder="Variable name"
                 value={editGroupName}
                 onChange={(e) => setEditGroupName(e.target.value)}
               />
