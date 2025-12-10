@@ -8,11 +8,15 @@ import {
   ChevronRight,
   ChevronDown,
   Braces,
+  Pencil,
+  AtSign,
 } from "lucide-react";
+import * as YAML from "yaml";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
 import { Separator } from "./ui/separator";
 import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -57,12 +61,14 @@ export function WorkspaceSidebar() {
     deleteLibrary,
     selectTemplate,
     createPromptGroup,
+    updatePromptGroup,
+    renamePromptGroup,
     deletePromptGroup,
     createTemplate,
     deleteTemplate,
   } = useLibraries();
 
-  const { sidebarWidth, setSidebarWidth } = useUIStore();
+  const { sidebarWidth, setSidebarWidth, sidebarViewMode, setSidebarViewMode } = useUIStore();
 
   const [expandedLibraries, setExpandedLibraries] = useState<Set<string>>(
     new Set()
@@ -84,6 +90,12 @@ export function WorkspaceSidebar() {
   const [newGroupName, setNewGroupName] = useState("");
   const [deleteGroupDialogOpen, setDeleteGroupDialogOpen] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<string | null>(null);
+  const [expandedWildcards, setExpandedWildcards] = useState<Set<string>>(new Set());
+  const [editGroupDialogOpen, setEditGroupDialogOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<{ name: string; options: string[] } | null>(null);
+  const [editGroupName, setEditGroupName] = useState("");
+  const [editGroupYaml, setEditGroupYaml] = useState("");
+  const [editGroupError, setEditGroupError] = useState<string | null>(null);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
 
@@ -221,6 +233,68 @@ export function WorkspaceSidebar() {
     setDeleteGroupDialogOpen(true);
   };
 
+  const toggleWildcardExpanded = (name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedWildcards((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+      return next;
+    });
+  };
+
+  const openEditGroupDialog = (name: string, options: string[], e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingGroup({ name, options });
+    setEditGroupName(name);
+    // Convert options array to YAML list format, or use default if empty
+    const yamlContent = options.length > 0
+      ? YAML.stringify(options)
+      : "- option one\n- option two";
+    setEditGroupYaml(yamlContent);
+    setEditGroupError(null);
+    setEditGroupDialogOpen(true);
+  };
+
+  const handleSaveGroup = async () => {
+    if (!editingGroup) return;
+    setEditGroupError(null);
+
+    const trimmedName = editGroupName.trim();
+    if (!trimmedName) {
+      setEditGroupError("Wildcard name cannot be empty");
+      return;
+    }
+
+    try {
+      const parsed = YAML.parse(editGroupYaml);
+      if (!Array.isArray(parsed)) {
+        setEditGroupError("Content must be a YAML list (array)");
+        return;
+      }
+      // Ensure all items are strings
+      const options = parsed.map((item) => String(item));
+
+      // If name changed, rename first then update options
+      if (trimmedName !== editingGroup.name) {
+        await renamePromptGroup(editingGroup.name, trimmedName);
+        await updatePromptGroup(trimmedName, options);
+      } else {
+        await updatePromptGroup(editingGroup.name, options);
+      }
+
+      setEditGroupDialogOpen(false);
+      setEditingGroup(null);
+      setEditGroupName("");
+      setEditGroupYaml("");
+    } catch (e) {
+      setEditGroupError(e instanceof Error ? e.message : "Invalid YAML");
+    }
+  };
+
   const folderName = libraryHome ? getLastPathSegment(libraryHome) : null;
 
   return (
@@ -270,6 +344,30 @@ export function WorkspaceSidebar() {
           </Button>
         </div>
       </div>
+
+      {/* View Mode Toggle */}
+      {libraryHome && (
+        <div className="flex px-3 pb-2 gap-1">
+          <Button
+            variant={sidebarViewMode === "templates" ? "secondary" : "ghost"}
+            size="sm"
+            className="flex-1 h-7 text-xs"
+            onClick={() => setSidebarViewMode("templates")}
+          >
+            <FileText className="h-3 w-3 mr-1" />
+            Templates
+          </Button>
+          <Button
+            variant={sidebarViewMode === "wildcards" ? "secondary" : "ghost"}
+            size="sm"
+            className="flex-1 h-7 text-xs"
+            onClick={() => setSidebarViewMode("wildcards")}
+          >
+            <Braces className="h-3 w-3 mr-1" />
+            Wildcards
+          </Button>
+        </div>
+      )}
 
       <Separator />
 
@@ -327,77 +425,124 @@ export function WorkspaceSidebar() {
                       </Button>
                     </div>
 
-                    {/* Templates (when expanded and loaded) */}
+                    {/* Expanded library content */}
                     {isExpanded && isActive && (
                       <div className="ml-6 mt-1 space-y-0.5">
-                        {activeLibrary.templates.map((template) => (
-                          <div
-                            key={template.id}
-                            onClick={() => selectTemplate(template.id)}
-                            className={cn(
-                              "group/template flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm transition-colors cursor-pointer",
-                              "hover:bg-accent hover:text-accent-foreground",
-                              selectedTemplateId === template.id &&
-                                "bg-primary/10 text-primary"
-                            )}
-                          >
-                            <FileText className="h-3.5 w-3.5 shrink-0" />
-                            <span className="flex-1 truncate">{template.name}</span>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5 opacity-0 group-hover/template:opacity-100"
-                              onClick={(e) => confirmDeleteTemplate(template.id, e)}
+                        {/* Templates view */}
+                        {sidebarViewMode === "templates" && (
+                          <>
+                            {activeLibrary.templates.map((template) => (
+                              <div
+                                key={template.id}
+                                onClick={() => selectTemplate(template.id)}
+                                className={cn(
+                                  "group/template flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm transition-colors cursor-pointer",
+                                  "hover:bg-accent hover:text-accent-foreground",
+                                  selectedTemplateId === template.id &&
+                                  "bg-primary/10 text-primary"
+                                )}
+                              >
+                                <FileText className="h-3.5 w-3.5 shrink-0" />
+                                <span className="flex-1 truncate">{template.name}</span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5 opacity-0 group-hover/template:opacity-100"
+                                  onClick={(e) => confirmDeleteTemplate(template.id, e)}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ))}
+                            {/* Add template button */}
+                            <button
+                              onClick={() => setNewTemplateDialogOpen(true)}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
                             >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        ))}
-                        {/* Add template button */}
-                        <button
-                          onClick={() => setNewTemplateDialogOpen(true)}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-                        >
-                          <Plus className="h-3.5 w-3.5 shrink-0" />
-                          <span>New template</span>
-                        </button>
-
-                        {/* Prompt Groups (Wildcards) */}
-                        {Object.keys(activeLibrary.wildcards).length > 0 && (
-                          <div className="mt-3 pt-2 border-t border-border/50">
-                            <p className="px-2 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                              Wildcards
-                            </p>
-                          </div>
+                              <Plus className="h-3.5 w-3.5 shrink-0" />
+                              <span>New template</span>
+                            </button>
+                          </>
                         )}
-                        {Object.entries(activeLibrary.wildcards).map(([name, options]) => (
-                          <div
-                            key={name}
-                            className="group/group flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                          >
-                            <Braces className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            <span className="flex-1 truncate">{name}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {options.length}
-                            </span>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5 opacity-0 group-hover/group:opacity-100"
-                              onClick={(e) => confirmDeleteGroup(name, e)}
+
+                        {/* Wildcards view */}
+                        {sidebarViewMode === "wildcards" && (
+                          <>
+                            {Object.entries(activeLibrary.wildcards).map(([name, options]) => {
+                              const isWildcardExpanded = expandedWildcards.has(name);
+                              return (
+                                <div key={name}>
+                                  <div
+                                    className="group/group flex w-full items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors hover:bg-accent hover:text-accent-foreground cursor-pointer"
+                                    onClick={(e) => toggleWildcardExpanded(name, e)}
+                                  >
+                                    {isWildcardExpanded ? (
+                                      <ChevronDown className="h-3 w-3 shrink-0" />
+                                    ) : (
+                                      <ChevronRight className="h-3 w-3 shrink-0" />
+                                    )}
+                                    <AtSign className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                    <span className="flex-1 truncate">{name}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {options.length}
+                                    </span>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-5 w-5 opacity-0 group-hover/group:opacity-100"
+                                      onClick={(e) => openEditGroupDialog(name, options, e)}
+                                      title="Edit wildcard"
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-5 w-5 opacity-0 group-hover/group:opacity-100"
+                                      onClick={(e) => confirmDeleteGroup(name, e)}
+                                      title="Delete wildcard"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                  {/* Expanded options */}
+                                  {isWildcardExpanded && (
+                                    <div className="ml-6 mt-0.5 space-y-0.5">
+                                      {options.length === 0 ? (
+                                        <p className="px-2 py-1 text-xs text-muted-foreground italic">
+                                          No options yet
+                                        </p>
+                                      ) : (
+                                        options.slice(0, 10).map((option, idx) => (
+                                          <div
+                                            key={idx}
+                                            className="px-2 py-0.5 text-xs text-muted-foreground truncate"
+                                            title={option}
+                                          >
+                                            {option}
+                                          </div>
+                                        ))
+                                      )}
+                                      {options.length > 10 && (
+                                        <p className="px-2 py-0.5 text-xs text-muted-foreground italic">
+                                          +{options.length - 10} more...
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {/* Add wildcard button */}
+                            <button
+                              onClick={() => setNewGroupDialogOpen(true)}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
                             >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        ))}
-                        {/* Add wildcard button */}
-                        <button
-                          onClick={() => setNewGroupDialogOpen(true)}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-                        >
-                          <Plus className="h-3.5 w-3.5 shrink-0" />
-                          <span>New wildcard</span>
-                        </button>
+                              <Plus className="h-3.5 w-3.5 shrink-0" />
+                              <span>New wildcard</span>
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
@@ -597,6 +742,61 @@ export function WorkspaceSidebar() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Edit Wildcard Dialog */}
+      <Dialog open={editGroupDialogOpen} onOpenChange={setEditGroupDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Wildcard</DialogTitle>
+            <DialogDescription>
+              Edit the name and options for this wildcard.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Name</label>
+              <Input
+                placeholder="Wildcard name"
+                value={editGroupName}
+                onChange={(e) => setEditGroupName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Options (YAML list)</label>
+              <Textarea
+                placeholder="- option1&#10;- option2&#10;- option3"
+                value={editGroupYaml}
+                onChange={(e) => setEditGroupYaml(e.target.value)}
+                className="min-h-[200px] font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Use YAML list format: each option starts with "- " on a new line.
+                Multi-line options can use "|" block scalar syntax.
+              </p>
+            </div>
+            {editGroupError && (
+              <p className="text-sm text-destructive">{editGroupError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEditGroupDialogOpen(false);
+                setEditingGroup(null);
+                setEditGroupName("");
+                setEditGroupYaml("");
+                setEditGroupError(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveGroup}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

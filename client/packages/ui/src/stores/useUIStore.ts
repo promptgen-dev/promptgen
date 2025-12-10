@@ -1,10 +1,14 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+export type SidebarViewMode = "templates" | "wildcards";
+
 interface UIState {
   // Sidebar
   sidebarWidth: number;
   setSidebarWidth: (width: number) => void;
+  sidebarViewMode: SidebarViewMode;
+  setSidebarViewMode: (mode: SidebarViewMode) => void;
 }
 
 const MIN_SIDEBAR_WIDTH = 180;
@@ -19,10 +23,15 @@ export const useUIStore = create<UIState>()(
         set({
           sidebarWidth: Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, width)),
         }),
+      sidebarViewMode: "templates" as SidebarViewMode,
+      setSidebarViewMode: (mode) => set({ sidebarViewMode: mode }),
     }),
     {
       name: "promptgen-ui-settings",
-      partialize: (state) => ({ sidebarWidth: state.sidebarWidth }),
+      partialize: (state) => ({
+        sidebarWidth: state.sidebarWidth,
+        sidebarViewMode: state.sidebarViewMode,
+      }),
     }
   )
 );
