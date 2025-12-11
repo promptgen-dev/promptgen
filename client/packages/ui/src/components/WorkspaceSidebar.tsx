@@ -14,6 +14,7 @@ import {
   SidebarHeader,
   ViewModeToggle,
   LibrarySelector,
+  SearchInput,
   TemplateList,
   VariableList,
   NoFolderSelected,
@@ -65,6 +66,9 @@ export function WorkspaceSidebar() {
   // Resize state
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Dialog state
   const [createLibraryDialogOpen, setCreateLibraryDialogOpen] = useState(false);
@@ -288,6 +292,7 @@ export function WorkspaceSidebar() {
             onSelectTemplate={selectTemplate}
             onEditTemplate={handleEditTemplate}
             onCreateTemplate={() => setCreateTemplateDialogOpen(true)}
+            searchQuery={searchQuery}
           />
         )}
         {sidebarViewMode === "variables" && (
@@ -295,6 +300,7 @@ export function WorkspaceSidebar() {
             variables={activeLibrary.wildcards}
             onEditVariable={handleEditVariable}
             onCreateVariable={() => setCreateVariableDialogOpen(true)}
+            searchQuery={searchQuery}
           />
         )}
       </div>
@@ -331,6 +337,14 @@ export function WorkspaceSidebar() {
           onViewModeChange={setSidebarViewMode}
           variablesCount={activeLibrary ? Object.keys(activeLibrary.wildcards).length : undefined}
           templatesCount={activeLibrary?.templates.length}
+        />
+      )}
+
+      {activeLibrary && (
+        <SearchInput
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder={sidebarViewMode === "variables" ? "Search (@group/option)" : "Search..."}
         />
       )}
 

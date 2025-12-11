@@ -1,6 +1,8 @@
+import { useMemo } from "react";
 import { FileText, Pencil, Plus } from "lucide-react";
 import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
+import { fuzzySearchTemplates } from "../../lib/fuzzySearch";
 import type { Template } from "@promptgen/backend";
 
 interface TemplateListProps {
@@ -9,6 +11,7 @@ interface TemplateListProps {
   onSelectTemplate: (id: string) => void;
   onEditTemplate: (id: string, name: string, e: React.MouseEvent) => void;
   onCreateTemplate: () => void;
+  searchQuery?: string;
 }
 
 export function TemplateList({
@@ -17,14 +20,15 @@ export function TemplateList({
   onSelectTemplate,
   onEditTemplate,
   onCreateTemplate,
+  searchQuery = "",
 }: TemplateListProps) {
-  const sortedTemplates = [...templates].sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
+  const filteredTemplates = useMemo(() => {
+    return fuzzySearchTemplates(templates, searchQuery);
+  }, [templates, searchQuery]);
 
   return (
     <>
-      {sortedTemplates.map((template) => (
+      {filteredTemplates.map((template) => (
         <div
           key={template.id}
           onClick={() => onSelectTemplate(template.id)}
@@ -47,6 +51,11 @@ export function TemplateList({
           </Button>
         </div>
       ))}
+      {filteredTemplates.length === 0 && searchQuery && (
+        <p className="px-2 py-4 text-xs text-muted-foreground text-center">
+          No templates match "{searchQuery}"
+        </p>
+      )}
       <button
         onClick={onCreateTemplate}
         className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"

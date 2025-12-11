@@ -1,6 +1,7 @@
 export { SidebarHeader } from "./SidebarHeader";
 export { ViewModeToggle } from "./ViewModeToggle";
 export { LibrarySelector } from "./LibrarySelector";
+export { SearchInput } from "./SearchInput";
 export { TemplateList } from "./TemplateList";
 export { VariableList } from "./VariableList";
 export {
