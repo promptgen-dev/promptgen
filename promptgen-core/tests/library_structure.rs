@@ -149,7 +149,7 @@ groups:
 // ============================================================================
 
 #[test]
-#[should_panic(expected = "duplicate group name")]
+#[should_panic(expected = "DuplicateGroupName")]
 fn duplicate_group_names_rejected() {
     // This should panic because the common::lib helper uses expect()
     lib(r#"

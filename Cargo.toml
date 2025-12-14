@@ -3,5 +3,10 @@ members = [
     "promptgen-cli",
     "promptgen-core",
     "client/apps/desktop/src-tauri",
+    "xtask",
 ]
 resolver = "3"
+
+# Alias for running xtask commands: cargo xtask <command>
+[workspace.metadata.scripts]
+xtask = "cargo run --package xtask --"

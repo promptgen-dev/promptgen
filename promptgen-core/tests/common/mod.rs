@@ -3,7 +3,8 @@
 #![allow(dead_code)]
 
 use promptgen_core::{
-    EvalContext, Library, PromptTemplate, RenderResult, parse_pack, parse_template, render,
+    EvalContext, Library, RenderResult, Workspace, WorkspaceBuilder, parse_pack, parse_template,
+    render,
 };
 
 // ============================================================================
@@ -30,6 +31,11 @@ pub fn lib(yaml: &str) -> Library {
     parse_pack(&full_yaml).expect("Test library YAML should be valid")
 }
 
+/// Create a workspace from a library.
+pub fn workspace(library: Library) -> Workspace {
+    WorkspaceBuilder::new().add_library(library).build()
+}
+
 /// Evaluate a template source against a library.
 pub fn eval(library: &Library, source: &str, seed: Option<u64>) -> RenderResult {
     eval_with_slots(library, source, &[], seed)
@@ -40,8 +46,9 @@ pub fn eval_template(library: &Library, name: &str, seed: Option<u64>) -> Render
     let template = library
         .find_template(name)
         .unwrap_or_else(|| panic!("Template '{}' should exist", name));
-    let mut ctx = EvalContext::with_seed(library, seed.unwrap_or(42));
-    render(template, &mut ctx).expect("Template should render")
+    let ws = workspace(library.clone());
+    let mut ctx = EvalContext::with_seed(&ws, seed.unwrap_or(42));
+    render(&template.ast, &mut ctx).expect("Template should render")
 }
 
 /// Evaluate a template source against a library with slot overrides.
@@ -52,10 +59,10 @@ pub fn eval_with_slots(
     seed: Option<u64>,
 ) -> RenderResult {
     let ast = parse_template(source).expect("Template should parse");
-    let template = PromptTemplate::new("test", ast);
-    let mut ctx = EvalContext::with_seed(library, seed.unwrap_or(42));
+    let ws = workspace(library.clone());
+    let mut ctx = EvalContext::with_seed(&ws, seed.unwrap_or(42));
     for (name, value) in slots {
         ctx.set_slot(*name, (*value).to_string());
     }
-    render(&template, &mut ctx).expect("Template should render")
+    render(&ast, &mut ctx).expect("Template should render")
 }
