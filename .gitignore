@@ -35,3 +35,8 @@ pnpm-debug.log*
 
 # Tauri
 client/apps/desktop/src-tauri/target/
+
+# Internal docs
+promptgen-docs/
+CLAUDE.md
+AGENTS.md
