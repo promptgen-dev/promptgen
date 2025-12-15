@@ -2,6 +2,13 @@
 members = [
     "promptgen-cli",
     "promptgen-core",
-    "client/apps/desktop/src-tauri",
+    "promptgen-ui",
 ]
 resolver = "3"
+
+[profile.release]
+opt-level = 2 # fast and small wasm
+
+# Optimize all dependencies even in debug builds
+[profile.dev.package."*"]
+opt-level = 2
