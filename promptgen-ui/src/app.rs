@@ -25,8 +25,8 @@ pub struct PromptGenApp {
 impl PromptGenApp {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Apply Catppuccin Mocha theme
-        theme::apply_theme(&cc.egui_ctx);
+        // Apply custom font sizes
+        theme::apply_font_sizes(&cc.egui_ctx);
 
         // Load previous app state (if any).
         let mut app: Self = if let Some(storage) = cc.storage {
@@ -94,6 +94,9 @@ impl eframe::App for PromptGenApp {
 
     /// Called each time the UI needs repainting.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Ensure custom font sizes are applied (theme switches may reset them)
+        theme::apply_font_sizes(ctx);
+
         // Top menu bar
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
