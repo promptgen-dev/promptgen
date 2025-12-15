@@ -174,14 +174,18 @@ fn unified_search_options_all_groups() {
 }
 
 #[test]
-fn unified_search_no_prefix_defaults_to_groups() {
+fn unified_search_no_prefix_defaults_to_options() {
     let ws = workspace(test_library());
-    let result = ws.search("Hair");
+    // Plain text search defaults to searching options across all groups
+    let result = ws.search("blonde");
     match result {
-        SearchResult::Groups(groups) => {
-            assert!(!groups.is_empty());
+        SearchResult::Options(options) => {
+            assert!(!options.is_empty());
+            // Should find "blonde hair" in Hair group
+            let hair_result = options.iter().find(|r| r.group_name == "Hair");
+            assert!(hair_result.is_some());
         }
-        SearchResult::Options(_) => panic!("Expected groups result"),
+        SearchResult::Groups(_) => panic!("Expected options result"),
     }
 }
 

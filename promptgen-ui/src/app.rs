@@ -271,47 +271,205 @@ impl PromptGenApp {
     }
 
     /// Render the variable (group) list with expandable options
+    ///
+    /// Supports advanced search syntax:
+    /// - `blue` - search all options across all groups
+    /// - `@Ey` - search group names only, show all options for matches
+    /// - `@Ey/bl` - search groups matching "Ey" that have options matching "bl"
+    /// - `@/bl` - search all options (same as plain search)
     fn render_variable_list(&mut self, ui: &mut egui::Ui) {
-        let Some(library) = self.state.selected_library() else {
+        if self.state.selected_library().is_none() {
             ui.label("No library selected");
-            return;
-        };
-
-        let search_query = self.state.search_query.to_lowercase();
-        let groups: Vec<_> = library
-            .groups
-            .iter()
-            .filter(|g| {
-                search_query.is_empty()
-                    || g.name.to_lowercase().contains(&search_query)
-                    || g.options.iter().any(|o| o.to_lowercase().contains(&search_query))
-            })
-            .collect();
-
-        if groups.is_empty() {
-            if search_query.is_empty() {
-                ui.label("No variables in this library");
-            } else {
-                ui.label("No matching variables");
-            }
             return;
         }
 
-        for group in groups {
-            let header_text = format!("@{} ({})", group.name, group.options.len());
+        let search_query = self.state.search_query.trim();
+
+        if search_query.is_empty() {
+            // No search - show all groups from selected library
+            self.render_all_variables(ui);
+        } else {
+            // Use workspace search with advanced syntax
+            let search_result = self.state.workspace.search(search_query);
+            self.render_search_results(ui, search_result);
+        }
+    }
+
+    /// Render all variables from the selected library (no search filter)
+    fn render_all_variables(&mut self, ui: &mut egui::Ui) {
+        let Some(library) = self.state.selected_library() else {
+            return;
+        };
+
+        if library.groups.is_empty() {
+            ui.label("No variables in this library");
+            return;
+        }
+
+        // Collect group data to avoid borrow issues
+        let groups: Vec<_> = library
+            .groups
+            .iter()
+            .map(|g| (g.name.clone(), g.options.clone()))
+            .collect();
+
+        for (name, options) in groups {
+            let header_text = format!("@{} ({})", name, options.len());
 
             egui::CollapsingHeader::new(&header_text)
                 .default_open(false)
                 .show(ui, |ui| {
-                    for option in &group.options {
-                        // Highlight matching text in search
-                        if !search_query.is_empty() && option.to_lowercase().contains(&search_query) {
-                            ui.colored_label(egui::Color32::from_rgb(166, 227, 161), format!("  • {}", option));
-                        } else {
-                            ui.label(format!("  • {}", option));
-                        }
+                    for option in &options {
+                        ui.label(format!("  • {}", option));
                     }
                 });
+        }
+    }
+
+    /// Create a LayoutJob that highlights matched characters in green
+    fn highlighted_text(text: &str, match_indices: &[usize], default_color: egui::Color32) -> egui::text::LayoutJob {
+        use egui::text::{LayoutJob, TextFormat};
+        use egui::FontId;
+
+        let highlight_color = egui::Color32::from_rgb(166, 227, 161); // Catppuccin green
+        let mut job = LayoutJob::default();
+
+        let chars: Vec<char> = text.chars().collect();
+        let match_set: std::collections::HashSet<usize> = match_indices.iter().copied().collect();
+
+        let mut i = 0;
+        while i < chars.len() {
+            // Find a run of same-colored characters
+            let is_highlighted = match_set.contains(&i);
+            let start = i;
+
+            while i < chars.len() && match_set.contains(&i) == is_highlighted {
+                i += 1;
+            }
+
+            // Collect the substring
+            let substring: String = chars[start..i].iter().collect();
+            let color = if is_highlighted { highlight_color } else { default_color };
+
+            job.append(
+                &substring,
+                0.0,
+                TextFormat {
+                    font_id: FontId::default(),
+                    color,
+                    ..Default::default()
+                },
+            );
+        }
+
+        job
+    }
+
+    /// Render search results using the workspace search
+    fn render_search_results(&mut self, ui: &mut egui::Ui, result: promptgen_core::SearchResult) {
+        use promptgen_core::SearchResult;
+
+        let default_color = ui.visuals().text_color();
+
+        match result {
+            SearchResult::Groups(groups) => {
+                if groups.is_empty() {
+                    ui.label("No matching variables");
+                    return;
+                }
+
+                for group in groups {
+                    // Create highlighted header with match indices
+                    let prefix = "@";
+                    let suffix = format!(" ({})", group.options.len());
+
+                    let header_job = {
+                        use egui::text::{LayoutJob, TextFormat};
+                        use egui::FontId;
+
+                        let mut job = LayoutJob::default();
+
+                        // Add prefix "@"
+                        job.append(prefix, 0.0, TextFormat {
+                            font_id: FontId::default(),
+                            color: default_color,
+                            ..Default::default()
+                        });
+
+                        // Add highlighted group name
+                        let name_job = Self::highlighted_text(&group.group_name, &group.match_indices, default_color);
+                        for section in name_job.sections {
+                            job.append(&name_job.text[section.byte_range.clone()], 0.0, section.format);
+                        }
+
+                        // Add suffix with count
+                        job.append(&suffix, 0.0, TextFormat {
+                            font_id: FontId::default(),
+                            color: default_color,
+                            ..Default::default()
+                        });
+
+                        job
+                    };
+
+                    // Auto-expand when searching
+                    egui::CollapsingHeader::new(header_job)
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            for option in &group.options {
+                                ui.label(format!("  • {}", option));
+                            }
+                        });
+                }
+            }
+            SearchResult::Options(option_results) => {
+                if option_results.is_empty() {
+                    ui.label("No matching options");
+                    return;
+                }
+
+                for result in option_results {
+                    let match_count = result.matches.len();
+                    let header_text = format!("@{} ({} match{})",
+                        result.group_name,
+                        match_count,
+                        if match_count == 1 { "" } else { "es" }
+                    );
+
+                    // Auto-expand when searching options
+                    egui::CollapsingHeader::new(&header_text)
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            for opt_match in &result.matches {
+                                // Create highlighted option text
+                                let bullet = "  • ";
+                                let option_job = {
+                                    use egui::text::{LayoutJob, TextFormat};
+                                    use egui::FontId;
+
+                                    let mut job = LayoutJob::default();
+
+                                    // Add bullet prefix
+                                    job.append(bullet, 0.0, TextFormat {
+                                        font_id: FontId::default(),
+                                        color: default_color,
+                                        ..Default::default()
+                                    });
+
+                                    // Add highlighted option text
+                                    let text_job = Self::highlighted_text(&opt_match.text, &opt_match.match_indices, default_color);
+                                    for section in text_job.sections {
+                                        job.append(&text_job.text[section.byte_range.clone()], 0.0, section.format);
+                                    }
+
+                                    job
+                                };
+
+                                ui.label(option_job);
+                            }
+                        });
+                }
+            }
         }
     }
 

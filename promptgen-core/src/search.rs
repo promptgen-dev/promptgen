@@ -205,10 +205,10 @@ impl Workspace {
     /// Unified search with syntax parsing.
     ///
     /// Supports the following query syntax:
-    /// - `@group` or `@group_query` - Search for groups
-    /// - `@group/option` - Search for options within a specific group
-    /// - `@/option` - Search for options across all groups
-    /// - Plain text without `@` prefix - Search for groups (default)
+    /// - Plain text (e.g., `blue`) - Search options across all groups
+    /// - `@group` or `@group_query` - Search for groups by name, show all options
+    /// - `@group/option` - Search for options within groups matching "group"
+    /// - `@/option` - Search for options across all groups (same as plain text)
     ///
     /// # Example
     ///
@@ -220,13 +220,16 @@ impl Workspace {
     ///     .add_library(Library::new("My Library"))
     ///     .build();
     ///
-    /// // Search groups
+    /// // Search options across all groups
+    /// let results = workspace.search("blue");
+    ///
+    /// // Search groups by name
     /// let results = workspace.search("@hair");
     ///
-    /// // Search options in a specific group
+    /// // Search options in groups matching "Hair"
     /// let results = workspace.search("@Hair/blonde");
     ///
-    /// // Search options across all groups
+    /// // Search options across all groups (same as plain text)
     /// let results = workspace.search("@/blue");
     /// ```
     pub fn search(&self, query: &str) -> SearchResult {
@@ -234,25 +237,96 @@ impl Workspace {
 
         // Check if query starts with @
         if let Some(rest) = query.strip_prefix('@') {
-            // Check for / to determine if searching options
+            // Check for / to determine if searching options within a group
             if let Some(slash_pos) = rest.find('/') {
                 let group_part = &rest[..slash_pos];
                 let option_part = &rest[slash_pos + 1..];
 
                 if group_part.is_empty() {
-                    // @/option - search all options
+                    // @/option - search all options (same as plain text)
                     SearchResult::Options(self.search_options(option_part, None))
                 } else {
-                    // @group/option - search options in specific group
-                    SearchResult::Options(self.search_options(option_part, Some(group_part)))
+                    // @group/option - search options in groups matching group_part
+                    // First find matching groups, then search their options
+                    SearchResult::Options(self.search_options_in_matching_groups(group_part, option_part))
                 }
             } else {
-                // @group - search groups
+                // @group - search groups by name
                 SearchResult::Groups(self.search_groups(rest))
             }
         } else {
-            // No @ prefix - default to group search
-            SearchResult::Groups(self.search_groups(query))
+            // No @ prefix - search options across all groups
+            SearchResult::Options(self.search_options(query, None))
         }
+    }
+
+    /// Search for options within groups that match a fuzzy group filter.
+    ///
+    /// This is used for the `@group/option` syntax where we first fuzzy-match
+    /// group names, then search for options within those matched groups.
+    pub fn search_options_in_matching_groups(
+        &self,
+        group_query: &str,
+        option_query: &str,
+    ) -> Vec<OptionSearchResult> {
+        let group_matcher = SkimMatcherV2::default().ignore_case();
+        let option_matcher = SkimMatcherV2::default().ignore_case();
+        let group_query = group_query.trim();
+        let option_query = option_query.trim();
+
+        let mut results = Vec::new();
+
+        for library in self.libraries() {
+            for group in &library.groups {
+                let group_name = &group.name;
+
+                // First check if the group name matches the group query
+                let group_matches = group_query.is_empty()
+                    || group_matcher.fuzzy_match(group_name, group_query).is_some();
+
+                if !group_matches {
+                    continue;
+                }
+
+                // Now search options within this matching group
+                let mut matches = Vec::new();
+
+                for option in &group.options {
+                    if option_query.is_empty() {
+                        matches.push(OptionMatch {
+                            text: option.clone(),
+                            score: 0,
+                            match_indices: vec![],
+                        });
+                    } else if let Some((score, indices)) = option_matcher.fuzzy_indices(option, option_query) {
+                        matches.push(OptionMatch {
+                            text: option.clone(),
+                            score,
+                            match_indices: indices,
+                        });
+                    }
+                }
+
+                if !matches.is_empty() {
+                    matches.sort_by(|a, b| b.score.cmp(&a.score));
+
+                    results.push(OptionSearchResult {
+                        library_id: library.id.clone(),
+                        library_name: library.name.clone(),
+                        group_name: group_name.to_string(),
+                        matches,
+                    });
+                }
+            }
+        }
+
+        // Sort result groups by their best match score
+        results.sort_by(|a, b| {
+            let a_best = a.matches.first().map(|m| m.score).unwrap_or(0);
+            let b_best = b.matches.first().map(|m| m.score).unwrap_or(0);
+            b_best.cmp(&a_best)
+        });
+
+        results
     }
 }
