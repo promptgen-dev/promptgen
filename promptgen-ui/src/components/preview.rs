@@ -11,27 +11,6 @@ impl PreviewPanel {
         ui.heading("Preview");
         ui.separator();
 
-        // Show parse result info (if there's content)
-        if !state.editor_content.is_empty() {
-            if let Some(result) = &state.parse_result {
-                if result.errors.is_empty() {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(166, 227, 161), // Catppuccin green
-                        "✓ Valid template",
-                    );
-                } else {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(243, 139, 168), // Catppuccin red
-                        format!("✗ {} error(s)", result.errors.len()),
-                    );
-                    for error in &result.errors {
-                        ui.label(format!("  • {}", error.message));
-                    }
-                }
-            }
-            ui.add_space(8.0);
-        }
-
         // Slot inputs section
         let slots = state.get_current_slots();
         if !slots.is_empty() {

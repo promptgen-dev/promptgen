@@ -2,6 +2,7 @@
 
 mod app;
 mod components;
+mod highlighting;
 mod state;
 mod theme;
 
