@@ -44,7 +44,7 @@ export function VariableList({
     });
   };
 
-  // Parse and filter variables using fuse.js
+  // Parse and filter variables using WASM fuzzy search
   const filteredVariables = useMemo((): FilteredVariable[] => {
     const query = parseVariableQuery(searchQuery);
     return filterVariables(variables, query);

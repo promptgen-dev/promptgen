@@ -17,6 +17,9 @@ importers:
       '@promptgen/backend':
         specifier: workspace:*
         version: link:../../packages/backend
+      '@promptgen/core-wasm':
+        specifier: workspace:*
+        version: link:../../packages/core-wasm
       '@promptgen/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -80,8 +83,13 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7
 
+  packages/core-wasm: {}
+
   packages/ui:
     dependencies:
+      '@promptgen/core-wasm':
+        specifier: workspace:*
+        version: link:../core-wasm
       '@radix-ui/react-alert-dialog':
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
@@ -115,9 +123,6 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      fuse.js:
-        specifier: ^7.1.0
-        version: 7.1.0
       lucide-react:
         specifier: ^0.556.0
         version: 0.556.0(react@19.2.1)
@@ -1221,10 +1226,6 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
-
-  fuse.js@7.1.0:
-    resolution: {integrity: sha512-trLf4SzuuUxfusZADLINj+dE8clK1frKdmqiJNb1Es75fmI5oY6X2mxLVUciLLjxqw/xr72Dhy+lER6dGd02FQ==}
-    engines: {node: '>=10'}
 
   gensync@1.0.0-beta.2:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
@@ -2498,8 +2499,6 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
-
-  fuse.js@7.1.0: {}
 
   gensync@1.0.0-beta.2: {}
 

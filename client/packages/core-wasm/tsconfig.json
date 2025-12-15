@@ -3,5 +3,5 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["src", "../backend/src", "../core-wasm/src"]
+  "include": ["src"]
 }

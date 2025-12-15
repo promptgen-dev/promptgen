@@ -22,7 +22,9 @@
       "@promptgen/ui": ["./packages/ui/src"],
       "@promptgen/ui/*": ["./packages/ui/src/*"],
       "@promptgen/backend": ["./packages/backend/src"],
-      "@promptgen/backend/*": ["./packages/backend/src/*"]
+      "@promptgen/backend/*": ["./packages/backend/src/*"],
+      "@promptgen/core-wasm": ["./packages/core-wasm/src"],
+      "@promptgen/core-wasm/*": ["./packages/core-wasm/src/*"]
     }
   }
 }

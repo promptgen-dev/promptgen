@@ -6,8 +6,10 @@
       "@promptgen/ui": ["../../packages/ui/src"],
       "@promptgen/ui/*": ["../../packages/ui/src/*"],
       "@promptgen/backend": ["../../packages/backend/src"],
-      "@promptgen/backend/*": ["../../packages/backend/src/*"]
+      "@promptgen/backend/*": ["../../packages/backend/src/*"],
+      "@promptgen/core-wasm": ["../../packages/core-wasm/src"],
+      "@promptgen/core-wasm/*": ["../../packages/core-wasm/src/*"]
     }
   },
-  "include": ["src", "../../packages/ui/src", "../../packages/backend/src"]
+  "include": ["src", "../../packages/ui/src", "../../packages/backend/src", "../../packages/core-wasm/src"]
 }

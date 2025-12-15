@@ -1,0 +1,32 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_wasmworkspace_free: (a: number, b: number) => void;
+export const __wbg_wasmworkspacebuilder_free: (a: number, b: number) => void;
+export const parseTemplateSource: (a: number, b: number) => [number, number, number];
+export const wasmworkspace_getCompletions: (a: number, b: number, c: number, d: number) => [number, number, number];
+export const wasmworkspace_getGroupNames: (a: number, b: number, c: number) => [number, number, number];
+export const wasmworkspace_getLibraryIds: (a: number) => [number, number];
+export const wasmworkspace_getReferences: (a: number, b: number, c: number) => [number, number, number];
+export const wasmworkspace_getSlots: (a: number, b: number, c: number) => [number, number, number, number];
+export const wasmworkspace_new: () => number;
+export const wasmworkspace_parseTemplate: (a: number, b: number, c: number) => [number, number, number];
+export const wasmworkspace_render: (a: number, b: number, c: number, d: any, e: number, f: bigint) => [number, number, number];
+export const wasmworkspace_search: (a: number, b: number, c: number) => [number, number, number];
+export const wasmworkspace_searchGroups: (a: number, b: number, c: number) => [number, number, number];
+export const wasmworkspace_searchOptions: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+export const wasmworkspace_withLibrary: (a: number, b: any) => [number, number, number];
+export const wasmworkspace_withoutLibrary: (a: number, b: number, c: number) => number;
+export const wasmworkspacebuilder_addLibrary: (a: number, b: any) => [number, number, number];
+export const wasmworkspacebuilder_build: (a: number) => number;
+export const init: () => void;
+export const wasmworkspacebuilder_new: () => number;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_exn_store: (a: number) => void;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __externref_table_dealloc: (a: number) => void;
+export const __externref_drop_slice: (a: number, b: number) => void;
+export const __wbindgen_start: () => void;

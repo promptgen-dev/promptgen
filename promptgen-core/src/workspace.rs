@@ -10,6 +10,8 @@
 
 use std::rc::Rc;
 
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -108,10 +110,10 @@ impl Workspace {
         let mut groups = Vec::new();
 
         for lib in &self.libraries {
-            if let Some(id) = library_id {
-                if lib.id != id {
-                    continue;
-                }
+            if let Some(id) = library_id
+                && lib.id != id
+            {
+                continue;
             }
 
             for group in &lib.groups {
@@ -185,10 +187,10 @@ impl Workspace {
         let mut errors = Vec::new();
 
         for (node, span) in &ast.nodes {
-            if let Node::LibraryRef(lib_ref) = node {
-                if let Err(e) = self.validate_reference(lib_ref, span.clone()) {
-                    errors.push(e);
-                }
+            if let Node::LibraryRef(lib_ref) = node
+                && let Err(e) = self.validate_reference(lib_ref, span.clone())
+            {
+                errors.push(e);
             }
         }
 
@@ -282,20 +284,20 @@ impl Workspace {
         let mut best_match: Option<(&str, &str, usize)> = None;
 
         for lib in &self.libraries {
-            if let Some(lib_name) = library_name {
-                if lib.name != lib_name {
-                    continue;
-                }
+            if let Some(lib_name) = library_name
+                && lib.name != lib_name
+            {
+                continue;
             }
 
             for group in &lib.groups {
                 let group_lower = group.name.to_lowercase();
                 let dist = levenshtein_distance(&group_lower, &name_lower);
 
-                if dist <= 3 {
-                    if best_match.is_none() || dist < best_match.unwrap().2 {
-                        best_match = Some((&lib.name, &group.name, dist));
-                    }
+                if dist <= 3
+                    && (best_match.is_none() || dist < best_match.unwrap().2)
+                {
+                    best_match = Some((&lib.name, &group.name, dist));
                 }
             }
         }
@@ -336,8 +338,7 @@ impl Workspace {
             let after_at = &before_cursor[at_pos + 1..];
 
             // Check for quoted reference with library
-            if after_at.starts_with('"') {
-                let content = &after_at[1..];
+            if let Some(content) = after_at.strip_prefix('"') {
                 if let Some(colon_pos) = content.find(':') {
                     // After @"LibName:
                     let library_name = content[..colon_pos].to_string();
@@ -384,28 +385,42 @@ impl Workspace {
 
     /// Complete group references after @.
     fn complete_group_reference(&self, prefix: &str, in_quotes: bool) -> Vec<CompletionItem> {
-        let prefix_lower = prefix.to_lowercase();
-        let mut completions = Vec::new();
+        let matcher = SkimMatcherV2::default().ignore_case();
+        let prefix = prefix.trim();
+        let mut scored_completions: Vec<(i64, CompletionItem)> = Vec::new();
 
         for lib in &self.libraries {
             // If multiple libraries, also suggest library names
             if self.libraries.len() > 1 && in_quotes {
-                let lib_name_lower = lib.name.to_lowercase();
-                if lib_name_lower.starts_with(&prefix_lower) || prefix.is_empty() {
-                    completions.push(CompletionItem {
-                        label: format!("{}:", lib.name),
-                        kind: CompletionKind::Library,
-                        detail: Some(format!("{} groups", lib.groups.len())),
-                        insert_text: format!("{}:", lib.name),
-                        library_id: Some(lib.id.clone()),
-                    });
+                let score = if prefix.is_empty() {
+                    Some(0)
+                } else {
+                    matcher.fuzzy_match(&lib.name, prefix)
+                };
+
+                if let Some(score) = score {
+                    scored_completions.push((
+                        score,
+                        CompletionItem {
+                            label: format!("{}:", lib.name),
+                            kind: CompletionKind::Library,
+                            detail: Some(format!("{} groups", lib.groups.len())),
+                            insert_text: format!("{}:", lib.name),
+                            library_id: Some(lib.id.clone()),
+                        },
+                    ));
                 }
             }
 
             // Suggest groups
             for group in &lib.groups {
-                let group_lower = group.name.to_lowercase();
-                if group_lower.starts_with(&prefix_lower) || prefix.is_empty() {
+                let score = if prefix.is_empty() {
+                    Some(0)
+                } else {
+                    matcher.fuzzy_match(&group.name, prefix)
+                };
+
+                if let Some(score) = score {
                     let insert_text = if group.name.contains(' ') || in_quotes {
                         if self.libraries.len() > 1 {
                             format!("\"{}:{}\"", lib.name, group.name)
@@ -416,48 +431,63 @@ impl Workspace {
                         group.name.clone()
                     };
 
-                    completions.push(CompletionItem {
-                        label: group.name.clone(),
-                        kind: CompletionKind::Group,
-                        detail: Some(format!("{} options", group.options.len())),
-                        insert_text,
-                        library_id: Some(lib.id.clone()),
-                    });
+                    scored_completions.push((
+                        score,
+                        CompletionItem {
+                            label: group.name.clone(),
+                            kind: CompletionKind::Group,
+                            detail: Some(format!("{} options", group.options.len())),
+                            insert_text,
+                            library_id: Some(lib.id.clone()),
+                        },
+                    ));
                 }
             }
         }
 
-        completions
+        // Sort by score descending (highest first)
+        scored_completions.sort_by(|a, b| b.0.cmp(&a.0));
+        scored_completions.into_iter().map(|(_, item)| item).collect()
     }
 
     /// Complete groups within a specific library.
     fn complete_qualified_group(&self, library_name: &str, prefix: &str) -> Vec<CompletionItem> {
-        let prefix_lower = prefix.to_lowercase();
-        let mut completions = Vec::new();
+        let matcher = SkimMatcherV2::default().ignore_case();
+        let prefix = prefix.trim();
+        let mut scored_completions: Vec<(i64, CompletionItem)> = Vec::new();
 
         if let Some(lib) = self.get_library_by_name(library_name) {
             for group in &lib.groups {
-                let group_lower = group.name.to_lowercase();
-                if group_lower.starts_with(&prefix_lower) || prefix.is_empty() {
-                    completions.push(CompletionItem {
-                        label: group.name.clone(),
-                        kind: CompletionKind::Group,
-                        detail: Some(format!("{} options", group.options.len())),
-                        insert_text: format!("{}\"", group.name), // Close the quote
-                        library_id: Some(lib.id.clone()),
-                    });
+                let score = if prefix.is_empty() {
+                    Some(0)
+                } else {
+                    matcher.fuzzy_match(&group.name, prefix)
+                };
+
+                if let Some(score) = score {
+                    scored_completions.push((
+                        score,
+                        CompletionItem {
+                            label: group.name.clone(),
+                            kind: CompletionKind::Group,
+                            detail: Some(format!("{} options", group.options.len())),
+                            insert_text: format!("{}\"", group.name), // Close the quote
+                            library_id: Some(lib.id.clone()),
+                        },
+                    ));
                 }
             }
         }
 
-        completions
+        // Sort by score descending (highest first)
+        scored_completions.sort_by(|a, b| b.0.cmp(&a.0));
+        scored_completions.into_iter().map(|(_, item)| item).collect()
     }
 
     /// Complete inside inline options.
     fn complete_in_options(&self, prefix: &str) -> Vec<CompletionItem> {
         // If prefix starts with @, complete references
-        if prefix.starts_with('@') {
-            let ref_prefix = &prefix[1..];
+        if let Some(ref_prefix) = prefix.strip_prefix('@') {
             return self.complete_group_reference(ref_prefix, false);
         }
 
@@ -470,10 +500,10 @@ impl Workspace {
         let mut slots = Vec::new();
 
         for (node, _span) in &ast.nodes {
-            if let Node::Slot(name) = node {
-                if !slots.contains(name) {
-                    slots.push(name.clone());
-                }
+            if let Node::Slot(name) = node
+                && !slots.contains(name)
+            {
+                slots.push(name.clone());
             }
         }
 
@@ -668,11 +698,11 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
 
     let mut matrix = vec![vec![0usize; b_len + 1]; a_len + 1];
 
-    for i in 0..=a_len {
-        matrix[i][0] = i;
+    for (i, row) in matrix.iter_mut().enumerate().take(a_len + 1) {
+        row[0] = i;
     }
-    for j in 0..=b_len {
-        matrix[0][j] = j;
+    for (j, val) in matrix[0].iter_mut().enumerate().take(b_len + 1) {
+        *val = j;
     }
 
     for i in 1..=a_len {

@@ -211,6 +211,43 @@ impl WasmWorkspace {
         let groups = self.inner.group_names(library_id.as_deref());
         Ok(serde_wasm_bindgen::to_value(&groups)?)
     }
+
+    /// Search for groups matching the query across all libraries.
+    ///
+    /// Returns all groups if query is empty. Results are sorted by score (highest first).
+    /// Search is case-insensitive.
+    #[wasm_bindgen(js_name = searchGroups)]
+    pub fn search_groups(&self, query: &str) -> Result<JsValue, JsError> {
+        let results = self.inner.search_groups(query);
+        Ok(serde_wasm_bindgen::to_value(&results)?)
+    }
+
+    /// Search for options matching the query, optionally filtered to a specific group.
+    ///
+    /// Returns all options if query is empty. Results are sorted by best match score.
+    /// Search is case-insensitive.
+    #[wasm_bindgen(js_name = searchOptions)]
+    pub fn search_options(
+        &self,
+        query: &str,
+        group_filter: Option<String>,
+    ) -> Result<JsValue, JsError> {
+        let results = self.inner.search_options(query, group_filter.as_deref());
+        Ok(serde_wasm_bindgen::to_value(&results)?)
+    }
+
+    /// Unified search with syntax parsing.
+    ///
+    /// Supports the following query syntax:
+    /// - `@group` or `@group_query` - Search for groups
+    /// - `@group/option` - Search for options within a specific group
+    /// - `@/option` - Search for options across all groups
+    /// - Plain text without `@` prefix - Search for groups (default)
+    #[wasm_bindgen]
+    pub fn search(&self, query: &str) -> Result<JsValue, JsError> {
+        let result = self.inner.search(query);
+        Ok(serde_wasm_bindgen::to_value(&result)?)
+    }
 }
 
 impl Default for WasmWorkspace {

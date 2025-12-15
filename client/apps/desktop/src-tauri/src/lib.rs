@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use promptgen_core::{
     load_library as core_load_library, parse_template, render, save_library as core_save_library,
-    EvalContext, Library, ParseError, PromptTemplate,
+    EvalContext, Library, ParseError, PromptTemplate, WorkspaceBuilder,
 };
 
 // ============================================================================
@@ -478,9 +478,14 @@ fn render_template(
         .find(|t| t.id == input.template_id)
         .ok_or_else(|| format!("Template not found: {}", input.template_id))?;
 
+    // Create a workspace from the library for evaluation
+    let workspace = WorkspaceBuilder::new()
+        .add_library(library.clone())
+        .build();
+
     let mut ctx = match input.seed {
-        Some(seed) => EvalContext::with_seed(library, seed),
-        None => EvalContext::new(library),
+        Some(seed) => EvalContext::with_seed(&workspace, seed),
+        None => EvalContext::new(&workspace),
     };
 
     // Add slot bindings if provided
@@ -490,7 +495,7 @@ fn render_template(
         }
     }
 
-    match render(template, &mut ctx) {
+    match render(&template.ast, &mut ctx) {
         Ok(result) => Ok(RenderResultDto {
             success: true,
             output: Some(result.text),

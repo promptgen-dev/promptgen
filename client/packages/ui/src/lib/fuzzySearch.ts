@@ -1,12 +1,8 @@
-import Fuse, { type IFuseOptions } from "fuse.js";
-
-// Fuse.js options for fuzzy matching
-const defaultFuseOptions: IFuseOptions<string> = {
-  threshold: 0.4, // 0 = exact match, 1 = match anything
-  distance: 100,
-  includeScore: true,
-  includeMatches: true,
-};
+import {
+  WasmWorkspaceBuilder,
+  type GroupSearchResult,
+  type OptionSearchResult,
+} from "@promptgen/core-wasm";
 
 /**
  * Parse a variable search query.
@@ -54,24 +50,6 @@ export function parseVariableQuery(searchQuery: string): ParsedVariableQuery {
 }
 
 /**
- * Fuzzy search an array of strings
- */
-export function fuzzySearchStrings(
-  items: string[],
-  query: string,
-  options?: IFuseOptions<string>
-): Set<number> {
-  if (!query) {
-    return new Set();
-  }
-
-  const fuse = new Fuse(items, { ...defaultFuseOptions, ...options });
-  const results = fuse.search(query);
-
-  return new Set(results.map((r) => r.refIndex));
-}
-
-/**
  * Result of filtering variables
  */
 export interface FilteredVariable {
@@ -82,7 +60,25 @@ export interface FilteredVariable {
 }
 
 /**
- * Filter variables based on parsed query
+ * Create a temporary WASM workspace from variables for searching.
+ */
+function createSearchWorkspace(variables: Record<string, string[]>) {
+  const groups = Object.entries(variables).map(([name, options]) => ({
+    name,
+    options,
+  }));
+
+  return new WasmWorkspaceBuilder()
+    .addLibrary({
+      id: "search",
+      name: "Search",
+      groups,
+    })
+    .build();
+}
+
+/**
+ * Filter variables based on parsed query using WASM fuzzy search.
  */
 export function filterVariables(
   variables: Record<string, string[]>,
@@ -97,93 +93,112 @@ export function filterVariables(
     return entries.map(([name, options]) => ({
       name,
       options,
-      matchingOptionIndices: new Set(),
+      matchingOptionIndices: new Set<number>(),
       showAllOptions: true,
     }));
   }
 
-  switch (query.type) {
-    case "options": {
-      // Search all options across all groups
-      const results: FilteredVariable[] = [];
+  const workspace = createSearchWorkspace(variables);
 
-      for (const [name, options] of entries) {
-        const matchingIndices = fuzzySearchStrings(options, query.optionQuery);
-        if (matchingIndices.size > 0) {
-          results.push({
-            name,
+  try {
+    switch (query.type) {
+      case "options": {
+        // Search all options across all groups
+        const searchResults = workspace.searchOptions(
+          query.optionQuery,
+          null
+        ) as OptionSearchResult[];
+
+        return searchResults.map((result) => {
+          const options = variables[result.group_name] || [];
+          // Build set of matching indices from the option texts
+          const matchingIndices = new Set<number>();
+          for (const match of result.matches) {
+            const idx = options.indexOf(match.text);
+            if (idx !== -1) {
+              matchingIndices.add(idx);
+            }
+          }
+
+          return {
+            name: result.group_name,
             options,
             matchingOptionIndices: matchingIndices,
             showAllOptions: false,
-          });
-        }
+          };
+        });
       }
 
-      return results;
-    }
+      case "groups": {
+        // Search group names only, show all options
+        const searchResults = workspace.searchGroups(
+          query.groupQuery
+        ) as GroupSearchResult[];
 
-    case "groups": {
-      // Search group names only, show all options
-      const groupNames = entries.map(([name]) => name);
-      const matchingGroupIndices = fuzzySearchStrings(
-        groupNames,
-        query.groupQuery
-      );
-
-      return entries
-        .filter((_, idx) => matchingGroupIndices.has(idx))
-        .map(([name, options]) => ({
-          name,
-          options,
-          matchingOptionIndices: new Set(),
+        return searchResults.map((result) => ({
+          name: result.group_name,
+          options: result.options,
+          matchingOptionIndices: new Set<number>(),
           showAllOptions: true,
         }));
-    }
+      }
 
-    case "groups-with-options": {
-      // Search groups matching groupQuery that have options matching optionQuery
-      const groupNames = entries.map(([name]) => name);
-      const matchingGroupIndices = fuzzySearchStrings(
-        groupNames,
-        query.groupQuery
-      );
-
-      const results: FilteredVariable[] = [];
-
-      for (let i = 0; i < entries.length; i++) {
-        if (!matchingGroupIndices.has(i)) continue;
-
-        const [name, options] = entries[i];
+      case "groups-with-options": {
+        // First filter groups, then search options within those groups
+        const groupResults = workspace.searchGroups(
+          query.groupQuery
+        ) as GroupSearchResult[];
 
         if (!query.optionQuery) {
           // No option query - show all options for matching groups
-          results.push({
-            name,
-            options,
-            matchingOptionIndices: new Set(),
+          return groupResults.map((result) => ({
+            name: result.group_name,
+            options: result.options,
+            matchingOptionIndices: new Set<number>(),
             showAllOptions: true,
-          });
-        } else {
-          // Filter options within matching groups
-          const matchingIndices = fuzzySearchStrings(options, query.optionQuery);
-          if (matchingIndices.size > 0) {
+          }));
+        }
+
+        // Filter options within matching groups
+        const results: FilteredVariable[] = [];
+
+        for (const groupResult of groupResults) {
+          const optionResults = workspace.searchOptions(
+            query.optionQuery,
+            groupResult.group_name
+          ) as OptionSearchResult[];
+
+          if (optionResults.length > 0 && optionResults[0].matches.length > 0) {
+            const options = variables[groupResult.group_name] || [];
+            const matchingIndices = new Set<number>();
+
+            for (const match of optionResults[0].matches) {
+              const idx = options.indexOf(match.text);
+              if (idx !== -1) {
+                matchingIndices.add(idx);
+              }
+            }
+
             results.push({
-              name,
+              name: groupResult.group_name,
               options,
               matchingOptionIndices: matchingIndices,
               showAllOptions: false,
             });
           }
         }
-      }
 
-      return results;
+        return results;
+      }
     }
+  } finally {
+    // Clean up the WASM workspace
+    workspace.free();
   }
 }
 
 /**
- * Fuzzy search templates by name
+ * Fuzzy search templates by name using WASM search.
  */
 export function fuzzySearchTemplates<T extends { name: string }>(
   templates: T[],
@@ -193,14 +208,35 @@ export function fuzzySearchTemplates<T extends { name: string }>(
     return [...templates].sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  const fuseOptions: IFuseOptions<T> = {
-    threshold: 0.4,
-    distance: 100,
-    includeScore: true,
-    keys: ["name"],
-  };
+  // Create a workspace with template names as groups
+  // This is a workaround since we don't have a dedicated template search in WASM
+  const groups = templates.map((t, idx) => ({
+    name: t.name,
+    options: [String(idx)], // Store index as option
+  }));
 
-  const fuse = new Fuse(templates, fuseOptions);
-  const results = fuse.search(query.trim());
-  return results.map((r) => r.item);
+  const workspace = new WasmWorkspaceBuilder()
+    .addLibrary({
+      id: "templates",
+      name: "Templates",
+      groups,
+    })
+    .build();
+
+  try {
+    const results = workspace.searchGroups(query.trim()) as GroupSearchResult[];
+
+    // Map results back to templates
+    const matchedTemplates: T[] = [];
+    for (const result of results) {
+      const template = templates.find((t) => t.name === result.group_name);
+      if (template) {
+        matchedTemplates.push(template);
+      }
+    }
+
+    return matchedTemplates;
+  } finally {
+    workspace.free();
+  }
 }
