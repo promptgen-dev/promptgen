@@ -7,7 +7,7 @@ use crate::theme;
 use crate::storage::{NativeStorage, StorageBackend};
 
 /// Main application struct - implements eframe::App
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Default, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct PromptGenApp {
     /// Persisted workspace path
@@ -19,17 +19,6 @@ pub struct PromptGenApp {
     #[cfg(not(target_arch = "wasm32"))]
     #[serde(skip)]
     storage: NativeStorage,
-}
-
-impl Default for PromptGenApp {
-    fn default() -> Self {
-        Self {
-            workspace_path: None,
-            state: AppState::default(),
-            #[cfg(not(target_arch = "wasm32"))]
-            storage: NativeStorage::new(),
-        }
-    }
 }
 
 impl PromptGenApp {
@@ -97,12 +86,9 @@ impl PromptGenApp {
 
     /// Render the sidebar panel
     fn render_sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Workspace");
-        ui.separator();
-
-        // Show workspace path or "no workspace" message
+        // Workspace header with folder picker
         #[cfg(not(target_arch = "wasm32"))]
-        {
+        let open_dialog = {
             if let Some(path) = &self.workspace_path {
                 ui.horizontal(|ui| {
                     ui.label("📁");
@@ -111,74 +97,222 @@ impl PromptGenApp {
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_else(|| path.display().to_string());
                     ui.label(&folder_name);
-                });
-
-                if ui.button("Change...").clicked() {
-                    self.open_workspace_dialog();
-                }
+                    ui.small_button("...").clicked()
+                }).inner
             } else {
-                ui.label("No workspace selected");
-                ui.add_space(8.0);
-                if ui.button("Select Folder...").clicked() {
-                    self.open_workspace_dialog();
-                }
+                ui.button("Select Workspace...").clicked()
             }
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if open_dialog {
+            self.open_workspace_dialog();
         }
 
         #[cfg(target_arch = "wasm32")]
         {
-            ui.label("Web version - workspace selection coming soon");
+            ui.label("Web version");
         }
 
-        ui.add_space(16.0);
-        ui.separator();
+        ui.add_space(8.0);
 
-        // Library list
+        // Library selector (ComboBox)
         if !self.state.libraries.is_empty() {
-            ui.heading("Libraries");
+            let selected_name = self
+                .state
+                .selected_library()
+                .map(|lib| lib.name.clone())
+                .unwrap_or_else(|| "Select library...".to_string());
+
+            ui.horizontal(|ui| {
+                ui.label("Library:");
+                egui::ComboBox::from_id_salt("library_selector")
+                    .selected_text(&selected_name)
+                    .width(ui.available_width() - 8.0)
+                    .show_ui(ui, |ui| {
+                        for lib in &self.state.libraries {
+                            let is_selected = self.state.selected_library_id.as_ref() == Some(&lib.id);
+                            if ui.selectable_label(is_selected, &lib.name).clicked() {
+                                self.state.selected_library_id = Some(lib.id.clone());
+                            }
+                        }
+                    });
+            });
+
+            ui.add_space(8.0);
+
+            // View mode toggle (Templates / Variables)
+            ui.horizontal(|ui| {
+                use crate::state::SidebarViewMode;
+
+                if ui
+                    .selectable_label(
+                        self.state.sidebar_view_mode == SidebarViewMode::Templates,
+                        "Templates",
+                    )
+                    .clicked()
+                {
+                    self.state.sidebar_view_mode = SidebarViewMode::Templates;
+                }
+                if ui
+                    .selectable_label(
+                        self.state.sidebar_view_mode == SidebarViewMode::Variables,
+                        "Variables",
+                    )
+                    .clicked()
+                {
+                    self.state.sidebar_view_mode = SidebarViewMode::Variables;
+                }
+            });
+
             ui.add_space(4.0);
 
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let mut selected_id = self.state.selected_library_id.clone();
+            // Search input
+            ui.horizontal(|ui| {
+                ui.label("🔍");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.state.search_query)
+                        .hint_text("Search...")
+                        .desired_width(ui.available_width() - 24.0),
+                );
+                if !self.state.search_query.is_empty() && ui.small_button("✕").clicked() {
+                    self.state.search_query.clear();
+                }
+            });
 
-                    for lib in &self.state.libraries {
-                        let is_selected = selected_id.as_ref() == Some(&lib.id);
-                        let response = ui.selectable_label(is_selected, &lib.name);
+            ui.separator();
 
-                        if response.clicked() {
-                            selected_id = Some(lib.id.clone());
-                        }
-
-                        // Show library info on hover
-                        response.on_hover_ui(|ui| {
-                            ui.label(format!("ID: {}", lib.id));
-                            if !lib.description.is_empty() {
-                                ui.label(&lib.description);
-                            }
-                            ui.label(format!("{} groups", lib.groups.len()));
-                            ui.label(format!("{} templates", lib.templates.len()));
-                        });
-                    }
-
-                    self.state.selected_library_id = selected_id;
-                });
+            // Content list based on view mode
+            self.render_sidebar_content(ui);
         } else if self.workspace_path.is_some() {
-            ui.label("No libraries found in workspace");
+            ui.add_space(16.0);
+            ui.label("No libraries found");
             ui.add_space(4.0);
             ui.label("Add .yaml library files to your workspace folder");
+        } else {
+            ui.add_space(16.0);
+            ui.label("Select a workspace folder to get started");
         }
 
         // Footer
         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                ui.label("Powered by ");
-                ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-            });
             egui::warn_if_debug_build(ui);
         });
+    }
+
+    /// Render the sidebar content (templates or variables list)
+    fn render_sidebar_content(&mut self, ui: &mut egui::Ui) {
+        use crate::state::SidebarViewMode;
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                match self.state.sidebar_view_mode {
+                    SidebarViewMode::Templates => self.render_template_list(ui),
+                    SidebarViewMode::Variables => self.render_variable_list(ui),
+                }
+            });
+    }
+
+    /// Render the template list
+    fn render_template_list(&mut self, ui: &mut egui::Ui) {
+        let Some(library) = self.state.selected_library() else {
+            ui.label("No library selected");
+            return;
+        };
+
+        let search_query = self.state.search_query.to_lowercase();
+
+        // Collect template info we need, releasing the borrow on self.state
+        let templates: Vec<_> = library
+            .templates
+            .iter()
+            .filter(|t| {
+                search_query.is_empty()
+                    || t.name.to_lowercase().contains(&search_query)
+                    || t.description.to_lowercase().contains(&search_query)
+            })
+            .map(|t| (t.id.clone(), t.name.clone(), t.description.clone(), promptgen_core::template_to_source(&t.ast)))
+            .collect();
+
+        if templates.is_empty() {
+            if search_query.is_empty() {
+                ui.label("No templates in this library");
+            } else {
+                ui.label("No matching templates");
+            }
+            return;
+        }
+
+        let mut new_selected_id = self.state.selected_template_id.clone();
+        let mut load_template_source: Option<String> = None;
+
+        for (id, name, description, source) in &templates {
+            let is_selected = new_selected_id.as_ref() == Some(id);
+            let response = ui.selectable_label(is_selected, name);
+
+            if response.clicked() {
+                new_selected_id = Some(id.clone());
+                load_template_source = Some(source.clone());
+            }
+
+            if !description.is_empty() {
+                response.on_hover_text(description);
+            }
+        }
+
+        self.state.selected_template_id = new_selected_id;
+
+        // Apply template source after the loop (outside the borrow)
+        if let Some(source) = load_template_source {
+            self.state.editor_content = source;
+            self.state.update_parse_result();
+        }
+    }
+
+    /// Render the variable (group) list with expandable options
+    fn render_variable_list(&mut self, ui: &mut egui::Ui) {
+        let Some(library) = self.state.selected_library() else {
+            ui.label("No library selected");
+            return;
+        };
+
+        let search_query = self.state.search_query.to_lowercase();
+        let groups: Vec<_> = library
+            .groups
+            .iter()
+            .filter(|g| {
+                search_query.is_empty()
+                    || g.name.to_lowercase().contains(&search_query)
+                    || g.options.iter().any(|o| o.to_lowercase().contains(&search_query))
+            })
+            .collect();
+
+        if groups.is_empty() {
+            if search_query.is_empty() {
+                ui.label("No variables in this library");
+            } else {
+                ui.label("No matching variables");
+            }
+            return;
+        }
+
+        for group in groups {
+            let header_text = format!("@{} ({})", group.name, group.options.len());
+
+            egui::CollapsingHeader::new(&header_text)
+                .default_open(false)
+                .show(ui, |ui| {
+                    for option in &group.options {
+                        // Highlight matching text in search
+                        if !search_query.is_empty() && option.to_lowercase().contains(&search_query) {
+                            ui.colored_label(egui::Color32::from_rgb(166, 227, 161), format!("  • {}", option));
+                        } else {
+                            ui.label(format!("  • {}", option));
+                        }
+                    }
+                });
+        }
     }
 
     /// Render the preview panel
@@ -258,12 +392,12 @@ impl eframe::App for PromptGenApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Top menu bar
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     ui.menu_button("File", |ui| {
                         if ui.button("Open Workspace...").clicked() {
-                            ui.close_menu();
+                            ui.close();
                             self.open_workspace_dialog();
                         }
                         ui.separator();

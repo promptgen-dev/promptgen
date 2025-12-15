@@ -56,18 +56,17 @@ impl StorageBackend for NativeStorage {
                 let path = entry.path();
 
                 // Check for .yaml or .yml files
-                if path.is_file() {
-                    if let Some(ext) = path.extension() {
-                        if ext == "yaml" || ext == "yml" {
-                            // Try to load the library to get its info
-                            if let Ok(lib) = load_library(&path) {
-                                summaries.push(LibrarySummary {
-                                    id: lib.id.clone(),
-                                    name: lib.name.clone(),
-                                    path,
-                                });
-                            }
-                        }
+                if path.is_file()
+                    && let Some(ext) = path.extension()
+                    && (ext == "yaml" || ext == "yml")
+                {
+                    // Try to load the library to get its info
+                    if let Ok(lib) = load_library(&path) {
+                        summaries.push(LibrarySummary {
+                            id: lib.id.clone(),
+                            name: lib.name.clone(),
+                            path,
+                        });
                     }
                 }
             }

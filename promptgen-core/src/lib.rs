@@ -17,6 +17,7 @@ pub use eval::{ChosenOption, EvalContext, RenderError, RenderResult, render};
 #[cfg(feature = "serde")]
 pub use io::{
     IoError, load_library, load_pack, parse_pack, save_library, save_pack, serialize_pack,
+    template_to_source,
 };
 
 pub use library::{

@@ -140,7 +140,7 @@ impl From<&Library> for PackDto {
 }
 
 /// Reconstruct source text from a parsed template AST.
-fn template_to_source(template: &crate::ast::Template) -> String {
+pub fn template_to_source(template: &crate::ast::Template) -> String {
     let mut source = String::new();
 
     for (node, _span) in &template.nodes {
