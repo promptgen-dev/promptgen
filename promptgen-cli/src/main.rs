@@ -4,7 +4,7 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 use promptgen_core::{
-    EvalContext, Library, PromptTemplate, RenderError,
+    EvalContext, Library, PromptTemplate, RenderError, Workspace,
     io::parse_pack,
     parser::parse_template,
     render,
@@ -466,17 +466,20 @@ fn cmd_render(
         HashMap::new()
     };
 
+    // Create workspace with the library for evaluation
+    let workspace = Workspace::with_single_library(library);
+
     // Create evaluation context
     let mut ctx = match seed {
-        Some(s) => EvalContext::with_seed(&library, s),
-        None => EvalContext::new(&library),
+        Some(s) => EvalContext::with_seed(&workspace, s),
+        None => EvalContext::new(&workspace),
     };
     for (k, v) in slot_overrides {
         ctx.set_slot(&k, v);
     }
 
     // Render the template
-    let result = render(&tmpl, &mut ctx)?;
+    let result = render(&tmpl.ast, &mut ctx)?;
 
     match format {
         OutputFormat::Text => {

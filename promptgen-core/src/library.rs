@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::ast::{Node, Template};
 
-/// Generate a new CUID for use as an ID.
+/// Generate a new unique ID.
 pub fn new_id() -> String {
-    cuid::cuid1().expect("CUID generation should not fail")
+    cuid::cuid1().expect("failed to generate cuid")
 }
 
 /// Target engine hint for a template.

@@ -4,7 +4,9 @@ pub mod eval;
 pub mod io; // TODO: Commented out internally, needs update for new grammar
 pub mod library;
 pub mod parser;
+pub mod search;
 pub mod span;
+pub mod workspace;
 
 // Re-exports for convenience
 pub use ast::{LibraryRef, Node, OptionItem, Spanned, Template};
@@ -22,3 +24,12 @@ pub use library::{
 };
 pub use parser::{ParseError, parse_template};
 pub use span::Span;
+
+// Workspace exports
+pub use workspace::{
+    CompletionItem, CompletionKind, DiagnosticError, DiagnosticWarning, ErrorKind, GroupInfo,
+    ParseResult, ReferenceInfo, WarningKind, Workspace, WorkspaceBuilder,
+};
+
+// Search exports
+pub use search::{GroupSearchResult, OptionMatch, OptionSearchResult, SearchResult};
