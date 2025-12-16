@@ -15,7 +15,7 @@ use fuzzy_matcher::FuzzyMatcher;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::ast::{LibraryRef, Node, Template};
+use crate::ast::{LibraryRef, Node, SlotDefinition, Template};
 use crate::library::{Library, PromptGroup};
 use crate::parser::parse_template;
 use crate::span::Span;
@@ -504,6 +504,27 @@ impl Workspace {
                 let name = &slot_block.label.0;
                 if !slots.contains(name) {
                     slots.push(name.clone());
+                }
+            }
+        }
+
+        slots
+    }
+
+    /// Extract slot definitions from a parsed template.
+    /// Returns normalized SlotDefinition structs with full type information.
+    pub fn get_slot_definitions(&self, ast: &Template) -> Vec<SlotDefinition> {
+        let mut slots = Vec::new();
+        let mut seen_labels = std::collections::HashSet::new();
+
+        for (node, _span) in &ast.nodes {
+            if let Node::SlotBlock(slot_block) = node {
+                let label = &slot_block.label.0;
+                // Only include first occurrence of each slot label
+                if seen_labels.insert(label.clone()) {
+                    if let Ok(def) = slot_block.to_definition() {
+                        slots.push(def);
+                    }
                 }
             }
         }

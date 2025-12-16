@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use crate::state::{AppState, SidebarViewMode};
+use promptgen_core::Cardinality;
+
+use crate::state::{AppState, SidebarMode, SidebarViewMode};
 
 /// Sidebar panel for navigating libraries, templates, and variables.
 pub struct SidebarPanel;
@@ -62,6 +64,12 @@ impl SidebarPanel {
 
     /// Render the main sidebar content (shared between native and WASM).
     fn render_content(ui: &mut egui::Ui, state: &mut AppState, workspace_path: &Option<PathBuf>) {
+        // Check if we're in slot picker mode
+        if let SidebarMode::SlotPicker { slot_label } = &state.sidebar_mode {
+            Self::render_slot_picker(ui, state, slot_label.clone());
+            return;
+        }
+
         // Library selector (ComboBox)
         if !state.libraries.is_empty() {
             let selected_name = state
@@ -451,5 +459,97 @@ impl SidebarPanel {
                 }
             }
         }
+    }
+
+    /// Render the slot picker overlay for selecting options for a pick slot.
+    fn render_slot_picker(ui: &mut egui::Ui, state: &mut AppState, slot_label: String) {
+        // Header with slot name and close button
+        ui.horizontal(|ui| {
+            ui.heading(&slot_label);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("x").on_hover_text("Close picker").clicked() {
+                    state.unfocus_slot();
+                }
+            });
+        });
+
+        // Show cardinality info
+        if let Some(cardinality) = state.get_slot_cardinality(&slot_label) {
+            let cardinality_text = match &cardinality {
+                Cardinality::One => "Select one".to_string(),
+                Cardinality::Many { max: None } => "Select any".to_string(),
+                Cardinality::Many { max: Some(n) } => {
+                    let current = state
+                        .slot_values
+                        .get(&slot_label)
+                        .map(|v| v.len())
+                        .unwrap_or(0);
+                    format!("Select up to {} ({}/{})", n, current, n)
+                }
+            };
+            ui.label(
+                egui::RichText::new(cardinality_text)
+                    .small()
+                    .color(egui::Color32::from_rgb(108, 112, 134)),
+            );
+        }
+
+        ui.separator();
+
+        // Get available options
+        let options = state.get_pick_options(&slot_label);
+        let selected_values = state
+            .slot_values
+            .get(&slot_label)
+            .cloned()
+            .unwrap_or_default();
+
+        // Check if we can add more
+        let can_add = match state.get_slot_cardinality(&slot_label) {
+            Some(Cardinality::One) => selected_values.is_empty(),
+            Some(Cardinality::Many { max: Some(n) }) => selected_values.len() < n as usize,
+            _ => true,
+        };
+
+        // Show options list
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if options.is_empty() {
+                    ui.label(
+                        egui::RichText::new("No options available")
+                            .italics()
+                            .color(egui::Color32::from_rgb(108, 112, 134)),
+                    );
+                    return;
+                }
+
+                for option in &options {
+                    let is_selected = selected_values.contains(option);
+
+                    ui.horizontal(|ui| {
+                        // Checkbox or selectable label
+                        let response = ui.selectable_label(is_selected, option);
+
+                        if response.clicked() {
+                            if is_selected {
+                                // Remove selection
+                                state.remove_slot_value(&slot_label, option);
+                            } else if can_add {
+                                // Add selection
+                                state.add_slot_value(&slot_label, option.clone());
+
+                                // For single-select, close the picker after selection
+                                if matches!(
+                                    state.get_slot_cardinality(&slot_label),
+                                    Some(Cardinality::One)
+                                ) {
+                                    state.unfocus_slot();
+                                }
+                            }
+                        }
+                    });
+                }
+            });
     }
 }

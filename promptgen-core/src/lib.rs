@@ -9,7 +9,10 @@ pub mod span;
 pub mod workspace;
 
 // Re-exports for convenience
-pub use ast::{LibraryRef, Node, OptionItem, Spanned, Template};
+pub use ast::{
+    Cardinality, LibraryRef, Node, OptionItem, PickSource, SlotDefKind, SlotDefinition, Spanned,
+    Template,
+};
 
 // Eval module exports
 pub use eval::{ChosenOption, EvalContext, RenderError, RenderResult, render};

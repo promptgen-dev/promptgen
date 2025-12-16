@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::components::{EditorPanel, PreviewPanel, SidebarPanel};
+use crate::components::{EditorPanel, PreviewPanel, SidebarPanel, SlotPanel};
 use crate::state::AppState;
 use crate::theme;
 
@@ -144,6 +144,20 @@ impl eframe::App for PromptGenApp {
             .show(ctx, |ui| {
                 PreviewPanel::show(ui, &mut self.state);
             });
+
+        // Bottom slot panel (only show if there are slots)
+        let has_slots = !self.state.get_slot_definitions().is_empty();
+        if has_slots {
+            egui::TopBottomPanel::bottom("slots")
+                .resizable(true)
+                .default_height(150.0)
+                .height_range(80.0..=400.0)
+                .show(ctx, |ui| {
+                    ui.heading("Slots");
+                    ui.separator();
+                    SlotPanel::show(ui, &mut self.state);
+                });
+        }
 
         // Central editor panel
         egui::CentralPanel::default().show(ctx, |ui| {

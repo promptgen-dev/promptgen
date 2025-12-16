@@ -11,30 +11,7 @@ impl PreviewPanel {
         ui.heading("Preview");
         ui.separator();
 
-        // Slot inputs section
-        let slots = state.get_current_slots();
-        if !slots.is_empty() {
-            ui.separator();
-            ui.label("Slot Values:");
-            ui.add_space(4.0);
-
-            for slot_name in &slots {
-                ui.horizontal(|ui| {
-                    ui.label(format!("{}:", slot_name));
-                    if let Some(value) = state.slot_values.get_mut(slot_name) {
-                        ui.add(
-                            egui::TextEdit::singleline(value)
-                                .desired_width(150.0)
-                                .hint_text("(empty)"),
-                        );
-                    }
-                });
-            }
-            ui.add_space(8.0);
-        }
-
         // Seed controls - always visible
-        ui.separator();
         ui.horizontal(|ui| {
             ui.label("Seed:");
 

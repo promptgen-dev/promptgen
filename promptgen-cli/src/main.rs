@@ -269,8 +269,8 @@ fn cmd_parse(
 
             // Show slots
             let slots: Vec<_> = ast.nodes.iter().filter_map(|(node, _)| {
-                if let promptgen_core::Node::Slot(name) = node {
-                    Some(name.clone())
+                if let promptgen_core::Node::SlotBlock(slot) = node {
+                    Some(slot.label.0.clone())
                 } else {
                     None
                 }
@@ -298,8 +298,8 @@ fn cmd_parse(
             }).collect();
 
             let slots: Vec<String> = ast.nodes.iter().filter_map(|(node, _)| {
-                if let promptgen_core::Node::Slot(name) = node {
-                    Some(name.clone())
+                if let promptgen_core::Node::SlotBlock(slot) = node {
+                    Some(slot.label.0.clone())
                 } else {
                     None
                 }
@@ -317,7 +317,7 @@ fn describe_node(node: &promptgen_core::Node) -> (String, String) {
     match node {
         promptgen_core::Node::Text(text) => ("Text".to_string(), text.clone()),
         promptgen_core::Node::Comment(text) => ("Comment".to_string(), text.clone()),
-        promptgen_core::Node::Slot(name) => ("Slot".to_string(), name.clone()),
+        promptgen_core::Node::SlotBlock(slot) => ("SlotBlock".to_string(), slot.label.0.clone()),
         promptgen_core::Node::LibraryRef(lib_ref) => {
             ("LibraryRef".to_string(), format_library_ref(lib_ref))
         }
