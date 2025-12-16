@@ -8,7 +8,7 @@
 
 mod common;
 
-use common::{eval, eval_with_slots, lib};
+use common::{empty_lib, eval, eval_with_slots, lib};
 
 // ============================================================================
 // Library Reference Tests: @Name
@@ -91,7 +91,7 @@ groups:
 
 #[test]
 fn inline_options_render() {
-    let lib = lib("groups: []");
+    let lib = empty_lib();
     let result = eval(&lib, "{happy|sad}", None);
 
     let valid_options = ["happy", "sad"];
@@ -105,7 +105,7 @@ fn inline_options_render() {
 
 #[test]
 fn inline_options_with_text() {
-    let lib = lib("groups: []");
+    let lib = empty_lib();
     let result = eval(&lib, "feeling {happy|sad} today", Some(42));
 
     // With seed 42, we should get deterministic output
@@ -117,7 +117,7 @@ fn inline_options_with_text() {
 
 #[test]
 fn inline_options_three_choices() {
-    let lib = lib("groups: []");
+    let lib = empty_lib();
     let result = eval(&lib, "{red|green|blue}", None);
 
     let valid_options = ["red", "green", "blue"];
@@ -135,7 +135,7 @@ fn inline_options_three_choices() {
 
 #[test]
 fn slot_without_override_preserved() {
-    let lib = lib("groups: []");
+    let lib = empty_lib();
     let result = eval(&lib, "Hello {{ Name }}", None);
 
     assert_eq!(result.text, "Hello {{ Name }}");
@@ -143,7 +143,7 @@ fn slot_without_override_preserved() {
 
 #[test]
 fn slot_with_override_renders() {
-    let lib = lib("groups: []");
+    let lib = empty_lib();
     let result = eval_with_slots(&lib, "Hello {{ Name }}", &[("Name", "Alice")], None);
 
     assert_eq!(result.text, "Hello Alice");
@@ -151,7 +151,7 @@ fn slot_with_override_renders() {
 
 #[test]
 fn multiple_slots_render() {
-    let lib = lib("groups: []");
+    let lib = empty_lib();
     let result = eval_with_slots(
         &lib,
         "{{ Name }} lives in {{ Place }}",
@@ -188,7 +188,7 @@ groups:
 
 #[test]
 fn comment_not_included_in_output() {
-    let lib = lib("groups: []");
+    let lib = empty_lib();
     let result = eval(&lib, "# This is a comment", None);
 
     assert_eq!(result.text, "");
@@ -275,7 +275,7 @@ groups:
 
 #[test]
 fn empty_template_renders_empty() {
-    let lib = lib("groups: []");
+    let lib = empty_lib();
     let result = eval(&lib, "", None);
 
     assert_eq!(result.text, "");
@@ -283,7 +283,7 @@ fn empty_template_renders_empty() {
 
 #[test]
 fn plain_text_only() {
-    let lib = lib("groups: []");
+    let lib = empty_lib();
     let result = eval(&lib, "Just plain text, no grammar", None);
 
     assert_eq!(result.text, "Just plain text, no grammar");

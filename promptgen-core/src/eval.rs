@@ -12,7 +12,10 @@ use std::collections::HashMap;
 
 use rand::prelude::*;
 
-use crate::ast::{LibraryRef, Node, OptionItem, Template};
+use crate::ast::{
+    LibraryRef, Node, OptionItem, PickOperator, PickSlot, PickSource, SlotBlock, SlotKind,
+    Template,
+};
 use crate::library::PromptGroup;
 use crate::parser::parse_template;
 use crate::workspace::Workspace;
@@ -23,8 +26,10 @@ pub struct EvalContext<'a, R: Rng = StdRng> {
     pub workspace: &'a Workspace,
     /// Random number generator for selecting options.
     pub rng: R,
-    /// Overrides for freeform slots (slot name -> value).
-    pub slot_overrides: HashMap<String, String>,
+    /// Overrides for slots (slot name -> list of values).
+    /// For `| one` slots, provide a single-element vec.
+    /// For `| many` slots, provide multiple values.
+    pub slot_overrides: HashMap<String, Vec<String>>,
     /// Stack of group names being evaluated (for cycle detection).
     eval_stack: Vec<String>,
 }
@@ -64,14 +69,23 @@ impl<'a, R: Rng> EvalContext<'a, R> {
         }
     }
 
-    /// Add a slot override.
+    /// Add a slot override with a single value.
+    /// For `| one` slots or textarea slots.
     pub fn set_slot(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        self.slot_overrides.insert(name.into(), value.into());
+        self.slot_overrides.insert(name.into(), vec![value.into()]);
     }
 
-    /// Add multiple slot overrides.
+    /// Add a slot override with multiple values.
+    /// For `| many` slots.
+    pub fn set_slot_values(&mut self, name: impl Into<String>, values: Vec<String>) {
+        self.slot_overrides.insert(name.into(), values);
+    }
+
+    /// Add multiple slot overrides (single values each).
     pub fn set_slots(&mut self, overrides: impl IntoIterator<Item = (String, String)>) {
-        self.slot_overrides.extend(overrides);
+        for (name, value) in overrides {
+            self.slot_overrides.insert(name, vec![value]);
+        }
     }
 }
 
@@ -95,8 +109,8 @@ pub struct RenderResult {
     pub text: String,
     /// Options that were chosen during rendering (for provenance/reproducibility).
     pub chosen_options: Vec<ChosenOption>,
-    /// Slot values that were used.
-    pub slot_values: HashMap<String, String>,
+    /// Slot values that were used (slot name -> list of values).
+    pub slot_values: HashMap<String, Vec<String>>,
 }
 
 /// Error that can occur during rendering.
@@ -119,6 +133,16 @@ pub enum RenderError {
 
     #[error("ambiguous group reference '{group}' found in libraries: {libraries}")]
     AmbiguousGroup { group: String, libraries: String },
+
+    #[error("slot '{slot}' expects exactly one value, but got {count}")]
+    TooManyValuesForOne { slot: String, count: usize },
+
+    #[error("slot '{slot}' allows at most {max} values, but got {count}")]
+    TooManyValuesForMany {
+        slot: String,
+        max: u32,
+        count: usize,
+    },
 }
 
 /// Render a parsed template AST using the given context.
@@ -153,13 +177,39 @@ fn eval_node<R: Rng>(
 
         Node::Comment(_) => Ok(String::new()),
 
-        Node::Slot(slot_name) => {
-            if let Some(value) = ctx.slot_overrides.get(slot_name).cloned() {
-                // Slot values can contain grammar - parse and evaluate
-                eval_text_with_grammar(&value, ctx, chosen_options)
-            } else {
-                // Leave the slot placeholder as-is if no override provided
-                Ok(format!("{{{{ {} }}}}", slot_name))
+        Node::SlotBlock(slot_block) => {
+            let slot_name = &slot_block.label.0;
+
+            match &slot_block.kind.0 {
+                SlotKind::Textarea => {
+                    // Textarea slot: check for override, otherwise show placeholder
+                    if let Some(values) = ctx.slot_overrides.get(slot_name).cloned() {
+                        // For textarea, join all values (typically just one)
+                        // Each value can contain grammar - parse and evaluate
+                        let mut result = String::new();
+                        for (i, value) in values.iter().enumerate() {
+                            if i > 0 {
+                                result.push_str(", ");
+                            }
+                            let evaluated = eval_text_with_grammar(value, ctx, chosen_options)?;
+                            result.push_str(&evaluated);
+                        }
+                        Ok(result)
+                    } else {
+                        // Leave the slot placeholder as-is if no override provided
+                        Ok(format!("{{{{ {} }}}}", slot_name))
+                    }
+                }
+                SlotKind::Pick(pick) => {
+                    // Pick slot: check for override first
+                    if let Some(values) = ctx.slot_overrides.get(slot_name).cloned() {
+                        // Validate and render the pick slot values
+                        eval_pick_slot_value(slot_name, &values, pick, ctx, chosen_options)
+                    } else {
+                        // Leave the slot placeholder as-is if no override provided
+                        Ok(slot_block_to_placeholder(slot_block))
+                    }
+                }
             }
         }
 
@@ -170,6 +220,107 @@ fn eval_node<R: Rng>(
         }
 
         Node::InlineOptions(options) => eval_inline_options(options, ctx, chosen_options),
+    }
+}
+
+/// Convert a slot block to its placeholder string representation.
+/// This preserves the full slot syntax for display when no value is provided.
+fn slot_block_to_placeholder(slot_block: &SlotBlock) -> String {
+    let mut output = String::new();
+    output.push_str("{{ ");
+
+    // Label - quote if it contains special characters
+    let label = &slot_block.label.0;
+    let needs_quotes = label.contains(':') || label.contains('"') || label.contains('}');
+    if needs_quotes {
+        output.push('"');
+        output.push_str(label);
+        output.push('"');
+    } else {
+        output.push_str(label);
+    }
+
+    // Kind
+    match &slot_block.kind.0 {
+        SlotKind::Textarea => {
+            // Nothing more to add for textarea
+        }
+        SlotKind::Pick(pick) => {
+            output.push_str(": pick(");
+
+            // Sources
+            for (i, (source, _span)) in pick.sources.iter().enumerate() {
+                if i > 0 {
+                    output.push_str(", ");
+                }
+                match source {
+                    PickSource::GroupRef(lib_ref) => {
+                        library_ref_to_string(lib_ref, &mut output);
+                    }
+                    PickSource::Literal { value, quoted } => {
+                        if *quoted {
+                            // Preserve quotes for quoted literals
+                            output.push('"');
+                            output.push_str(&value.replace('\\', "\\\\").replace('"', "\\\""));
+                            output.push('"');
+                        } else {
+                            // Bare literals stay bare
+                            output.push_str(value);
+                        }
+                    }
+                }
+            }
+
+            output.push(')');
+
+            // Operators
+            for (op, _span) in &pick.operators {
+                match op {
+                    PickOperator::One => {
+                        output.push_str(" | one");
+                    }
+                    PickOperator::Many(spec) => {
+                        output.push_str(" | many");
+                        if spec.max.is_some() || spec.sep.is_some() {
+                            output.push('(');
+                            let mut first = true;
+                            if let Some(max) = spec.max {
+                                output.push_str(&format!("max={}", max));
+                                first = false;
+                            }
+                            if let Some(sep) = &spec.sep {
+                                if !first {
+                                    output.push_str(", ");
+                                }
+                                output.push_str(&format!("sep=\"{}\"", sep));
+                            }
+                            output.push(')');
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    output.push_str(" }}");
+    output
+}
+
+/// Convert a library reference to string format for placeholder output.
+fn library_ref_to_string(lib_ref: &LibraryRef, output: &mut String) {
+    output.push('@');
+    if let Some(library) = &lib_ref.library {
+        output.push('"');
+        output.push_str(library);
+        output.push(':');
+        output.push_str(&lib_ref.group);
+        output.push('"');
+    } else if lib_ref.group.contains(' ') || lib_ref.group.contains(':') {
+        output.push('"');
+        output.push_str(&lib_ref.group);
+        output.push('"');
+    } else {
+        output.push_str(&lib_ref.group);
     }
 }
 
@@ -188,6 +339,76 @@ fn eval_text_with_grammar<R: Rng>(
     }
 
     Ok(output)
+}
+
+/// Evaluate a pick slot value with validation based on operators.
+///
+/// Validates the values array against the `one` or `many(max=N)` constraints,
+/// evaluates any grammar in each value, and joins the results with the
+/// appropriate separator.
+fn eval_pick_slot_value<R: Rng>(
+    slot_name: &str,
+    values: &[String],
+    pick: &PickSlot,
+    ctx: &mut EvalContext<'_, R>,
+    chosen_options: &mut Vec<ChosenOption>,
+) -> Result<String, RenderError> {
+    // Determine cardinality and separator from operators
+    let (is_one, max, separator) = extract_pick_constraints(pick);
+
+    let count = values.len();
+
+    // Validate count constraints
+    if is_one && count > 1 {
+        return Err(RenderError::TooManyValuesForOne {
+            slot: slot_name.to_string(),
+            count,
+        });
+    }
+
+    if let Some(max_val) = max {
+        if count > max_val as usize {
+            return Err(RenderError::TooManyValuesForMany {
+                slot: slot_name.to_string(),
+                max: max_val,
+                count,
+            });
+        }
+    }
+
+    // Evaluate each value (may contain grammar like @Color or {a|b})
+    let mut evaluated: Vec<String> = Vec::with_capacity(count);
+    for value in values {
+        let result = eval_text_with_grammar(value, ctx, chosen_options)?;
+        evaluated.push(result);
+    }
+
+    // Join with the appropriate separator
+    Ok(evaluated.join(&separator))
+}
+
+/// Extract cardinality constraints and separator from pick operators.
+/// Returns (is_one, max_for_many, separator)
+fn extract_pick_constraints(pick: &PickSlot) -> (bool, Option<u32>, String) {
+    let mut is_one = false;
+    let mut max: Option<u32> = None;
+    let mut separator = ", ".to_string(); // Default separator
+
+    for (op, _span) in &pick.operators {
+        match op {
+            PickOperator::One => {
+                is_one = true;
+            }
+            PickOperator::Many(spec) => {
+                max = spec.max;
+                if let Some(sep) = &spec.sep {
+                    separator = sep.clone();
+                }
+            }
+        }
+    }
+
+    (is_one, max, separator)
 }
 
 /// Resolve a library reference to a random option.

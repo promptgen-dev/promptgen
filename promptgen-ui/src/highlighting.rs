@@ -127,7 +127,7 @@ fn highlight_from_ast(
                 // Highlight @ symbol and the reference name
                 append_token(job, node_text, TokenKind::Reference, font_id, colors);
             }
-            Node::Slot(_) => {
+            Node::SlotBlock(_) => {
                 // Highlight entire slot including {{ }}
                 append_token(job, node_text, TokenKind::Slot, font_id, colors);
             }

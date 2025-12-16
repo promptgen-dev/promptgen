@@ -500,10 +500,11 @@ impl Workspace {
         let mut slots = Vec::new();
 
         for (node, _span) in &ast.nodes {
-            if let Node::Slot(name) = node
-                && !slots.contains(name)
-            {
-                slots.push(name.clone());
+            if let Node::SlotBlock(slot_block) = node {
+                let name = &slot_block.label.0;
+                if !slots.contains(name) {
+                    slots.push(name.clone());
+                }
             }
         }
 

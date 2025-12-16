@@ -134,15 +134,19 @@ impl PromptTemplate {
     }
 
     /// Extract all slots from this template.
-    /// Returns slots defined by `{{ Name }}` syntax.
+    /// Returns slots defined by `{{ label }}` or `{{ label: pick(...) }}` syntax.
     pub fn slots(&self) -> Vec<TemplateSlot> {
         let mut slots = Vec::new();
 
         for (node, _span) in &self.ast.nodes {
-            if let Node::Slot(name) = node {
+            if let Node::SlotBlock(slot_block) = node {
+                let kind = match &slot_block.kind.0 {
+                    crate::ast::SlotKind::Textarea => TemplateSlotKind::Freeform,
+                    crate::ast::SlotKind::Pick(_) => TemplateSlotKind::Pick,
+                };
                 slots.push(TemplateSlot {
-                    name: name.clone(),
-                    kind: SlotKind::Freeform,
+                    name: slot_block.label.0.clone(),
+                    kind,
                 });
             }
         }
@@ -169,14 +173,17 @@ impl PromptTemplate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemplateSlot {
     pub name: String,
-    pub kind: SlotKind,
+    pub kind: TemplateSlotKind,
 }
 
-/// The kind of slot in a template.
+/// The kind of slot in a template (legacy representation).
+/// Note: This will be replaced by ast::SlotKind in a future version.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SlotKind {
-    /// A freeform slot from `{{ Name }}` syntax.
+pub enum TemplateSlotKind {
+    /// A freeform/textarea slot.
     Freeform,
+    /// A pick slot with structured selection.
+    Pick,
 }
 
 #[cfg(test)]
@@ -224,9 +231,9 @@ mod tests {
         let slots = template.slots();
         assert_eq!(slots.len(), 2);
         assert_eq!(slots[0].name, "Name");
-        assert_eq!(slots[0].kind, SlotKind::Freeform);
+        assert_eq!(slots[0].kind, TemplateSlotKind::Freeform);
         assert_eq!(slots[1].name, "Place");
-        assert_eq!(slots[1].kind, SlotKind::Freeform);
+        assert_eq!(slots[1].kind, TemplateSlotKind::Freeform);
     }
 
     #[test]

@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::lib;
+use common::{empty_lib, lib};
 
 // ============================================================================
 // Library Loading Tests
@@ -68,7 +68,7 @@ groups:
 
 #[test]
 fn empty_library_loads() {
-    let lib = lib("groups: []");
+    let lib = empty_lib();
 
     assert!(lib.groups.is_empty());
     assert!(lib.templates.is_empty());

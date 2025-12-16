@@ -21,7 +21,7 @@ pub use io::{
 };
 
 pub use library::{
-    EngineHint, Library, PromptGroup, PromptTemplate, SlotKind, TemplateSlot, new_id,
+    EngineHint, Library, PromptGroup, PromptTemplate, TemplateSlot, TemplateSlotKind, new_id,
 };
 pub use parser::{ParseError, parse_template};
 pub use span::Span;

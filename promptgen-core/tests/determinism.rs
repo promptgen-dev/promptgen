@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{eval, lib};
+use common::{empty_lib, eval, lib};
 use std::collections::HashSet;
 
 // ============================================================================
@@ -59,7 +59,7 @@ groups:
 
 #[test]
 fn inline_options_are_deterministic() {
-    let lib = lib("groups: []");
+    let lib = empty_lib();
 
     let result1 = eval(&lib, "{a|b|c|d|e}", Some(999));
     let result2 = eval(&lib, "{a|b|c|d|e}", Some(999));

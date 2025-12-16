@@ -160,10 +160,8 @@ fn node_to_source(node: &Node, output: &mut String) {
             output.push_str(text);
         }
 
-        Node::Slot(name) => {
-            output.push_str("{{ ");
-            output.push_str(name);
-            output.push_str(" }}");
+        Node::SlotBlock(slot_block) => {
+            slot_block_to_source(slot_block, output);
         }
 
         Node::LibraryRef(lib_ref) => {
@@ -214,6 +212,88 @@ fn option_item_to_source(item: &OptionItem, output: &mut String) {
             }
         }
     }
+}
+
+/// Convert a slot block to source.
+fn slot_block_to_source(slot_block: &crate::ast::SlotBlock, output: &mut String) {
+    use crate::ast::{PickOperator, PickSource, SlotKind};
+
+    output.push_str("{{ ");
+
+    // Label - quote if it contains special characters
+    let label = &slot_block.label.0;
+    let needs_quotes = label.contains(':') || label.contains('"') || label.contains('}');
+    if needs_quotes {
+        output.push('"');
+        output.push_str(label);
+        output.push('"');
+    } else {
+        output.push_str(label);
+    }
+
+    // Kind
+    match &slot_block.kind.0 {
+        SlotKind::Textarea => {
+            // Nothing more to add for textarea
+        }
+        SlotKind::Pick(pick) => {
+            output.push_str(": pick(");
+
+            // Sources
+            for (i, (source, _span)) in pick.sources.iter().enumerate() {
+                if i > 0 {
+                    output.push_str(", ");
+                }
+                match source {
+                    PickSource::GroupRef(lib_ref) => {
+                        library_ref_to_source(lib_ref, output);
+                    }
+                    PickSource::Literal { value, quoted } => {
+                        if *quoted {
+                            // Preserve quotes for quoted literals
+                            output.push('"');
+                            output.push_str(&value.replace('\\', "\\\\").replace('"', "\\\""));
+                            output.push('"');
+                        } else {
+                            // Bare literals stay bare
+                            output.push_str(value);
+                        }
+                    }
+                }
+            }
+
+            output.push(')');
+
+            // Operators
+            for (op, _span) in &pick.operators {
+                match op {
+                    PickOperator::One => {
+                        output.push_str(" | one");
+                    }
+                    PickOperator::Many(spec) => {
+                        output.push_str(" | many");
+                        if spec.max.is_some() || spec.sep.is_some() {
+                            output.push('(');
+                            let mut first = true;
+                            if let Some(max) = spec.max {
+                                output.push_str(&format!("max={}", max));
+                                first = false;
+                            }
+                            if let Some(sep) = &spec.sep {
+                                if !first {
+                                    output.push_str(", ");
+                                }
+                                output.push_str(&format!("sep=\"{}\"", sep));
+                            }
+                            output.push(')');
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    output.push_str(" }}");
 }
 
 // ============================================================================
