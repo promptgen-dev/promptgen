@@ -72,15 +72,20 @@ impl TemplateEditor {
         let layout_response = ui.horizontal_top(|ui| {
             if config.show_line_numbers {
                 // Line numbers column - match the number of lines in content
+                // Right-align numbers with minimal width based on max line number
+                let max_digits = desired_rows.to_string().len();
                 let line_numbers: String = (1..=desired_rows)
-                    .map(|n| format!("{:>4}", n))
+                    .map(|n| format!("{:>width$}", n, width = max_digits))
                     .collect::<Vec<_>>()
                     .join("\n");
+
+                // Calculate width: ~8px per digit + small margin
+                let width = (max_digits as f32) * 8.0 + 4.0;
 
                 ui.add(
                     egui::TextEdit::multiline(&mut line_numbers.as_str())
                         .font(egui::TextStyle::Monospace)
-                        .desired_width(40.0)
+                        .desired_width(width)
                         .frame(false)
                         .interactive(false)
                         .text_color(egui::Color32::from_rgb(108, 112, 134)), // Catppuccin overlay0

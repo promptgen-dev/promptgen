@@ -1,5 +1,6 @@
 //! Slot panel component for editing template slots.
 
+use egui_flex::{Flex, FlexAlign, FlexItem};
 use promptgen_core::{Cardinality, SlotDefKind};
 
 use crate::components::focusable_frame::FocusableFrame;
@@ -161,42 +162,47 @@ impl SlotPanel {
                     .fill(editor_bg)
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.horizontal_wrapped(|ui| {
-                            let mut to_remove = None;
+                        let mut to_remove = None;
 
-                            for value in &values {
-                                // Chip with X button
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 4.0;
+                        Flex::horizontal()
+                            .wrap(true)
+                            .gap(egui::vec2(4.0, 4.0))
+                            .align_items(FlexAlign::Center)
+                            .show(ui, |flex| {
+                                for value in &values {
+                                    flex.add_ui(FlexItem::new(), |ui| {
+                                        // Chip with X button
+                                        egui::Frame::NONE
+                                            .inner_margin(egui::Margin {
+                                                left: 6,
+                                                right: 6,
+                                                top: 2,
+                                                bottom: 2,
+                                            })
+                                            .corner_radius(12.0)
+                                            .fill(egui::Color32::from_rgb(69, 71, 90)) // Catppuccin surface2
+                                            .show(ui, |ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.spacing_mut().item_spacing.x = 4.0;
+                                                    ui.label(value);
+                                                    if ui
+                                                        .small_button("x")
+                                                        .on_hover_text("Remove")
+                                                        .clicked()
+                                                    {
+                                                        to_remove = Some(value.clone());
+                                                        chip_removed.set(true);
+                                                    }
+                                                });
+                                            });
+                                    });
+                                }
+                            });
 
-                                    egui::Frame::NONE
-                                        .inner_margin(egui::Margin {
-                                            left: 6,
-                                            right: 6,
-                                            top: 2,
-                                            bottom: 2,
-                                        })
-                                        .corner_radius(12.0)
-                                        .fill(egui::Color32::from_rgb(69, 71, 90)) // Catppuccin surface2
-                                        .show(ui, |ui| {
-                                            ui.label(value);
-                                            if ui
-                                                .small_button("x")
-                                                .on_hover_text("Remove")
-                                                .clicked()
-                                            {
-                                                to_remove = Some(value.clone());
-                                                chip_removed.set(true);
-                                            }
-                                        });
-                                });
-                            }
-
-                            if let Some(value) = to_remove {
-                                state.remove_slot_value(&label_owned, &value);
-                                state.request_render();
-                            }
-                        });
+                        if let Some(value) = to_remove {
+                            state.remove_slot_value(&label_owned, &value);
+                            state.request_render();
+                        }
                     });
             } else {
                 // Empty state - show placeholder in a clickable area
