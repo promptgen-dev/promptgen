@@ -68,14 +68,7 @@ impl EditorPanel {
             // Update parse result when editor content changes
             if response.changed() {
                 state.update_parse_result();
-
-                // Auto-render if enabled
-                if state.auto_render {
-                    if state.auto_randomize_seed {
-                        state.randomize_seed();
-                    }
-                    let _ = state.render_template();
-                }
+                state.request_render();
             }
         });
 

@@ -535,9 +535,11 @@ impl SidebarPanel {
                             if is_selected {
                                 // Remove selection
                                 state.remove_slot_value(&slot_label, option);
+                                state.request_render();
                             } else if can_add {
                                 // Add/replace selection (add_slot_value handles single-select replacement)
                                 state.add_slot_value(&slot_label, option.clone());
+                                state.request_render();
                             }
                         }
                     });

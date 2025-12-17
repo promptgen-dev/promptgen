@@ -76,6 +76,7 @@ impl SlotPanel {
 
         if response.changed() {
             state.set_textarea_value(label, value);
+            state.request_render();
         }
 
         // Highlight if focused
@@ -197,6 +198,7 @@ impl SlotPanel {
 
                             if let Some(value) = to_remove {
                                 state.remove_slot_value(label, &value);
+                                state.request_render();
                             }
                         });
                     });

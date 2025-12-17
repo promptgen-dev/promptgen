@@ -8,6 +8,9 @@ pub struct PreviewPanel;
 impl PreviewPanel {
     /// Render the preview panel.
     pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
+        // Process any pending render requests from other components
+        state.process_pending_render();
+
         ui.heading("Preview");
         ui.separator();
 

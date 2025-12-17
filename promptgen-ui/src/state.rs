@@ -55,6 +55,7 @@ pub struct AppState {
     pub slot_values: HashMap<String, Vec<String>>,
     pub auto_randomize_seed: bool,
     pub auto_render: bool,
+    pub preview_dirty: bool,
 
     // UI State
     pub sidebar_view_mode: SidebarViewMode,
@@ -77,6 +78,7 @@ impl Default for AppState {
             slot_values: HashMap::new(),
             auto_randomize_seed: true,
             auto_render: true,
+            preview_dirty: false,
             sidebar_view_mode: SidebarViewMode::default(),
             sidebar_mode: SidebarMode::default(),
             search_query: String::new(),
@@ -181,6 +183,26 @@ impl AppState {
                 .map(|d| d.as_nanos() as u64)
                 .unwrap_or(42),
         );
+    }
+
+    /// Request a preview render (if auto_render is enabled).
+    /// Call this from any component that changes render-affecting state.
+    pub fn request_render(&mut self) {
+        if self.auto_render {
+            self.preview_dirty = true;
+        }
+    }
+
+    /// Process any pending render request.
+    /// Call this from PreviewPanel at the start of show().
+    pub fn process_pending_render(&mut self) {
+        if self.preview_dirty {
+            if self.auto_randomize_seed {
+                self.randomize_seed();
+            }
+            let _ = self.render_template();
+            self.preview_dirty = false;
+        }
     }
 
     /// Get slot definitions from the current template
