@@ -2,6 +2,7 @@
 
 use promptgen_core::{Cardinality, SlotDefKind};
 
+use crate::components::focusable_frame::FocusableFrame;
 use crate::components::template_editor::{TemplateEditor, TemplateEditorConfig};
 use crate::state::AppState;
 
@@ -26,30 +27,16 @@ impl SlotPanel {
         for def in &definitions {
             let is_focused = state.is_slot_focused(&def.label);
 
-            // Create a frame for each slot
-            let frame = egui::Frame::NONE
-                .inner_margin(8)
-                .corner_radius(4.0)
-                .fill(if is_focused {
-                    egui::Color32::from_rgb(49, 50, 68) // Catppuccin surface1
-                } else {
-                    egui::Color32::TRANSPARENT
-                });
-
-            frame.show(ui, |ui| {
-                ui.set_width(ui.available_width());
-
-                match &def.kind {
-                    SlotDefKind::Textarea => {
-                        Self::show_textarea_slot(ui, state, &def.label, is_focused);
-                    }
-                    SlotDefKind::Pick {
-                        cardinality, sep, ..
-                    } => {
-                        Self::show_pick_slot(ui, state, &def.label, cardinality, sep, is_focused);
-                    }
+            match &def.kind {
+                SlotDefKind::Textarea => {
+                    Self::show_textarea_slot(ui, state, &def.label, is_focused);
                 }
-            });
+                SlotDefKind::Pick {
+                    cardinality, sep, ..
+                } => {
+                    Self::show_pick_slot(ui, state, &def.label, cardinality, sep, is_focused);
+                }
+            }
 
             ui.add_space(4.0);
         }
@@ -57,36 +44,46 @@ impl SlotPanel {
 
     /// Render a textarea slot.
     fn show_textarea_slot(ui: &mut egui::Ui, state: &mut AppState, label: &str, is_focused: bool) {
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(label).strong());
-            ui.label(
-                egui::RichText::new("(text)")
-                    .small()
-                    .color(egui::Color32::from_rgb(108, 112, 134)),
-            );
+        let label_owned = label.to_string();
+
+        let frame_response = FocusableFrame::new(is_focused).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(&label_owned).strong());
+                ui.label(
+                    egui::RichText::new("(text)")
+                        .small()
+                        .color(egui::Color32::from_rgb(108, 112, 134)),
+                );
+            });
+
+            let config = TemplateEditorConfig {
+                min_lines: 3,
+                hint_text: Some("Enter text...".to_string()),
+                show_line_numbers: true,
+            };
+
+            let mut value = state.get_textarea_value(&label_owned);
+            let result = TemplateEditor::show(ui, &mut value, &state.workspace, &config);
+
+            if result.response.changed() {
+                state.set_textarea_value(&label_owned, value);
+                state.request_render();
+            }
+
+            // Show parse errors below the editor
+            TemplateEditor::show_errors(ui, &result.parse_result);
+
+            result
         });
 
-        let config = TemplateEditorConfig {
-            min_lines: 3,
-            hint_text: Some("Enter text...".to_string()),
-            show_line_numbers: true,
-        };
+        let result = frame_response.inner;
 
-        let mut value = state.get_textarea_value(label);
-        let result = TemplateEditor::show(ui, &mut value, &state.workspace, &config);
-
-        if result.response.changed() {
-            state.set_textarea_value(label, value);
-            state.request_render();
-        }
-
-        // Track focus on textarea - unfocus pick slots when textarea gains focus
-        if result.response.has_focus() && !is_focused {
+        // Track focus - either from TextEdit gaining focus or clicking anywhere in frame
+        if (result.response.has_focus() || frame_response.clicked) && !is_focused {
             state.focus_textarea_slot(label);
         }
-
-        // Show parse errors below the editor
-        TemplateEditor::show_errors(ui, &result.parse_result);
     }
 
     /// Render a pick slot.
@@ -113,16 +110,20 @@ impl SlotPanel {
             Cardinality::Many { max: Some(n) } => values.len() < *n as usize,
         };
 
-        // Track if chip X button was clicked
-        let mut chip_removed = false;
+        // Track if chip X button was clicked (need to use Cell for interior mutability)
+        let chip_removed = std::cell::Cell::new(false);
 
-        // Render content and measure actual height
-        let content_response = ui.scope(|ui| {
+        let label_owned = label.to_string();
+        let cardinality_clone = cardinality.clone();
+
+        let frame_response = FocusableFrame::new(is_focused).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+
             // Header with label and cardinality info
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(label).strong());
+                ui.label(egui::RichText::new(&label_owned).strong());
 
-                let cardinality_text = match cardinality {
+                let cardinality_text = match &cardinality_clone {
                     Cardinality::One => "(single)",
                     Cardinality::Many { max: None } => "(multi)",
                     Cardinality::Many { max: Some(n) } => {
@@ -185,14 +186,14 @@ impl SlotPanel {
                                                 .clicked()
                                             {
                                                 to_remove = Some(value.clone());
-                                                chip_removed = true;
+                                                chip_removed.set(true);
                                             }
                                         });
                                 });
                             }
 
                             if let Some(value) = to_remove {
-                                state.remove_slot_value(label, &value);
+                                state.remove_slot_value(&label_owned, &value);
                                 state.request_render();
                             }
                         });
@@ -219,26 +220,9 @@ impl SlotPanel {
             }
         });
 
-        // Use the content rect for click detection
-        let content_rect = content_response.response.rect;
-
-        // Check for clicks on the content area (not just the pre-allocated rect)
-        let clicked = ui.rect_contains_pointer(content_rect)
-            && ui.input(|i| i.pointer.primary_clicked())
-            && !chip_removed;
-
-        if clicked && can_open_picker {
+        // Focus slot when clicking anywhere in frame (except on chip X buttons)
+        if frame_response.clicked && can_open_picker && !chip_removed.get() {
             state.focus_slot(label);
-        }
-
-        // Highlight if focused
-        if is_focused {
-            ui.painter().rect_stroke(
-                content_rect.expand(2.0),
-                4.0,
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(137, 180, 250)), // Catppuccin blue
-                egui::StrokeKind::Outside,
-            );
         }
     }
 }

@@ -1,5 +1,6 @@
 //! Editor panel component for template editing.
 
+use crate::components::focusable_frame::FocusableFrame;
 use crate::components::template_editor::{TemplateEditor, TemplateEditorConfig};
 use crate::state::AppState;
 
@@ -24,22 +25,13 @@ impl EditorPanel {
             show_line_numbers: true,
         };
 
-        // Use frame for focus highlight background
         let is_focused = state.is_main_editor_focused();
-        let frame = egui::Frame::NONE
-            .inner_margin(8.0)
-            .corner_radius(4.0)
-            .fill(if is_focused {
-                egui::Color32::from_rgb(49, 50, 68) // Catppuccin surface1
-            } else {
-                egui::Color32::TRANSPARENT
-            });
 
-        let result = frame
-            .show(ui, |ui| {
-                TemplateEditor::show(ui, &mut state.editor_content, &state.workspace, &config)
-            })
-            .inner;
+        let frame_response = FocusableFrame::new(is_focused).show(ui, |ui| {
+            TemplateEditor::show(ui, &mut state.editor_content, &state.workspace, &config)
+        });
+
+        let result = frame_response.inner;
 
         // Update parse result when editor content changes
         if result.response.changed() {
@@ -48,8 +40,8 @@ impl EditorPanel {
             state.request_render();
         }
 
-        // Track focus on main editor - unfocus pick slots when editor gains focus
-        if result.response.has_focus() && !state.is_main_editor_focused() {
+        // Track focus - either from TextEdit gaining focus or clicking anywhere in frame
+        if (result.response.has_focus() || frame_response.clicked) && !is_focused {
             state.focus_main_editor();
         }
 
