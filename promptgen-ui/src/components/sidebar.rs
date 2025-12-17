@@ -504,9 +504,9 @@ impl SidebarPanel {
             .cloned()
             .unwrap_or_default();
 
-        // Check if we can add more
+        // Check if we can add more (single-select always allows as it replaces)
         let can_add = match state.get_slot_cardinality(&slot_label) {
-            Some(Cardinality::One) => selected_values.is_empty(),
+            Some(Cardinality::One) => true, // Single-select always allows (replaces)
             Some(Cardinality::Many { max: Some(n) }) => selected_values.len() < n as usize,
             _ => true,
         };
@@ -536,16 +536,8 @@ impl SidebarPanel {
                                 // Remove selection
                                 state.remove_slot_value(&slot_label, option);
                             } else if can_add {
-                                // Add selection
+                                // Add/replace selection (add_slot_value handles single-select replacement)
                                 state.add_slot_value(&slot_label, option.clone());
-
-                                // For single-select, close the picker after selection
-                                if matches!(
-                                    state.get_slot_cardinality(&slot_label),
-                                    Some(Cardinality::One)
-                                ) {
-                                    state.unfocus_slot();
-                                }
                             }
                         }
                     });

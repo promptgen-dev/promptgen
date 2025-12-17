@@ -145,23 +145,28 @@ impl eframe::App for PromptGenApp {
                 PreviewPanel::show(ui, &mut self.state);
             });
 
-        // Bottom slot panel (only show if there are slots)
-        let has_slots = !self.state.get_slot_definitions().is_empty();
-        if has_slots {
-            egui::TopBottomPanel::bottom("slots")
-                .resizable(true)
-                .default_height(150.0)
-                .height_range(80.0..=400.0)
-                .show(ctx, |ui| {
-                    ui.heading("Slots");
-                    ui.separator();
-                    SlotPanel::show(ui, &mut self.state);
-                });
+        // Handle Escape key to close slot picker
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.state.unfocus_slot();
         }
 
-        // Central editor panel
+        // Central panel with unified scroll area for editor + slots
         egui::CentralPanel::default().show(ctx, |ui| {
-            EditorPanel::show(ui, &mut self.state);
+            egui::ScrollArea::vertical()
+                .id_salt("main_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    // Editor section
+                    EditorPanel::show(ui, &mut self.state);
+
+                    // Slots section (only show if there are slots)
+                    let has_slots = !self.state.get_slot_definitions().is_empty();
+                    if has_slots {
+                        ui.separator();
+                        ui.heading("Slots");
+                        SlotPanel::show(ui, &mut self.state);
+                    }
+                });
         });
     }
 }

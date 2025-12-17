@@ -27,58 +27,57 @@ impl EditorPanel {
             ui.ctx().fonts_mut(|f| f.layout_job(job))
         };
 
-        egui::ScrollArea::vertical()
-            .id_salt("editor_scroll")
-            .show(ui, |ui| {
-                // Horizontal layout for line numbers + editor
-                ui.horizontal_top(|ui| {
-                    // Line numbers column
-                    let line_count = state.editor_content.lines().count().max(1);
-                    let line_numbers: String = (1..=line_count)
-                        .map(|n| format!("{:>4}", n))
-                        .collect::<Vec<_>>()
-                        .join("\n");
+        // Calculate rows based on content, minimum 5 lines
+        let line_count = state.editor_content.lines().count().max(1);
+        let desired_rows = line_count.max(5);
 
-                    ui.add(
-                        egui::TextEdit::multiline(&mut line_numbers.as_str())
-                            .font(egui::TextStyle::Monospace)
-                            .desired_width(40.0)
-                            .frame(false)
-                            .interactive(false)
-                            .text_color(egui::Color32::from_rgb(108, 112, 134)), // Catppuccin overlay0
-                    );
+        // Horizontal layout for line numbers + editor (no internal scroll)
+        ui.horizontal_top(|ui| {
+            // Line numbers column - match the number of lines in content (min 5)
+            let line_numbers: String = (1..=desired_rows)
+                .map(|n| format!("{:>4}", n))
+                .collect::<Vec<_>>()
+                .join("\n");
 
-                    ui.add_space(4.0);
+            ui.add(
+                egui::TextEdit::multiline(&mut line_numbers.as_str())
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(40.0)
+                    .frame(false)
+                    .interactive(false)
+                    .text_color(egui::Color32::from_rgb(108, 112, 134)), // Catppuccin overlay0
+            );
 
-                    // Main editor
-                    let response = ui.add(
-                        egui::TextEdit::multiline(&mut state.editor_content)
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(20)
-                            .font(egui::TextStyle::Monospace)
-                            .layouter(&mut layouter)
-                            .hint_text(
-                                "Enter your prompt template here...\n\n\
-                                 Use @GroupName to reference variables.\n\
-                                 Use {option1|option2|option3} for inline choices.\n\
-                                 Use {{ slot_name }} for user-filled slots.",
-                            ),
-                    );
+            ui.add_space(4.0);
 
-                    // Update parse result when editor content changes
-                    if response.changed() {
-                        state.update_parse_result();
+            // Main editor - auto-size to content
+            let response = ui.add(
+                egui::TextEdit::multiline(&mut state.editor_content)
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(desired_rows)
+                    .font(egui::TextStyle::Monospace)
+                    .layouter(&mut layouter)
+                    .hint_text(
+                        "Enter your prompt template here...\n\n\
+                         Use @GroupName to reference variables.\n\
+                         Use {option1|option2|option3} for inline choices.\n\
+                         Use {{ slot_name }} for user-filled slots.",
+                    ),
+            );
 
-                        // Auto-render if enabled
-                        if state.auto_render {
-                            if state.auto_randomize_seed {
-                                state.randomize_seed();
-                            }
-                            let _ = state.render_template();
-                        }
+            // Update parse result when editor content changes
+            if response.changed() {
+                state.update_parse_result();
+
+                // Auto-render if enabled
+                if state.auto_render {
+                    if state.auto_randomize_seed {
+                        state.randomize_seed();
                     }
-                });
-            });
+                    let _ = state.render_template();
+                }
+            }
+        });
 
         // Error display below editor
         Self::show_errors(ui, &state.parse_result);
