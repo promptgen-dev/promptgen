@@ -2,6 +2,7 @@
 
 use promptgen_core::{Cardinality, SlotDefKind};
 
+use crate::components::template_editor::{TemplateEditor, TemplateEditorConfig};
 use crate::state::AppState;
 
 /// Slot panel for editing template slot values.
@@ -65,34 +66,27 @@ impl SlotPanel {
             );
         });
 
-        let mut value = state.get_textarea_value(label);
-        let response = ui.add(
-            egui::TextEdit::multiline(&mut value)
-                .desired_width(f32::INFINITY)
-                .desired_rows(3)
-                .hint_text("Enter text...")
-                .frame(true),
-        );
+        let config = TemplateEditorConfig {
+            min_lines: 3,
+            hint_text: Some("Enter text...".to_string()),
+            show_line_numbers: true,
+        };
 
-        if response.changed() {
+        let mut value = state.get_textarea_value(label);
+        let result = TemplateEditor::show(ui, &mut value, &state.workspace, &config);
+
+        if result.response.changed() {
             state.set_textarea_value(label, value);
             state.request_render();
         }
 
         // Track focus on textarea - unfocus pick slots when textarea gains focus
-        if response.has_focus() && !is_focused {
+        if result.response.has_focus() && !is_focused {
             state.focus_textarea_slot(label);
         }
 
-        // Highlight if focused
-        if is_focused {
-            ui.painter().rect_stroke(
-                response.rect.expand(2.0),
-                4.0,
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(137, 180, 250)), // Catppuccin blue
-                egui::StrokeKind::Outside,
-            );
-        }
+        // Show parse errors below the editor
+        TemplateEditor::show_errors(ui, &result.parse_result);
     }
 
     /// Render a pick slot.
@@ -109,11 +103,7 @@ impl SlotPanel {
         let editor_bg = ui.visuals().extreme_bg_color;
 
         // Get current values
-        let values = state
-            .slot_values
-            .get(label)
-            .cloned()
-            .unwrap_or_default();
+        let values = state.slot_values.get(label).cloned().unwrap_or_default();
 
         // For single-select, we can always open the picker to change selection
         // For multi-select, check if we're at max
