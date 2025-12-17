@@ -23,7 +23,7 @@ impl SlotPanel {
 
         // No internal scroll - parent handles scrolling
         for def in &definitions {
-            let is_focused = state.focused_slot.as_ref() == Some(&def.label);
+            let is_focused = state.is_slot_focused(&def.label);
 
             // Create a frame for each slot
             let frame = egui::Frame::NONE
@@ -77,6 +77,11 @@ impl SlotPanel {
         if response.changed() {
             state.set_textarea_value(label, value);
             state.request_render();
+        }
+
+        // Track focus on textarea - unfocus pick slots when textarea gains focus
+        if response.has_focus() && !is_focused {
+            state.focus_textarea_slot(label);
         }
 
         // Highlight if focused

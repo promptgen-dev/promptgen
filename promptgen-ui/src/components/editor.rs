@@ -70,6 +70,21 @@ impl EditorPanel {
                 state.update_parse_result();
                 state.request_render();
             }
+
+            // Track focus on main editor - unfocus pick slots when editor gains focus
+            if response.has_focus() && !state.is_main_editor_focused() {
+                state.focus_main_editor();
+            }
+
+            // Highlight if main editor is focused
+            if state.is_main_editor_focused() {
+                ui.painter().rect_stroke(
+                    response.rect.expand(2.0),
+                    4.0,
+                    egui::Stroke::new(2.0, egui::Color32::from_rgb(137, 180, 250)), // Catppuccin blue
+                    egui::StrokeKind::Outside,
+                );
+            }
         });
 
         // Error display below editor

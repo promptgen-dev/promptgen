@@ -28,6 +28,20 @@ pub enum SidebarMode {
     },
 }
 
+/// What editor element currently has focus
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum EditorFocus {
+    /// No editor focused
+    #[default]
+    None,
+    /// Main template editor is focused
+    MainEditor,
+    /// A textarea slot is focused
+    TextareaSlot { label: String },
+    /// A pick slot is focused (opens sidebar picker)
+    PickSlot { label: String },
+}
+
 /// Persisted application configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -61,7 +75,7 @@ pub struct AppState {
     pub sidebar_view_mode: SidebarViewMode,
     pub sidebar_mode: SidebarMode,
     pub search_query: String,
-    pub focused_slot: Option<String>,
+    pub editor_focus: EditorFocus,
 }
 
 impl Default for AppState {
@@ -82,7 +96,7 @@ impl Default for AppState {
             sidebar_view_mode: SidebarViewMode::default(),
             sidebar_mode: SidebarMode::default(),
             search_query: String::new(),
-            focused_slot: None,
+            editor_focus: EditorFocus::default(),
         }
     }
 }
@@ -120,9 +134,11 @@ impl AppState {
                 self.slot_values.entry(slot).or_insert_with(Vec::new);
             }
             // Clear focused slot if it no longer exists
-            if let Some(ref focused) = self.focused_slot {
-                if !self.slot_values.contains_key(focused) {
-                    self.focused_slot = None;
+            if let EditorFocus::PickSlot { ref label } | EditorFocus::TextareaSlot { ref label } =
+                self.editor_focus
+            {
+                if !self.slot_values.contains_key(label) {
+                    self.editor_focus = EditorFocus::None;
                     self.sidebar_mode = SidebarMode::Normal;
                 }
             }
@@ -215,25 +231,47 @@ impl AppState {
         Vec::new()
     }
 
-    /// Focus a slot and switch sidebar to picker mode if it's a pick slot
-    pub fn focus_slot(&mut self, slot_label: &str) {
-        self.focused_slot = Some(slot_label.to_string());
-
-        // Check if this is a pick slot
-        let definitions = self.get_slot_definitions();
-        if let Some(def) = definitions.iter().find(|d| d.label == slot_label) {
-            if matches!(def.kind, SlotDefKind::Pick { .. }) {
-                self.sidebar_mode = SidebarMode::SlotPicker {
-                    slot_label: slot_label.to_string(),
-                };
-            }
-        }
+    /// Focus the main editor (and unfocus any slots, returning sidebar to normal)
+    pub fn focus_main_editor(&mut self) {
+        self.editor_focus = EditorFocus::MainEditor;
+        self.sidebar_mode = SidebarMode::Normal;
     }
 
-    /// Unfocus the current slot and return sidebar to normal mode
-    pub fn unfocus_slot(&mut self) {
-        self.focused_slot = None;
+    /// Focus a textarea slot (and unfocus any pick slots, returning sidebar to normal)
+    pub fn focus_textarea_slot(&mut self, slot_label: &str) {
+        self.editor_focus = EditorFocus::TextareaSlot {
+            label: slot_label.to_string(),
+        };
         self.sidebar_mode = SidebarMode::Normal;
+    }
+
+    /// Focus a pick slot and switch sidebar to picker mode
+    pub fn focus_slot(&mut self, slot_label: &str) {
+        self.editor_focus = EditorFocus::PickSlot {
+            label: slot_label.to_string(),
+        };
+        self.sidebar_mode = SidebarMode::SlotPicker {
+            slot_label: slot_label.to_string(),
+        };
+    }
+
+    /// Unfocus the current editor/slot and return sidebar to normal mode
+    pub fn unfocus_slot(&mut self) {
+        self.editor_focus = EditorFocus::None;
+        self.sidebar_mode = SidebarMode::Normal;
+    }
+
+    /// Check if a specific slot is focused (pick or textarea)
+    pub fn is_slot_focused(&self, slot_label: &str) -> bool {
+        matches!(
+            &self.editor_focus,
+            EditorFocus::PickSlot { label } | EditorFocus::TextareaSlot { label } if label == slot_label
+        )
+    }
+
+    /// Check if the main editor is focused
+    pub fn is_main_editor_focused(&self) -> bool {
+        matches!(self.editor_focus, EditorFocus::MainEditor)
     }
 
     /// Get expanded options for a pick slot, resolving group references
