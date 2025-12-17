@@ -12,10 +12,7 @@ use std::collections::HashMap;
 
 use rand::prelude::*;
 
-use crate::ast::{
-    LibraryRef, Node, OptionItem, PickOperator, PickSlot, PickSource, SlotBlock, SlotKind,
-    Template,
-};
+use crate::ast::{LibraryRef, Node, OptionItem, PickOperator, PickSlot, SlotKind, Template};
 use crate::library::PromptGroup;
 use crate::parser::parse_template;
 use crate::workspace::Workspace;
@@ -182,7 +179,7 @@ fn eval_node<R: Rng>(
 
             match &slot_block.kind.0 {
                 SlotKind::Textarea => {
-                    // Textarea slot: check for override, otherwise show placeholder
+                    // Textarea slot: check for override, otherwise return empty string
                     if let Some(values) = ctx.slot_overrides.get(slot_name).cloned() {
                         // For textarea, join all values (typically just one)
                         // Each value can contain grammar - parse and evaluate
@@ -196,8 +193,8 @@ fn eval_node<R: Rng>(
                         }
                         Ok(result)
                     } else {
-                        // Leave the slot placeholder as-is if no override provided
-                        Ok(format!("{{{{ {} }}}}", slot_name))
+                        // No value provided - render as empty string per spec
+                        Ok(String::new())
                     }
                 }
                 SlotKind::Pick(pick) => {
@@ -206,8 +203,8 @@ fn eval_node<R: Rng>(
                         // Validate and render the pick slot values
                         eval_pick_slot_value(slot_name, &values, pick, ctx, chosen_options)
                     } else {
-                        // Leave the slot placeholder as-is if no override provided
-                        Ok(slot_block_to_placeholder(slot_block))
+                        // No value provided - render as empty string per spec
+                        Ok(String::new())
                     }
                 }
             }
@@ -220,107 +217,6 @@ fn eval_node<R: Rng>(
         }
 
         Node::InlineOptions(options) => eval_inline_options(options, ctx, chosen_options),
-    }
-}
-
-/// Convert a slot block to its placeholder string representation.
-/// This preserves the full slot syntax for display when no value is provided.
-fn slot_block_to_placeholder(slot_block: &SlotBlock) -> String {
-    let mut output = String::new();
-    output.push_str("{{ ");
-
-    // Label - quote if it contains special characters
-    let label = &slot_block.label.0;
-    let needs_quotes = label.contains(':') || label.contains('"') || label.contains('}');
-    if needs_quotes {
-        output.push('"');
-        output.push_str(label);
-        output.push('"');
-    } else {
-        output.push_str(label);
-    }
-
-    // Kind
-    match &slot_block.kind.0 {
-        SlotKind::Textarea => {
-            // Nothing more to add for textarea
-        }
-        SlotKind::Pick(pick) => {
-            output.push_str(": pick(");
-
-            // Sources
-            for (i, (source, _span)) in pick.sources.iter().enumerate() {
-                if i > 0 {
-                    output.push_str(", ");
-                }
-                match source {
-                    PickSource::GroupRef(lib_ref) => {
-                        library_ref_to_string(lib_ref, &mut output);
-                    }
-                    PickSource::Literal { value, quoted } => {
-                        if *quoted {
-                            // Preserve quotes for quoted literals
-                            output.push('"');
-                            output.push_str(&value.replace('\\', "\\\\").replace('"', "\\\""));
-                            output.push('"');
-                        } else {
-                            // Bare literals stay bare
-                            output.push_str(value);
-                        }
-                    }
-                }
-            }
-
-            output.push(')');
-
-            // Operators
-            for (op, _span) in &pick.operators {
-                match op {
-                    PickOperator::One => {
-                        output.push_str(" | one");
-                    }
-                    PickOperator::Many(spec) => {
-                        output.push_str(" | many");
-                        if spec.max.is_some() || spec.sep.is_some() {
-                            output.push('(');
-                            let mut first = true;
-                            if let Some(max) = spec.max {
-                                output.push_str(&format!("max={}", max));
-                                first = false;
-                            }
-                            if let Some(sep) = &spec.sep {
-                                if !first {
-                                    output.push_str(", ");
-                                }
-                                output.push_str(&format!("sep=\"{}\"", sep));
-                            }
-                            output.push(')');
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    output.push_str(" }}");
-    output
-}
-
-/// Convert a library reference to string format for placeholder output.
-fn library_ref_to_string(lib_ref: &LibraryRef, output: &mut String) {
-    output.push('@');
-    if let Some(library) = &lib_ref.library {
-        output.push('"');
-        output.push_str(library);
-        output.push(':');
-        output.push_str(&lib_ref.group);
-        output.push('"');
-    } else if lib_ref.group.contains(' ') || lib_ref.group.contains(':') {
-        output.push('"');
-        output.push_str(&lib_ref.group);
-        output.push('"');
-    } else {
-        output.push_str(&lib_ref.group);
     }
 }
 
@@ -675,7 +571,8 @@ mod tests {
         let mut ctx = EvalContext::with_seed(&ws, 42);
 
         let result = render(&ast, &mut ctx).unwrap();
-        assert_eq!(result.text, "Hello {{ Name }}!");
+        // Empty slots render to empty string per spec
+        assert_eq!(result.text, "Hello !");
     }
 
     #[test]

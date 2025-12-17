@@ -45,8 +45,8 @@ templates:
 
     let result = eval_template(&lib, "Greeting", Some(42));
 
-    // Without slot override, the slot should be preserved
-    assert_eq!(result.text, "Hello {{ Name }}");
+    // Without slot override, the slot renders to empty string per spec
+    assert_eq!(result.text, "Hello ");
 }
 
 #[test]

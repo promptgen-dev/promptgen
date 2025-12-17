@@ -134,11 +134,12 @@ fn inline_options_three_choices() {
 // ============================================================================
 
 #[test]
-fn slot_without_override_preserved() {
+fn slot_without_override_renders_empty() {
     let lib = empty_lib();
     let result = eval(&lib, "Hello {{ Name }}", None);
 
-    assert_eq!(result.text, "Hello {{ Name }}");
+    // Empty slots render to empty string per spec
+    assert_eq!(result.text, "Hello ");
 }
 
 #[test]

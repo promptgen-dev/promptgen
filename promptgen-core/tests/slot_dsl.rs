@@ -35,10 +35,11 @@ fn textarea_slot_with_quoted_label() {
 }
 
 #[test]
-fn textarea_slot_preserves_unset_value() {
+fn textarea_slot_renders_empty_when_unset() {
     let lib = empty_lib();
     let result = eval(&lib, "Hello {{ Name }}", None);
-    assert_eq!(result.text, "Hello {{ Name }}");
+    // Empty slots render to empty string per spec
+    assert_eq!(result.text, "Hello ");
 }
 
 #[test]
@@ -54,78 +55,76 @@ fn multiple_textarea_slots() {
 }
 
 // ============================================================================
-// Pick Slot Placeholder Tests
+// Pick Slot Empty Render Tests (slots without values render to empty string)
 // ============================================================================
 
 #[test]
-fn pick_slot_preserves_placeholder_without_value() {
+fn pick_slot_renders_empty_without_value() {
     let lib = empty_lib();
     let result = eval(&lib, "{{ Choice: pick(@Color) }}", None);
-    assert_eq!(result.text, "{{ Choice: pick(@Color) }}");
+    // Empty slots render to empty string per spec
+    assert_eq!(result.text, "");
 }
 
 #[test]
-fn pick_slot_with_one_preserves_placeholder() {
+fn pick_slot_with_one_renders_empty() {
     let lib = empty_lib();
     let result = eval(&lib, "{{ Choice: pick(@Color) | one }}", None);
-    assert_eq!(result.text, "{{ Choice: pick(@Color) | one }}");
+    assert_eq!(result.text, "");
 }
 
 #[test]
-fn pick_slot_with_many_preserves_placeholder() {
+fn pick_slot_with_many_renders_empty() {
     let lib = empty_lib();
     let result = eval(&lib, "{{ Tags: pick(@Tag) | many }}", None);
-    assert_eq!(result.text, "{{ Tags: pick(@Tag) | many }}");
+    assert_eq!(result.text, "");
 }
 
 #[test]
-fn pick_slot_with_many_max_preserves_placeholder() {
+fn pick_slot_with_many_max_renders_empty() {
     let lib = empty_lib();
     let result = eval(&lib, "{{ Colors: pick(@Color) | many(max=2) }}", None);
-    assert_eq!(result.text, "{{ Colors: pick(@Color) | many(max=2) }}");
+    assert_eq!(result.text, "");
 }
 
 #[test]
-fn pick_slot_with_many_sep_preserves_placeholder() {
+fn pick_slot_with_many_sep_renders_empty() {
     let lib = empty_lib();
     let result = eval(
         &lib,
         r#"{{ Words: pick(@Word) | many(sep=" | ") }}"#,
         None,
     );
-    assert_eq!(result.text, r#"{{ Words: pick(@Word) | many(sep=" | ") }}"#);
+    assert_eq!(result.text, "");
 }
 
 #[test]
-fn pick_slot_with_many_max_and_sep_preserves_placeholder() {
+fn pick_slot_with_many_max_and_sep_renders_empty() {
     let lib = empty_lib();
     let result = eval(
         &lib,
         r#"{{ Fruits: pick(@Fruit) | many(max=3, sep="; ") }}"#,
         None,
     );
-    assert_eq!(
-        result.text,
-        r#"{{ Fruits: pick(@Fruit) | many(max=3, sep="; ") }}"#
-    );
+    assert_eq!(result.text, "");
 }
 
 #[test]
-fn pick_slot_with_literals_preserves_placeholder() {
+fn pick_slot_with_literals_renders_empty() {
     let lib = empty_lib();
     let result = eval(
         &lib,
         r#"{{ Choice: pick("yes", "no", "maybe") }}"#,
         None,
     );
-    assert_eq!(result.text, r#"{{ Choice: pick("yes", "no", "maybe") }}"#);
+    assert_eq!(result.text, "");
 }
 
 #[test]
-fn pick_slot_with_mixed_sources_preserves_placeholder() {
+fn pick_slot_with_mixed_sources_renders_empty() {
     let lib = empty_lib();
     let result = eval(&lib, r#"{{ Choice: pick(@Color, "custom") }}"#, None);
-    assert_eq!(result.text, r#"{{ Choice: pick(@Color, "custom") }}"#);
+    assert_eq!(result.text, "");
 }
 
 // ============================================================================
@@ -492,36 +491,28 @@ fn textarea_and_pick_slots_together() {
 #[test]
 fn textarea_and_pick_slots_partial_values() {
     let lib = empty_lib();
-    // When only textarea has value, pick slot shows placeholder
+    // When only textarea has value, pick slot renders to empty string
     let result = eval_with_slots(
         &lib,
         "{{ Name }} likes {{ FavoriteColor: pick(@Color) | one }}",
         &[("Name", "Alice")],
         None,
     );
-    assert_eq!(
-        result.text,
-        "Alice likes {{ FavoriteColor: pick(@Color) | one }}"
-    );
+    // Empty pick slot renders to empty string per spec
+    assert_eq!(result.text, "Alice likes ");
 }
 
 #[test]
 fn pick_slot_with_inline_options() {
     let lib = empty_lib();
-    // Inline options evaluate, but pick slot preserves placeholder
+    // Inline options evaluate, empty pick slot renders to empty string
     let result = eval(&lib, "A {big|small} {{ Choice: pick(@Hair) | one }}", Some(42));
 
-    // Should start with "A big " or "A small "
-    let valid_starts = ["A big ", "A small "];
+    // Should be "A big " or "A small " (empty slot renders to empty string)
+    let valid = ["A big ", "A small "];
     assert!(
-        valid_starts.iter().any(|s| result.text.starts_with(s)),
-        "Result should start with 'A big ' or 'A small ', got '{}'",
-        result.text
-    );
-    // Should end with the pick slot placeholder
-    assert!(
-        result.text.ends_with("{{ Choice: pick(@Hair) | one }}"),
-        "Should end with pick slot placeholder, got '{}'",
+        valid.contains(&result.text.as_str()),
+        "Result should be 'A big ' or 'A small ', got '{}'",
         result.text
     );
 }
@@ -535,26 +526,20 @@ groups:
       - blonde hair
       - red hair
 "#);
-    // Library refs evaluate, but pick slot preserves placeholder
+    // Library refs evaluate, empty pick slot renders to empty string
     let result = eval(
         &lib,
         "@Hair and {{ EyeChoice: pick(@Eyes) | one }}",
         Some(42),
     );
 
-    // Should contain hair from library ref (evaluated)
-    let has_hair = result.text.contains("blonde hair") || result.text.contains("red hair");
+    // Should be "blonde hair and " or "red hair and " (empty slot renders to empty string)
+    let valid = ["blonde hair and ", "red hair and "];
     assert!(
-        has_hair,
-        "Result '{}' should contain hair type",
-        result.text
-    );
-
-    // Should contain the pick slot placeholder (not evaluated)
-    assert!(
-        result.text.contains("{{ EyeChoice: pick(@Eyes) | one }}"),
-        "Result '{}' should contain pick slot placeholder",
-        result.text
+        valid.contains(&result.text.as_str()),
+        "Result '{}' should be one of {:?}",
+        result.text,
+        valid
     );
 }
 
