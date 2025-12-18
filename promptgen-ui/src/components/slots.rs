@@ -220,6 +220,9 @@ impl SlotPanel {
                         // Use horizontal_wrapped with egui_dnd for drag-and-drop
                         ui.horizontal_wrapped(|ui| {
                             let dnd_id = format!("slot_dnd_{}", label_owned);
+                            // Calculate max chip width (leave room for spacing)
+                            let max_chip_width = (ui.available_width() - 16.0).max(100.0);
+
                             dnd(ui, dnd_id).show_custom_vec(&mut items, |ui, items, item_iter| {
                                 items.iter().enumerate().for_each(|(idx, item)| {
                                     let (_original_idx, value) = item;
@@ -233,12 +236,14 @@ impl SlotPanel {
                                     let chip_spacing = 4.0; // space between label and X button
                                     let chip_vertical_padding = 2.0; // top + bottom
 
+                                    let raw_chip_width = text_size.x
+                                        + x_button_size.x
+                                        + chip_padding * 2.0
+                                        + chip_spacing
+                                        + 8.0; // extra for button frame
+
                                     let chip_size = Vec2::new(
-                                        text_size.x
-                                            + x_button_size.x
-                                            + chip_padding * 2.0
-                                            + chip_spacing
-                                            + 8.0, // extra for button frame
+                                        raw_chip_width.min(max_chip_width),
                                         text_size.y.max(x_button_size.y)
                                             + chip_vertical_padding * 2.0
                                             + 4.0,
@@ -273,7 +278,12 @@ impl SlotPanel {
                                                                 ui.horizontal(|ui| {
                                                                     ui.spacing_mut().item_spacing.x =
                                                                         chip_spacing;
-                                                                    ui.label(value);
+                                                                    // Truncate long labels
+                                                                    let label_response = ui.add(
+                                                                        Label::new(value).truncate(),
+                                                                    );
+                                                                    // Show full text on hover
+                                                                    label_response.on_hover_text(value);
                                                                     if ui
                                                                         .small_button("x")
                                                                         .on_hover_text("Remove")

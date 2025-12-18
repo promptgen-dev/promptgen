@@ -527,22 +527,23 @@ impl SidebarPanel {
                 for option in &options {
                     let is_selected = selected_values.contains(option);
 
-                    ui.horizontal(|ui| {
-                        // Checkbox or selectable label
-                        let response = ui.selectable_label(is_selected, option);
+                    // Use full width selectable label, left-aligned
+                    let response = ui.selectable_label(is_selected, option.as_str());
 
-                        if response.clicked() {
-                            if is_selected {
-                                // Remove selection
-                                state.remove_slot_value(&slot_label, option);
-                                state.request_render();
-                            } else if can_add {
-                                // Add/replace selection (add_slot_value handles single-select replacement)
-                                state.add_slot_value(&slot_label, option.clone());
-                                state.request_render();
-                            }
+                    // Show full text on hover for truncated options
+                    response.clone().on_hover_text(option);
+
+                    if response.clicked() {
+                        if is_selected {
+                            // Remove selection
+                            state.remove_slot_value(&slot_label, option);
+                            state.request_render();
+                        } else if can_add {
+                            // Add/replace selection (add_slot_value handles single-select replacement)
+                            state.add_slot_value(&slot_label, option.clone());
+                            state.request_render();
                         }
-                    });
+                    }
                 }
             });
     }
