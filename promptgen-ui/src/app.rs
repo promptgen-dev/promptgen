@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use crate::components::{EditorPanel, PreviewPanel, SidebarPanel, SlotPanel};
-use crate::state::AppState;
+use crate::components::{EditorPanel, GroupEditorPanel, PreviewPanel, SidebarPanel, SlotPanel};
+use crate::state::{AppState, EditorMode};
 use crate::theme;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -67,6 +67,23 @@ impl PromptGenApp {
     /// Load all libraries from the current workspace
     #[cfg(not(target_arch = "wasm32"))]
     fn load_libraries(&mut self) {
+        // First get library summaries to get paths
+        match self.storage.list_libraries() {
+            Ok(summaries) => {
+                // Store paths
+                self.state.library_paths.clear();
+                for summary in &summaries {
+                    self.state
+                        .library_paths
+                        .insert(summary.id.clone(), summary.path.clone());
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to list libraries: {}", e);
+            }
+        }
+
+        // Then load all libraries
         match self.storage.load_all_libraries() {
             Ok(libraries) => {
                 self.state.libraries = libraries;
@@ -156,15 +173,24 @@ impl eframe::App for PromptGenApp {
                 .id_salt("main_scroll")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    // Editor section
-                    EditorPanel::show(ui, &mut self.state);
+                    // Choose which editor to show based on editor mode
+                    match &self.state.editor_mode {
+                        EditorMode::Template => {
+                            // Template editor section
+                            EditorPanel::show(ui, &mut self.state);
 
-                    // Slots section (only show if there are slots)
-                    let has_slots = !self.state.get_slot_definitions().is_empty();
-                    if has_slots {
-                        ui.separator();
-                        ui.heading("Slots");
-                        SlotPanel::show(ui, &mut self.state);
+                            // Slots section (only show if there are slots)
+                            let has_slots = !self.state.get_slot_definitions().is_empty();
+                            if has_slots {
+                                ui.separator();
+                                ui.heading("Slots");
+                                SlotPanel::show(ui, &mut self.state);
+                            }
+                        }
+                        EditorMode::GroupEditor { .. } | EditorMode::NewGroup => {
+                            // Group editor section
+                            GroupEditorPanel::show(ui, &mut self.state);
+                        }
                     }
                 });
         });

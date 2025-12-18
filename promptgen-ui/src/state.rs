@@ -42,6 +42,27 @@ pub enum EditorFocus {
     PickSlot { label: String },
 }
 
+/// What the central editor panel is currently showing
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum EditorMode {
+    /// Normal template editing mode
+    #[default]
+    Template,
+    /// Editing an existing group
+    GroupEditor { group_name: String },
+    /// Creating a new group
+    NewGroup,
+}
+
+/// Active confirmation dialog
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfirmDialog {
+    /// Confirm discarding unsaved group editor changes
+    DiscardGroupChanges,
+    /// Confirm deleting a group
+    DeleteGroup { group_name: String },
+}
+
 /// Persisted application configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -56,6 +77,7 @@ pub struct AppState {
     // Workspace
     pub workspace: Workspace,
     pub libraries: Vec<Library>,
+    pub library_paths: HashMap<String, std::path::PathBuf>, // library_id -> file_path
     pub selected_library_id: Option<String>,
 
     // Editor
@@ -76,6 +98,14 @@ pub struct AppState {
     pub sidebar_mode: SidebarMode,
     pub search_query: String,
     pub editor_focus: EditorFocus,
+
+    // Group Editor State
+    pub editor_mode: EditorMode,
+    pub group_editor_name: String,
+    pub group_editor_content: String,
+    pub group_editor_original_name: Option<String>,
+    pub group_editor_dirty: bool,
+    pub confirm_dialog: Option<ConfirmDialog>,
 }
 
 impl Default for AppState {
@@ -83,6 +113,7 @@ impl Default for AppState {
         Self {
             workspace: Workspace::new(),
             libraries: Vec::new(),
+            library_paths: HashMap::new(),
             selected_library_id: None,
             editor_content: String::new(),
             selected_template_id: None,
@@ -97,6 +128,12 @@ impl Default for AppState {
             sidebar_mode: SidebarMode::default(),
             search_query: String::new(),
             editor_focus: EditorFocus::default(),
+            editor_mode: EditorMode::default(),
+            group_editor_name: String::new(),
+            group_editor_content: String::new(),
+            group_editor_original_name: None,
+            group_editor_dirty: false,
+            confirm_dialog: None,
         }
     }
 }
@@ -373,5 +410,193 @@ impl AppState {
             .and_then(|v| v.first())
             .cloned()
             .unwrap_or_default()
+    }
+
+    // ==================== Group Editor Methods ====================
+
+    /// Enter group editor mode for an existing group
+    pub fn enter_group_editor(&mut self, group_name: &str) {
+        // Find the group in the current library and extract data
+        let group_data = self.selected_library().and_then(|library| {
+            library
+                .groups
+                .iter()
+                .find(|g| g.name == group_name)
+                .map(|group| (group.name.clone(), group.options.clone()))
+        });
+
+        if let Some((name, options)) = group_data {
+            self.group_editor_name = name.clone();
+            self.group_editor_content = Self::options_to_text(&options);
+            self.group_editor_original_name = Some(name);
+            self.group_editor_dirty = false;
+            self.editor_mode = EditorMode::GroupEditor {
+                group_name: group_name.to_string(),
+            };
+            // Switch sidebar to variables view
+            self.sidebar_view_mode = SidebarViewMode::Variables;
+            self.sidebar_mode = SidebarMode::Normal;
+        }
+    }
+
+    /// Enter group editor mode for creating a new group
+    pub fn enter_new_group_editor(&mut self) {
+        self.group_editor_name = String::new();
+        self.group_editor_content = String::new();
+        self.group_editor_original_name = None;
+        self.group_editor_dirty = false;
+        self.editor_mode = EditorMode::NewGroup;
+        // Switch sidebar to variables view
+        self.sidebar_view_mode = SidebarViewMode::Variables;
+        self.sidebar_mode = SidebarMode::Normal;
+    }
+
+    /// Exit group editor mode and return to template editor
+    /// Returns false if there are unsaved changes (caller should show confirmation)
+    pub fn try_exit_group_editor(&mut self) -> bool {
+        if self.group_editor_dirty {
+            self.confirm_dialog = Some(ConfirmDialog::DiscardGroupChanges);
+            return false;
+        }
+        self.exit_group_editor_force();
+        true
+    }
+
+    /// Force exit group editor mode (discards any unsaved changes)
+    pub fn exit_group_editor_force(&mut self) {
+        self.editor_mode = EditorMode::Template;
+        self.group_editor_name.clear();
+        self.group_editor_content.clear();
+        self.group_editor_original_name = None;
+        self.group_editor_dirty = false;
+        self.confirm_dialog = None;
+    }
+
+    /// Check if the group editor has unsaved changes
+    pub fn is_group_editor_dirty(&self) -> bool {
+        self.group_editor_dirty
+    }
+
+    /// Mark the group editor as having changes
+    pub fn mark_group_editor_dirty(&mut self) {
+        self.group_editor_dirty = true;
+    }
+
+    /// Parse options text into a Vec of options.
+    ///
+    /// Format:
+    /// - Each line is a separate option by default
+    /// - `---` on its own line marks the START of a multiline option
+    /// - The multiline option continues until the next `---` or end of text
+    ///
+    /// Example:
+    /// ```text
+    /// option 1
+    /// option 2
+    /// ---
+    /// some
+    ///
+    /// multiline option
+    /// ---
+    /// option 3
+    /// ```
+    /// Produces: ["option 1", "option 2", "some\n\nmultiline option", "option 3"]
+    pub fn parse_options(text: &str) -> Vec<String> {
+        let mut options = Vec::new();
+        let mut in_multiline = false;
+        let mut multiline_buffer = String::new();
+
+        for line in text.lines() {
+            if line.trim() == "---" {
+                if in_multiline {
+                    // End of multiline option
+                    let trimmed = multiline_buffer.trim().to_string();
+                    if !trimmed.is_empty() {
+                        options.push(trimmed);
+                    }
+                    multiline_buffer.clear();
+                    in_multiline = false;
+                } else {
+                    // Start of multiline option
+                    in_multiline = true;
+                }
+            } else if in_multiline {
+                // Inside a multiline option - preserve newlines
+                if !multiline_buffer.is_empty() {
+                    multiline_buffer.push('\n');
+                }
+                multiline_buffer.push_str(line);
+            } else {
+                // Single-line option
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    options.push(trimmed.to_string());
+                }
+            }
+        }
+
+        // Handle unclosed multiline block
+        if in_multiline && !multiline_buffer.trim().is_empty() {
+            options.push(multiline_buffer.trim().to_string());
+        }
+
+        options
+    }
+
+    /// Convert options Vec to text format.
+    ///
+    /// Single-line options are output as-is (one per line).
+    /// Multi-line options are wrapped with `---` delimiters.
+    pub fn options_to_text(options: &[String]) -> String {
+        options
+            .iter()
+            .map(|opt| {
+                if opt.contains('\n') {
+                    // Multiline option - wrap with ---
+                    format!("---\n{}\n---", opt)
+                } else {
+                    opt.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Get the current options count from the editor content
+    pub fn get_group_editor_option_count(&self) -> usize {
+        Self::parse_options(&self.group_editor_content).len()
+    }
+
+    /// Validate group name (returns error message if invalid)
+    pub fn validate_group_name(&self) -> Option<String> {
+        let name = self.group_editor_name.trim();
+
+        if name.is_empty() {
+            return Some("Group name cannot be empty".to_string());
+        }
+
+        // Check for duplicate names (excluding the original name if editing)
+        if let Some(library) = self.selected_library() {
+            let is_duplicate = library.groups.iter().any(|g| {
+                g.name == name && Some(&g.name) != self.group_editor_original_name.as_ref()
+            });
+            if is_duplicate {
+                return Some(format!("A group named \"{}\" already exists", name));
+            }
+        }
+
+        None
+    }
+
+    /// Request to delete a group (shows confirmation dialog)
+    pub fn request_delete_group(&mut self, group_name: &str) {
+        self.confirm_dialog = Some(ConfirmDialog::DeleteGroup {
+            group_name: group_name.to_string(),
+        });
+    }
+
+    /// Cancel any active confirmation dialog
+    pub fn cancel_confirm_dialog(&mut self) {
+        self.confirm_dialog = None;
     }
 }

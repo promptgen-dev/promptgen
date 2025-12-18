@@ -254,6 +254,11 @@ impl SidebarPanel {
 
         if library.groups.is_empty() {
             ui.label("No variables in this library");
+            // Still show add button
+            ui.add_space(8.0);
+            if ui.button("+ New Group").clicked() {
+                state.enter_new_group_editor();
+            }
             return;
         }
 
@@ -264,16 +269,61 @@ impl SidebarPanel {
             .map(|g| (g.name.clone(), g.options.clone()))
             .collect();
 
+        // Track which group to edit (to avoid borrow issues)
+        let mut group_to_edit: Option<String> = None;
+
         for (name, options) in groups {
             let header_text = format!("@{} ({})", name, options.len());
+            let id = ui.make_persistent_id(&name);
 
-            egui::CollapsingHeader::new(&header_text)
-                .default_open(false)
-                .show(ui, |ui| {
-                    for option in &options {
-                        ui.label(format!("  • {}", option));
+            // Use CollapsingState for custom header layout
+            let mut collapsing_state =
+                egui::collapsing_header::CollapsingState::load_with_default_open(
+                    ui.ctx(),
+                    id,
+                    false,
+                );
+
+            // Header row: collapse toggle + label + edit button
+            ui.horizontal(|ui| {
+                // Toggle icon (replicates CollapsingHeader behavior)
+                let icon = if collapsing_state.is_open() {
+                    "⏷"
+                } else {
+                    "⏵"
+                };
+                if ui.small_button(icon).clicked() {
+                    collapsing_state.toggle(ui);
+                }
+
+                // Group name label
+                ui.label(&header_text);
+
+                // Edit button aligned right
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("✎").on_hover_text("Edit group").clicked() {
+                        group_to_edit = Some(name.clone());
                     }
                 });
+            });
+
+            // Body content (only shown when expanded)
+            collapsing_state.show_body_unindented(ui, |ui| {
+                for option in &options {
+                    ui.label(format!("    • {}", option));
+                }
+            });
+        }
+
+        // Handle edit action after the loop
+        if let Some(name) = group_to_edit {
+            state.enter_group_editor(&name);
+        }
+
+        // Add new group button at the bottom
+        ui.add_space(8.0);
+        if ui.button("+ New Group").clicked() {
+            state.enter_new_group_editor();
         }
     }
 
