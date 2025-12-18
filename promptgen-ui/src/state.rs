@@ -131,17 +131,15 @@ impl AppState {
                 .retain(|name, _| current_slots.contains(name));
             // Add new slots with empty values
             for slot in current_slots {
-                self.slot_values.entry(slot).or_insert_with(Vec::new);
+                self.slot_values.entry(slot).or_default();
             }
             // Clear focused slot if it no longer exists
             if let EditorFocus::PickSlot { ref label } | EditorFocus::TextareaSlot { ref label } =
                 self.editor_focus
-            {
-                if !self.slot_values.contains_key(label) {
+                && !self.slot_values.contains_key(label) {
                     self.editor_focus = EditorFocus::None;
                     self.sidebar_mode = SidebarMode::Normal;
                 }
-            }
         }
     }
 
@@ -277,8 +275,8 @@ impl AppState {
     /// Get expanded options for a pick slot, resolving group references
     pub fn get_pick_options(&self, slot_label: &str) -> Vec<String> {
         let definitions = self.get_slot_definitions();
-        if let Some(def) = definitions.iter().find(|d| d.label == slot_label) {
-            if let SlotDefKind::Pick { sources, .. } = &def.kind {
+        if let Some(def) = definitions.iter().find(|d| d.label == slot_label)
+            && let SlotDefKind::Pick { sources, .. } = &def.kind {
                 let mut options = Vec::new();
                 for source in sources {
                     match source {
@@ -304,7 +302,6 @@ impl AppState {
                 }
                 return options;
             }
-        }
         Vec::new()
     }
 

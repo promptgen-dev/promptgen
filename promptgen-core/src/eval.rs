@@ -273,15 +273,14 @@ fn eval_pick_slot_value<R: Rng>(
         });
     }
 
-    if let Some(max_val) = max {
-        if count > max_val as usize {
+    if let Some(max_val) = max
+        && count > max_val as usize {
             return Err(RenderError::TooManyValuesForMany {
                 slot: slot_name.to_string(),
                 max: max_val,
                 count,
             });
         }
-    }
 
     // Evaluate each value (may contain grammar like @Color or {a|b})
     let mut evaluated: Vec<String> = Vec::with_capacity(count);

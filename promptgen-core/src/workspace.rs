@@ -521,11 +521,10 @@ impl Workspace {
             if let Node::SlotBlock(slot_block) = node {
                 let label = &slot_block.label.0;
                 // Only include first occurrence of each slot label
-                if seen_labels.insert(label.clone()) {
-                    if let Ok(def) = slot_block.to_definition() {
+                if seen_labels.insert(label.clone())
+                    && let Ok(def) = slot_block.to_definition() {
                         slots.push(def);
                     }
-                }
             }
         }
 
