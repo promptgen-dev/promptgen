@@ -8,8 +8,12 @@
 
 mod common;
 
-use common::{empty_lib, eval, eval_with_slot_values, eval_with_slots, lib, try_eval_with_slot_values};
+use common::{
+    empty_lib, eval, eval_with_slot_values, eval_with_slots, lib, try_eval_with_slot_values,
+};
 use promptgen_core::{ParseError, RenderError, parse_template};
+
+use crate::common::try_eval_with_slots;
 
 // ============================================================================
 // Textarea Slot Tests
@@ -90,11 +94,7 @@ fn pick_slot_with_many_max_renders_empty() {
 #[test]
 fn pick_slot_with_many_sep_renders_empty() {
     let lib = empty_lib();
-    let result = eval(
-        &lib,
-        r#"{{ Words: pick(@Word) | many(sep=" | ") }}"#,
-        None,
-    );
+    let result = eval(&lib, r#"{{ Words: pick(@Word) | many(sep=" | ") }}"#, None);
     assert_eq!(result.text, "");
 }
 
@@ -112,11 +112,7 @@ fn pick_slot_with_many_max_and_sep_renders_empty() {
 #[test]
 fn pick_slot_with_literals_renders_empty() {
     let lib = empty_lib();
-    let result = eval(
-        &lib,
-        r#"{{ Choice: pick("yes", "no", "maybe") }}"#,
-        None,
-    );
+    let result = eval(&lib, r#"{{ Choice: pick("yes", "no", "maybe") }}"#, None);
     assert_eq!(result.text, "");
 }
 
@@ -506,7 +502,11 @@ fn textarea_and_pick_slots_partial_values() {
 fn pick_slot_with_inline_options() {
     let lib = empty_lib();
     // Inline options evaluate, empty pick slot renders to empty string
-    let result = eval(&lib, "A {big|small} {{ Choice: pick(@Hair) | one }}", Some(42));
+    let result = eval(
+        &lib,
+        "A {big|small} {{ Choice: pick(@Hair) | one }}",
+        Some(42),
+    );
 
     // Should be "A big " or "A small " (empty slot renders to empty string)
     let valid = ["A big ", "A small "];
@@ -579,6 +579,19 @@ groups:
 // ============================================================================
 // Edge Case Tests
 // ============================================================================
+
+#[test]
+fn slots_should_not_allow_slots_to_render() {
+    let lib = empty_lib();
+    let result = try_eval_with_slots(&lib, r#"{{ Slot }}"#, &[("Slot", "{{ Slot }}")], None);
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        RenderError::SlotReferencesSlot(label) => {
+            assert_eq!(label, "Slot");
+        }
+        other => panic!("Expected SlotReferencesSlot error, got {:?}", other),
+    }
+}
 
 #[test]
 fn slot_label_with_special_chars_quoted() {

@@ -140,6 +140,9 @@ pub enum RenderError {
         max: u32,
         count: usize,
     },
+
+    #[error("Slots may not reference other slots: {0}")]
+    SlotReferencesSlot(String),
 }
 
 /// Render a parsed template AST using the given context.
@@ -221,12 +224,20 @@ fn eval_node<R: Rng>(
 }
 
 /// Parse and evaluate text that may contain grammar.
+/// Slot values may not contain slot blocks (would cause infinite recursion).
 fn eval_text_with_grammar<R: Rng>(
     text: &str,
     ctx: &mut EvalContext<'_, R>,
     chosen_options: &mut Vec<ChosenOption>,
 ) -> Result<String, RenderError> {
     let ast = parse_template(text).map_err(|e| RenderError::OptionParseError(e.to_string()))?;
+
+    // Check for slot blocks in the parsed AST - slots may not reference other slots
+    for (node, _span) in &ast.nodes {
+        if let Node::SlotBlock(slot_block) = node {
+            return Err(RenderError::SlotReferencesSlot(slot_block.label.0.clone()));
+        }
+    }
 
     let mut output = String::new();
     for (node, _span) in &ast.nodes {
@@ -382,8 +393,7 @@ fn resolve_group<'a>(
                 0 => Err(RenderError::GroupNotFound(lib_ref.group.clone())),
                 1 => Ok((matches[0].0.name.clone(), matches[0].1)),
                 _ => {
-                    let lib_names: Vec<_> =
-                        matches.iter().map(|(l, _)| l.name.as_str()).collect();
+                    let lib_names: Vec<_> = matches.iter().map(|(l, _)| l.name.as_str()).collect();
                     Err(RenderError::AmbiguousGroup {
                         group: lib_ref.group.clone(),
                         libraries: lib_names.join(", "),
@@ -466,8 +476,10 @@ mod tests {
             "Weather",
             vec!["sunny", "rainy", "cloudy"],
         ));
-        lib2.groups
-            .push(PromptGroup::with_options("Time", vec!["morning", "evening"]));
+        lib2.groups.push(PromptGroup::with_options(
+            "Time",
+            vec!["morning", "evening"],
+        ));
 
         WorkspaceBuilder::new()
             .add_library(lib1)
@@ -506,8 +518,10 @@ mod tests {
     #[test]
     fn test_render_quoted_library_ref() {
         let mut lib = Library::with_id("test", "Test");
-        lib.groups
-            .push(PromptGroup::with_options("Eye Color", vec!["amber", "violet"]));
+        lib.groups.push(PromptGroup::with_options(
+            "Eye Color",
+            vec!["amber", "violet"],
+        ));
 
         let ws = WorkspaceBuilder::new().add_library(lib).build();
         let ast = parse_template(r#"@"Eye Color""#).unwrap();
@@ -657,8 +671,10 @@ mod tests {
     #[test]
     fn test_render_nested_grammar_in_options() {
         let mut lib = Library::with_id("test", "Test");
-        lib.groups
-            .push(PromptGroup::with_options("Color", vec!["red", "blue", "green"]));
+        lib.groups.push(PromptGroup::with_options(
+            "Color",
+            vec!["red", "blue", "green"],
+        ));
         lib.groups.push(PromptGroup::with_options(
             "FancyEyes",
             vec!["@Color eyes", "sparkling eyes"],
@@ -696,10 +712,8 @@ mod tests {
         let mut lib = Library::with_id("test", "Test");
 
         // Create a cycle: A references B, B references A
-        lib.groups
-            .push(PromptGroup::with_options("A", vec!["@B"]));
-        lib.groups
-            .push(PromptGroup::with_options("B", vec!["@A"]));
+        lib.groups.push(PromptGroup::with_options("A", vec!["@B"]));
+        lib.groups.push(PromptGroup::with_options("B", vec!["@A"]));
 
         let ws = WorkspaceBuilder::new().add_library(lib).build();
         let ast = parse_template("@A").unwrap();

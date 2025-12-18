@@ -1,14 +1,28 @@
 //! Slot panel component for editing template slots.
 
 use egui_flex::{Flex, FlexAlign, FlexItem};
-use promptgen_core::{Cardinality, SlotDefKind};
+use promptgen_core::{Cardinality, Node, ParseResult, SlotDefKind};
 
 use crate::components::focusable_frame::FocusableFrame;
 use crate::components::template_editor::{TemplateEditor, TemplateEditorConfig};
 use crate::state::AppState;
+use crate::theme::syntax;
 
 /// Slot panel for editing template slot values.
 pub struct SlotPanel;
+
+/// Check if a ParseResult contains any slot blocks (which are invalid in slot values).
+/// Returns the label of the first slot block found, if any.
+fn find_slot_block_in_parse_result(parse_result: &ParseResult) -> Option<String> {
+    if let Some(ast) = &parse_result.ast {
+        for (node, _span) in &ast.nodes {
+            if let Node::SlotBlock(slot_block) = node {
+                return Some(slot_block.label.0.clone());
+            }
+        }
+    }
+    None
+}
 
 impl SlotPanel {
     /// Render the slot panel.
@@ -75,6 +89,18 @@ impl SlotPanel {
 
             // Show parse errors below the editor
             TemplateEditor::show_errors(ui, &result.parse_result);
+
+            // Check for slot blocks in the parsed AST (slots cannot reference other slots)
+            if let Some(nested_label) = find_slot_block_in_parse_result(&result.parse_result) {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.colored_label(syntax::ERROR, "error:");
+                    ui.label(format!(
+                        "Slot values cannot contain other slots (found \"{}\")",
+                        nested_label
+                    ));
+                });
+            }
 
             result
         });
