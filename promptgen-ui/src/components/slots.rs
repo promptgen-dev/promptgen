@@ -1,12 +1,26 @@
 //! Slot panel component for editing template slots.
 
-use egui_flex::{Flex, FlexAlign, FlexItem};
+use egui::{Align, Id, Label, Layout, UiBuilder, Vec2};
+use egui_dnd::dnd;
 use promptgen_core::{Cardinality, Node, ParseResult, SlotDefKind};
 
 use crate::components::focusable_frame::FocusableFrame;
 use crate::components::template_editor::{TemplateEditor, TemplateEditorConfig};
 use crate::state::AppState;
 use crate::theme::syntax;
+
+/// Measure text size in the UI (based on hello_egui_utils::measure_text)
+fn measure_text(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) -> Vec2 {
+    let res = Label::new(text).layout_in_ui(
+        &mut ui.new_child(
+            UiBuilder::new()
+                .max_rect(ui.available_rect_before_wrap())
+                .layout(Layout::left_to_right(Align::Center)),
+        ),
+    );
+    // Add small padding to avoid rounding errors
+    res.2.rect.size() + Vec2::new(0.1, 0.0)
+}
 
 /// Slot panel for editing template slot values.
 pub struct SlotPanel;
@@ -126,15 +140,24 @@ impl SlotPanel {
         // Get the editor background color from the current theme
         let editor_bg = ui.visuals().extreme_bg_color;
 
-        // Get current values
-        let values = state.slot_values.get(label).cloned().unwrap_or_default();
+        // Get current values as mutable vec with indices for DnD
+        let mut items: Vec<(usize, String)> = state
+            .slot_values
+            .get(label)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .collect();
+
+        let original_order: Vec<String> = items.iter().map(|(_, s)| s.clone()).collect();
 
         // For single-select, we can always open the picker to change selection
         // For multi-select, check if we're at max
         let can_open_picker = match cardinality {
             Cardinality::One => true, // Always allow opening to change selection
             Cardinality::Many { max: None } => true,
-            Cardinality::Many { max: Some(n) } => values.len() < *n as usize,
+            Cardinality::Many { max: Some(n) } => items.len() < *n as usize,
         };
 
         // Track if chip X button was clicked (need to use Cell for interior mutability)
@@ -142,6 +165,9 @@ impl SlotPanel {
 
         let label_owned = label.to_string();
         let cardinality_clone = cardinality.clone();
+
+        // Track value to remove
+        let to_remove = std::cell::RefCell::new(None::<String>);
 
         let frame_response = FocusableFrame::new(is_focused).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -155,7 +181,7 @@ impl SlotPanel {
                     Cardinality::Many { max: None } => "(multi)",
                     Cardinality::Many { max: Some(n) } => {
                         // Show count/max
-                        let count = values.len();
+                        let count = items.len();
                         ui.label(
                             egui::RichText::new(format!("{}/{}", count, n))
                                 .small()
@@ -175,7 +201,7 @@ impl SlotPanel {
             });
 
             // Display selected values as chips inside a dark background container
-            if !values.is_empty() {
+            if !items.is_empty() {
                 // Container with editor background color - full width
                 egui::Frame::NONE
                     .inner_margin(egui::Margin {
@@ -188,47 +214,85 @@ impl SlotPanel {
                     .fill(editor_bg)
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        let mut to_remove = None;
+                        // Make item spacing equal for horizontal wrapped layout
+                        ui.spacing_mut().item_spacing.x = ui.spacing().item_spacing.y;
 
-                        Flex::horizontal()
-                            .wrap(true)
-                            .gap(egui::vec2(4.0, 4.0))
-                            .align_items(FlexAlign::Center)
-                            .show(ui, |flex| {
-                                for value in &values {
-                                    flex.add_ui(FlexItem::new(), |ui| {
-                                        // Chip with X button
-                                        egui::Frame::NONE
-                                            .inner_margin(egui::Margin {
-                                                left: 6,
-                                                right: 6,
-                                                top: 2,
-                                                bottom: 2,
-                                            })
-                                            .corner_radius(12.0)
-                                            .fill(egui::Color32::from_rgb(69, 71, 90)) // Catppuccin surface2
-                                            .show(ui, |ui| {
-                                                ui.horizontal(|ui| {
-                                                    ui.spacing_mut().item_spacing.x = 4.0;
-                                                    ui.label(value);
-                                                    if ui
-                                                        .small_button("x")
-                                                        .on_hover_text("Remove")
-                                                        .clicked()
-                                                    {
-                                                        to_remove = Some(value.clone());
-                                                        chip_removed.set(true);
-                                                    }
-                                                });
-                                            });
-                                    });
-                                }
+                        // Use horizontal_wrapped with egui_dnd for drag-and-drop
+                        ui.horizontal_wrapped(|ui| {
+                            let dnd_id = format!("slot_dnd_{}", label_owned);
+                            dnd(ui, dnd_id).show_custom_vec(&mut items, |ui, items, item_iter| {
+                                items.iter().enumerate().for_each(|(idx, item)| {
+                                    let (_original_idx, value) = item;
+
+                                    // Measure the chip content size: value text + "x" button + spacing
+                                    let text_size = measure_text(ui, value);
+                                    let x_button_size = measure_text(ui, "x");
+
+                                    // Chip padding and internal spacing
+                                    let chip_padding = 6.0; // left + right inner margin
+                                    let chip_spacing = 4.0; // space between label and X button
+                                    let chip_vertical_padding = 2.0; // top + bottom
+
+                                    let chip_size = Vec2::new(
+                                        text_size.x
+                                            + x_button_size.x
+                                            + chip_padding * 2.0
+                                            + chip_spacing
+                                            + 8.0, // extra for button frame
+                                        text_size.y.max(x_button_size.y)
+                                            + chip_vertical_padding * 2.0
+                                            + 4.0,
+                                    );
+
+                                    // Use the value string as a stable ID (combined with slot label for uniqueness)
+                                    let item_id = Id::new((&label_owned, value));
+                                    item_iter.next(
+                                        ui,
+                                        item_id,
+                                        idx,
+                                        true,
+                                        |ui, item_handle| {
+                                            item_handle.ui_sized(
+                                                ui,
+                                                chip_size,
+                                                |ui, handle, _state| {
+                                                    // Chip with X button - entire chip is drag handle
+                                                    handle.ui_sized(ui, chip_size, |ui| {
+                                                        egui::Frame::NONE
+                                                            .inner_margin(egui::Margin {
+                                                                left: chip_padding as i8,
+                                                                right: chip_padding as i8,
+                                                                top: chip_vertical_padding as i8,
+                                                                bottom: chip_vertical_padding as i8,
+                                                            })
+                                                            .corner_radius(12.0)
+                                                            .fill(egui::Color32::from_rgb(
+                                                                69, 71, 90,
+                                                            )) // Catppuccin surface2
+                                                            .show(ui, |ui| {
+                                                                ui.horizontal(|ui| {
+                                                                    ui.spacing_mut().item_spacing.x =
+                                                                        chip_spacing;
+                                                                    ui.label(value);
+                                                                    if ui
+                                                                        .small_button("x")
+                                                                        .on_hover_text("Remove")
+                                                                        .clicked()
+                                                                    {
+                                                                        *to_remove.borrow_mut() =
+                                                                            Some(value.clone());
+                                                                        chip_removed.set(true);
+                                                                    }
+                                                                });
+                                                            });
+                                                    });
+                                                },
+                                            )
+                                        },
+                                    );
+                                });
                             });
-
-                        if let Some(value) = to_remove {
-                            state.remove_slot_value(&label_owned, &value);
-                            state.request_render();
-                        }
+                        });
                     });
             } else {
                 // Empty state - show placeholder in a clickable area
@@ -251,6 +315,19 @@ impl SlotPanel {
                     });
             }
         });
+
+        // Handle removal
+        if let Some(value) = to_remove.borrow().as_ref() {
+            state.remove_slot_value(&label_owned, value);
+            state.request_render();
+        } else {
+            // Check if order changed via drag-and-drop
+            let new_order: Vec<String> = items.iter().map(|(_, s)| s.clone()).collect();
+            if new_order != original_order {
+                state.set_slot_values(&label_owned, new_order);
+                state.request_render();
+            }
+        }
 
         // Focus slot when clicking anywhere in frame (except on chip X buttons)
         if frame_response.clicked && can_open_picker && !chip_removed.get() {

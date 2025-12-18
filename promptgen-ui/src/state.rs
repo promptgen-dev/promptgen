@@ -352,6 +352,13 @@ impl AppState {
         }
     }
 
+    /// Set all values for a slot (used for reordering)
+    pub fn set_slot_values(&mut self, slot_label: &str, new_values: Vec<String>) {
+        if let Some(values) = self.slot_values.get_mut(slot_label) {
+            *values = new_values;
+        }
+    }
+
     /// Set the single value for a textarea slot
     pub fn set_textarea_value(&mut self, slot_label: &str, value: String) {
         if let Some(values) = self.slot_values.get_mut(slot_label) {
