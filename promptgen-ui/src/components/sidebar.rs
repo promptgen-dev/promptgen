@@ -150,11 +150,9 @@ impl SidebarPanel {
     fn render_sidebar_content(ui: &mut egui::Ui, state: &mut AppState) {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
-            .show(ui, |ui| {
-                match state.sidebar_view_mode {
-                    SidebarViewMode::Templates => Self::render_template_list(ui, state),
-                    SidebarViewMode::Variables => Self::render_variable_list(ui, state),
-                }
+            .show(ui, |ui| match state.sidebar_view_mode {
+                SidebarViewMode::Templates => Self::render_template_list(ui, state),
+                SidebarViewMode::Variables => Self::render_variable_list(ui, state),
             });
     }
 
@@ -333,8 +331,8 @@ impl SidebarPanel {
         match_indices: &[usize],
         default_color: egui::Color32,
     ) -> egui::text::LayoutJob {
-        use egui::text::{LayoutJob, TextFormat};
         use egui::FontId;
+        use egui::text::{LayoutJob, TextFormat};
 
         let highlight_color = egui::Color32::from_rgb(166, 227, 161); // Catppuccin green
         let mut job = LayoutJob::default();
@@ -393,8 +391,8 @@ impl SidebarPanel {
                     let suffix = format!(" ({})", group.options.len());
 
                     let header_job = {
-                        use egui::text::{LayoutJob, TextFormat};
                         use egui::FontId;
+                        use egui::text::{LayoutJob, TextFormat};
 
                         let mut job = LayoutJob::default();
 
@@ -470,8 +468,8 @@ impl SidebarPanel {
                                 // Create highlighted option text
                                 let bullet = "  • ";
                                 let option_job = {
-                                    use egui::text::{LayoutJob, TextFormat};
                                     use egui::FontId;
+                                    use egui::text::{LayoutJob, TextFormat};
 
                                     let mut job = LayoutJob::default();
 
@@ -574,27 +572,32 @@ impl SidebarPanel {
                     return;
                 }
 
-                for option in &options {
-                    let is_selected = selected_values.contains(option);
+                // Use justified layout to make buttons fill full width
+                ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                    for option in &options {
+                        let is_selected = selected_values.contains(option);
+                        let display_text = option.clone();
 
-                    // Use full width selectable label, left-aligned
-                    let response = ui.selectable_label(is_selected, option.as_str());
+                        // Full-width selectable button with truncation
+                        let response =
+                            ui.add(egui::Button::new(display_text).selected(is_selected).wrap());
 
-                    // Show full text on hover for truncated options
-                    response.clone().on_hover_text(option);
+                        // Show full text on hover for truncated options
+                        response.clone().on_hover_text(option);
 
-                    if response.clicked() {
-                        if is_selected {
-                            // Remove selection
-                            state.remove_slot_value(&slot_label, option);
-                            state.request_render();
-                        } else if can_add {
-                            // Add/replace selection (add_slot_value handles single-select replacement)
-                            state.add_slot_value(&slot_label, option.clone());
-                            state.request_render();
+                        if response.clicked() {
+                            if is_selected {
+                                // Remove selection
+                                state.remove_slot_value(&slot_label, option);
+                                state.request_render();
+                            } else if can_add {
+                                // Add/replace selection (add_slot_value handles single-select replacement)
+                                state.add_slot_value(&slot_label, option.clone());
+                                state.request_render();
+                            }
                         }
                     }
-                }
+                });
             });
     }
 }

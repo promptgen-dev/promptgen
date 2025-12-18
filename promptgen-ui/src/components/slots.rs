@@ -227,8 +227,17 @@ impl SlotPanel {
                                 items.iter().enumerate().for_each(|(idx, item)| {
                                     let (_original_idx, value) = item;
 
+                                    // For display, replace newlines with spaces to keep chips single-line
+                                    let display_value: String = value
+                                        .chars()
+                                        .map(|c| if c == '\n' { ' ' } else { c })
+                                        .collect::<String>()
+                                        .split_whitespace()
+                                        .collect::<Vec<_>>()
+                                        .join(" ");
+
                                     // Measure the chip content size: value text + "x" button + spacing
-                                    let text_size = measure_text(ui, value);
+                                    let text_size = measure_text(ui, &display_value);
                                     let x_button_size = measure_text(ui, "x");
 
                                     // Chip padding and internal spacing
@@ -278,11 +287,11 @@ impl SlotPanel {
                                                                 ui.horizontal(|ui| {
                                                                     ui.spacing_mut().item_spacing.x =
                                                                         chip_spacing;
-                                                                    // Truncate long labels
+                                                                    // Truncate long labels, show single-line version
                                                                     let label_response = ui.add(
-                                                                        Label::new(value).truncate(),
+                                                                        Label::new(&display_value).truncate(),
                                                                     );
-                                                                    // Show full text on hover
+                                                                    // Show full original text on hover
                                                                     label_response.on_hover_text(value);
                                                                     if ui
                                                                         .small_button("x")
