@@ -411,35 +411,70 @@ fn many_arg_value_parser<'src>(
     choice((quoted, number, ident))
 }
 
+/// Split a string by a delimiter, but only at depth 0 (outside nested braces).
+/// For example, splitting "a|{b|c}|d" by '|' yields ["a", "{b|c}", "d"].
+fn split_at_depth_zero(s: &str, delimiter: char) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut depth: usize = 0;
+    let mut start = 0;
+
+    for (i, c) in s.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            c if c == delimiter && depth == 0 => {
+                result.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+
+    // Don't forget the last segment
+    result.push(&s[start..]);
+    result
+}
+
 /// Parse `{a|b|c}` - inline options
-/// Options can contain nested grammar (like @Hair)
+/// Options can contain nested grammar (like @Hair or nested {x|y})
 fn inline_options_parser<'src>(
 ) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
     just('{')
-        .ignore_then(
-            // Parse content between braces, split by |
-            none_of("}").repeated().collect::<String>(),
-        )
+        .ignore_then(brace_balanced_content())
         .then_ignore(just('}'))
         .map_with(|content, e| {
-            // Split by | and parse each option
-            let options: Vec<OptionItem> = content
-                .split('|')
+            // Split by | at depth 0 only (respecting nested braces)
+            let options: Vec<OptionItem> = split_at_depth_zero(&content, '|')
+                .into_iter()
                 .map(|opt| {
                     let opt = opt.trim();
-                    // Check if option contains grammar (@ for lib refs)
-                    if opt.contains('@') {
-                        // For now, treat as text - nested parsing will be added later
-                        // TODO: Parse nested grammar in options
-                        OptionItem::Text(opt.to_string())
-                    } else {
-                        OptionItem::Text(opt.to_string())
-                    }
+                    OptionItem::Text(opt.to_string())
                 })
                 .collect();
 
             (Node::InlineOptions(options), to_range(e.span()))
         })
+}
+
+/// Parse content inside braces, respecting nested braces.
+/// Returns the content string (without outer braces).
+/// Uses Chumsky's recursive combinator to handle arbitrary nesting.
+fn brace_balanced_content<'src>(
+) -> impl Parser<'src, &'src str, String, extra::Err<Simple<'src, char>>> + Clone {
+    recursive(|nested| {
+        choice((
+            // Nested braces: '{' + inner content + '}'
+            just('{')
+                .then(nested)
+                .then(just('}'))
+                .map(|((open, inner), close)| format!("{}{}{}", open, inner, close)),
+            // Any character except '{' and '}'
+            none_of("{}").map(|c: char| c.to_string()),
+        ))
+        .repeated()
+        .collect::<Vec<String>>()
+        .map(|parts| parts.join(""))
+    })
 }
 
 /// Parse `@"Name"` or `@"Lib:Name"` - quoted library reference
@@ -735,6 +770,79 @@ mod tests {
                 assert_eq!(options.len(), 2);
                 assert!(matches!(&options[0], OptionItem::Text(t) if t == "hot weather"));
                 assert!(matches!(&options[1], OptionItem::Text(t) if t == "cold weather"));
+            }
+            other => panic!("expected InlineOptions, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_nested_inline_options() {
+        // {a|b|{c|d}} should parse as 3 options: "a", "b", "{c|d}"
+        let src = "{a|b|{c|d}}";
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (node, _span) = &tmpl.nodes[0];
+        match node {
+            Node::InlineOptions(options) => {
+                assert_eq!(options.len(), 3);
+                assert!(matches!(&options[0], OptionItem::Text(t) if t == "a"));
+                assert!(matches!(&options[1], OptionItem::Text(t) if t == "b"));
+                assert!(matches!(&options[2], OptionItem::Text(t) if t == "{c|d}"));
+            }
+            other => panic!("expected InlineOptions, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_nested_inline_options_at_start() {
+        // {{a|b}|c} should parse as 2 options: "{a|b}", "c"
+        let src = "{{a|b}|c}";
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (node, _span) = &tmpl.nodes[0];
+        match node {
+            Node::InlineOptions(options) => {
+                assert_eq!(options.len(), 2);
+                assert!(matches!(&options[0], OptionItem::Text(t) if t == "{a|b}"));
+                assert!(matches!(&options[1], OptionItem::Text(t) if t == "c"));
+            }
+            other => panic!("expected InlineOptions, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_deeply_nested_inline_options() {
+        // {a|{b|{c|d}}} should parse as 2 options: "a", "{b|{c|d}}"
+        let src = "{a|{b|{c|d}}}";
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (node, _span) = &tmpl.nodes[0];
+        match node {
+            Node::InlineOptions(options) => {
+                assert_eq!(options.len(), 2);
+                assert!(matches!(&options[0], OptionItem::Text(t) if t == "a"));
+                assert!(matches!(&options[1], OptionItem::Text(t) if t == "{b|{c|d}}"));
+            }
+            other => panic!("expected InlineOptions, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_nested_inline_options_with_library_ref() {
+        // {@Hair|{red|blue} hair} should parse as 2 options
+        let src = "{@Hair|{red|blue} hair}";
+        let tmpl = parse_template(src).expect("should parse");
+
+        assert_eq!(tmpl.nodes.len(), 1);
+        let (node, _span) = &tmpl.nodes[0];
+        match node {
+            Node::InlineOptions(options) => {
+                assert_eq!(options.len(), 2);
+                assert!(matches!(&options[0], OptionItem::Text(t) if t == "@Hair"));
+                assert!(matches!(&options[1], OptionItem::Text(t) if t == "{red|blue} hair"));
             }
             other => panic!("expected InlineOptions, got {:?}", other),
         }

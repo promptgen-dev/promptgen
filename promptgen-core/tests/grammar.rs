@@ -241,6 +241,70 @@ groups:
     );
 }
 
+#[test]
+fn nested_inline_options_direct() {
+    // Test {a|b|{c|d}} - direct nested inline options in template
+    let lib = lib(r#"
+groups:
+  - name: Placeholder
+    options:
+      - placeholder
+"#);
+    let result = eval(&lib, "{a|b|{c|d}}", None);
+
+    let valid_options = ["a", "b", "c", "d"];
+    assert!(
+        valid_options.contains(&result.text.as_str()),
+        "Result '{}' should be one of {:?}",
+        result.text,
+        valid_options
+    );
+}
+
+#[test]
+fn deeply_nested_inline_options() {
+    // Test {a|{b|{c|d}}} - deeply nested inline options
+    let lib = lib(r#"
+groups:
+  - name: Placeholder
+    options:
+      - placeholder
+"#);
+    let result = eval(&lib, "{a|{b|{c|d}}}", None);
+
+    let valid_options = ["a", "b", "c", "d"];
+    assert!(
+        valid_options.contains(&result.text.as_str()),
+        "Result '{}' should be one of {:?}",
+        result.text,
+        valid_options
+    );
+}
+
+#[test]
+fn nested_inline_options_with_surrounding_text() {
+    // Test prefix {a|{nested|choice}} suffix
+    let lib = lib(r#"
+groups:
+  - name: Placeholder
+    options:
+      - placeholder
+"#);
+    let result = eval(&lib, "prefix {a|{nested|choice}} suffix", None);
+
+    let valid_options = [
+        "prefix a suffix",
+        "prefix nested suffix",
+        "prefix choice suffix",
+    ];
+    assert!(
+        valid_options.contains(&result.text.as_str()),
+        "Result '{}' should be one of {:?}",
+        result.text,
+        valid_options
+    );
+}
+
 // ============================================================================
 // Mixed Grammar Tests
 // ============================================================================
