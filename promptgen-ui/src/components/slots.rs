@@ -88,9 +88,11 @@ impl SlotPanel {
             });
 
             let config = TemplateEditorConfig {
+                id: format!("slot_editor_{}", label_owned),
                 min_lines: 3,
                 hint_text: Some("Enter text...".to_string()),
                 show_line_numbers: true,
+                cursor_position: None,
             };
 
             let mut value = state.get_textarea_value(&label_owned);

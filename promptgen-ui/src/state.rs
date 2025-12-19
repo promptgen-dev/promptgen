@@ -63,6 +63,32 @@ pub enum ConfirmDialog {
     DeleteVariable { variable_name: String },
 }
 
+/// Autocomplete mode - what kind of completions to show
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutocompleteMode {
+    /// Completing variable names (@Var...)
+    Variables,
+    /// Completing options within a specific variable (@Var/opt...)
+    Options { variable_name: String },
+}
+
+/// Autocomplete state
+#[derive(Debug, Clone, Default)]
+pub struct AutocompleteState {
+    /// Whether autocomplete popup is active
+    pub active: bool,
+    /// The query being completed (text after @)
+    pub query: String,
+    /// The mode (variables or options within a variable)
+    pub mode: Option<AutocompleteMode>,
+    /// Currently selected completion index
+    pub selected_index: usize,
+    /// Byte position where the @ symbol starts in the editor
+    pub trigger_position: usize,
+    /// The response ID of the text editor for popup positioning
+    pub editor_response_id: Option<egui::Id>,
+}
+
 /// Persisted application configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -106,6 +132,12 @@ pub struct AppState {
     pub variable_editor_original_name: Option<String>,
     pub variable_editor_dirty: bool,
     pub confirm_dialog: Option<ConfirmDialog>,
+
+    // Autocomplete State
+    pub autocomplete: AutocompleteState,
+
+    // Pending cursor position (set after autocomplete, applied on next render)
+    pub pending_cursor_position: Option<usize>,
 }
 
 impl Default for AppState {
@@ -134,6 +166,8 @@ impl Default for AppState {
             variable_editor_original_name: None,
             variable_editor_dirty: false,
             confirm_dialog: None,
+            autocomplete: AutocompleteState::default(),
+            pending_cursor_position: None,
         }
     }
 }
@@ -598,5 +632,132 @@ impl AppState {
     /// Cancel any active confirmation dialog
     pub fn cancel_confirm_dialog(&mut self) {
         self.confirm_dialog = None;
+    }
+
+    // ==================== Autocomplete Methods ====================
+
+    /// Activate autocomplete with the given trigger position
+    pub fn activate_autocomplete(&mut self, trigger_position: usize) {
+        self.autocomplete.active = true;
+        self.autocomplete.trigger_position = trigger_position;
+        self.autocomplete.query.clear();
+        self.autocomplete.mode = Some(AutocompleteMode::Variables);
+        self.autocomplete.selected_index = 0;
+    }
+
+    /// Deactivate autocomplete
+    pub fn deactivate_autocomplete(&mut self) {
+        self.autocomplete.active = false;
+        self.autocomplete.query.clear();
+        self.autocomplete.mode = None;
+        self.autocomplete.selected_index = 0;
+        self.autocomplete.trigger_position = 0;
+        self.autocomplete.editor_response_id = None;
+    }
+
+    /// Update autocomplete query based on cursor position and text content
+    /// Returns the extracted query after the @, or None if cursor is not in autocomplete context
+    pub fn update_autocomplete_query(&mut self, content: &str, cursor_pos: usize) {
+        if !self.autocomplete.active {
+            return;
+        }
+
+        // Extract text from trigger position to cursor
+        let trigger = self.autocomplete.trigger_position;
+        if cursor_pos <= trigger || cursor_pos > content.len() {
+            // Cursor moved before the @, deactivate
+            self.deactivate_autocomplete();
+            return;
+        }
+
+        // Get the text after @ up to cursor
+        let query_text = &content[trigger + 1..cursor_pos]; // +1 to skip the @
+
+        // Check if query contains whitespace or invalid chars (cancel autocomplete)
+        if query_text.contains(char::is_whitespace) {
+            self.deactivate_autocomplete();
+            return;
+        }
+
+        // Parse the query to determine mode
+        if let Some(slash_pos) = query_text.find('/') {
+            // @Variable/option syntax - switch to options mode
+            let variable_part = &query_text[..slash_pos];
+            let option_part = &query_text[slash_pos + 1..];
+
+            // Only reset selection if the query actually changed
+            let new_query = option_part.to_string();
+            let query_changed = self.autocomplete.query != new_query;
+
+            self.autocomplete.mode = Some(AutocompleteMode::Options {
+                variable_name: variable_part.to_string(),
+            });
+            self.autocomplete.query = new_query;
+
+            if query_changed {
+                self.autocomplete.selected_index = 0;
+            }
+        } else {
+            // @Variable syntax - stay in variables mode
+            let new_query = query_text.to_string();
+            let query_changed = self.autocomplete.query != new_query;
+
+            self.autocomplete.mode = Some(AutocompleteMode::Variables);
+            self.autocomplete.query = new_query;
+
+            if query_changed {
+                self.autocomplete.selected_index = 0;
+            }
+        }
+    }
+
+    /// Move autocomplete selection up
+    pub fn autocomplete_move_up(&mut self, total_items: usize) {
+        if total_items == 0 {
+            return;
+        }
+        if self.autocomplete.selected_index == 0 {
+            self.autocomplete.selected_index = total_items - 1;
+        } else {
+            self.autocomplete.selected_index -= 1;
+        }
+    }
+
+    /// Move autocomplete selection down
+    pub fn autocomplete_move_down(&mut self, total_items: usize) {
+        if total_items == 0 {
+            return;
+        }
+        self.autocomplete.selected_index = (self.autocomplete.selected_index + 1) % total_items;
+    }
+
+    /// Get the text to insert when a completion is selected
+    /// For variables: inserts @VariableName
+    /// For options: inserts the option text
+    pub fn get_completion_insert_text(&self, selected_text: &str) -> String {
+        match &self.autocomplete.mode {
+            Some(AutocompleteMode::Variables) => {
+                // Check if variable name needs quotes
+                let needs_quotes =
+                    selected_text.contains(' ') || selected_text.contains(':');
+                if needs_quotes {
+                    format!("@\"{}\"", selected_text)
+                } else {
+                    format!("@{}", selected_text)
+                }
+            }
+            Some(AutocompleteMode::Options { .. }) => {
+                // For options, just insert the option text itself
+                selected_text.to_string()
+            }
+            None => selected_text.to_string(),
+        }
+    }
+
+    /// Get the byte range in the editor content that should be replaced with the completion
+    /// Returns (start, end) byte positions
+    pub fn get_completion_replace_range(&self) -> (usize, usize) {
+        // Replace from @ trigger position to current position (will be determined by cursor)
+        (self.autocomplete.trigger_position, self.autocomplete.trigger_position)
     }
 }

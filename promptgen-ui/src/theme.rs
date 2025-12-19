@@ -83,4 +83,10 @@ pub mod syntax {
 
     /// Error color (same red works for both modes)
     pub const ERROR: Color32 = Color32::from_rgb(210, 15, 57); // Latte Red (darker, visible in both)
+
+    /// Variable reference color (constant for autocomplete display)
+    pub const VARIABLE_REF: Color32 = Color32::from_rgb(137, 180, 250); // Mocha Blue
+
+    /// Match highlight color for fuzzy search (bright yellow)
+    pub const MATCH_HIGHLIGHT: Color32 = Color32::from_rgb(249, 226, 175); // Mocha Yellow
 }

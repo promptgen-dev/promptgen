@@ -9,20 +9,26 @@ use promptgen_core::{ParseResult, Workspace};
 /// Configuration for the template editor widget
 #[derive(Clone)]
 pub struct TemplateEditorConfig {
+    /// Unique identifier for this editor instance (required for multiple editors)
+    pub id: String,
     /// Minimum number of lines to display (main editor: 5, slots: 3)
     pub min_lines: usize,
     /// Hint text to show when editor is empty
     pub hint_text: Option<String>,
     /// Whether to show line numbers (default: true)
     pub show_line_numbers: bool,
+    /// If set, move cursor to this byte position on next render (then clear it)
+    pub cursor_position: Option<usize>,
 }
 
 impl Default for TemplateEditorConfig {
     fn default() -> Self {
         Self {
+            id: "template_editor".to_string(),
             min_lines: 5,
             hint_text: None,
             show_line_numbers: true,
+            cursor_position: None,
         }
     }
 }
@@ -35,6 +41,8 @@ pub struct TemplateEditorResponse {
     pub full_rect: egui::Rect,
     /// Parse result for the content (updated each frame)
     pub parse_result: ParseResult,
+    /// Current cursor position (character index), if available
+    pub cursor_position: Option<usize>,
 }
 
 /// Reusable template editor widget with syntax highlighting and line numbers
@@ -95,7 +103,9 @@ impl TemplateEditor {
             }
 
             // Main editor - auto-size to content
+            let text_edit_id = ui.make_persistent_id(&config.id);
             let mut text_edit = egui::TextEdit::multiline(content)
+                .id(text_edit_id)
                 .desired_width(f32::INFINITY)
                 .desired_rows(desired_rows)
                 .font(egui::TextStyle::Monospace)
@@ -106,13 +116,34 @@ impl TemplateEditor {
                 text_edit = text_edit.hint_text(hint.as_str());
             }
 
-            ui.add(text_edit)
+            let response = ui.add(text_edit);
+
+            // Apply pending cursor position if set
+            if let Some(cursor_pos) = config.cursor_position {
+                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), text_edit_id) {
+                    let ccursor = egui::text::CCursor::new(cursor_pos);
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                    state.store(ui.ctx(), text_edit_id);
+                    // Request focus to make sure the cursor is visible
+                    response.request_focus();
+                }
+            }
+
+            // Read current cursor position
+            let cursor_position = egui::TextEdit::load_state(ui.ctx(), text_edit_id)
+                .and_then(|state| state.cursor.char_range())
+                .map(|range| range.primary.index);
+
+            (response, cursor_position)
         });
 
         TemplateEditorResponse {
-            response: layout_response.inner,
+            response: layout_response.inner.0,
             full_rect: layout_response.response.rect,
             parse_result,
+            cursor_position: layout_response.inner.1,
         }
     }
 
