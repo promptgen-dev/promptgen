@@ -578,9 +578,15 @@ impl SidebarPanel {
                         let is_selected = selected_values.contains(option);
                         let display_text = option.clone();
 
-                        // Full-width selectable button with truncation
-                        let response =
-                            ui.add(egui::Button::new(display_text).selected(is_selected).wrap());
+                        // Full-width selectable button - transparent when not selected, highlight when selected
+                        let fill = if is_selected {
+                            ui.visuals().selection.bg_fill
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        };
+                        let response = ui.add(
+                            egui::Button::new(display_text).fill(fill).wrap(),
+                        );
 
                         // Show full text on hover for truncated options
                         response.clone().on_hover_text(option);
