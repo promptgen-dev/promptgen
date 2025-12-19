@@ -5,11 +5,11 @@ use egui::{Color32, RichText, Vec2};
 use egui_material_icons::icons::ICON_ARROW_BACK;
 
 use crate::components::autocomplete::{
-    check_autocomplete_trigger, find_autocomplete_context, get_completions,
+    apply_completion, check_autocomplete_trigger, find_autocomplete_context, get_completions,
     handle_autocomplete_keyboard, AutocompletePopup,
 };
 use crate::highlighting::highlight_template;
-use crate::state::{AppState, AutocompleteMode, ConfirmDialog};
+use crate::state::{AppState, ConfirmDialog};
 use crate::theme::syntax;
 
 /// The editor ID for the variable options editor
@@ -30,10 +30,9 @@ impl VariableEditorPanel {
             if ui
                 .button(format!("{} Back to Editor", ICON_ARROW_BACK))
                 .clicked()
+                && !state.try_exit_variable_editor()
             {
-                if !state.try_exit_variable_editor() {
-                    // Will show confirmation dialog
-                }
+                // Will show confirmation dialog
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -42,10 +41,8 @@ impl VariableEditorPanel {
                     && !state.variable_editor_content.trim().is_empty();
 
                 let save_button = ui.add_enabled(can_save, egui::Button::new("Save"));
-                if save_button.clicked() {
-                    if Self::save_variable(state) {
-                        should_close = true;
-                    }
+                if save_button.clicked() && Self::save_variable(state) {
+                    should_close = true;
                 }
 
                 // Variable name display
@@ -156,7 +153,8 @@ impl VariableEditorPanel {
 
         // If we got a selection from keyboard, apply it before rendering
         if let Some(completion_text) = autocomplete_selection {
-            Self::apply_completion(state, &mut content, &completion_text);
+            content = apply_completion(state, &content, editor_id, &completion_text);
+            state.mark_variable_editor_dirty();
         }
 
         egui::Frame::NONE
@@ -217,16 +215,16 @@ impl VariableEditorPanel {
                     );
 
                     // Apply pending cursor position if set
-                    if let Some(cursor_pos) = pending_cursor_position {
-                        if let Some(mut text_state) = egui::TextEdit::load_state(ui.ctx(), text_edit_id)
-                        {
-                            let ccursor = egui::text::CCursor::new(cursor_pos);
-                            text_state
-                                .cursor
-                                .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
-                            text_state.store(ui.ctx(), text_edit_id);
-                            response.request_focus();
-                        }
+                    if let Some(cursor_pos) = pending_cursor_position
+                        && let Some(mut text_state) =
+                            egui::TextEdit::load_state(ui.ctx(), text_edit_id)
+                    {
+                        let ccursor = egui::text::CCursor::new(cursor_pos);
+                        text_state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                        text_state.store(ui.ctx(), text_edit_id);
+                        response.request_focus();
                     }
 
                     // Read current cursor position
@@ -262,7 +260,8 @@ impl VariableEditorPanel {
                         } else if let Some(completion_text) =
                             AutocompletePopup::show(ui, state, editor_id, &response, &completions)
                         {
-                            Self::apply_completion(state, &mut content, &completion_text);
+                            content = apply_completion(state, &content, editor_id, &completion_text);
+                            state.mark_variable_editor_dirty();
                         }
                     }
 
@@ -276,38 +275,6 @@ impl VariableEditorPanel {
         if content != state.variable_editor_content {
             state.variable_editor_content = content;
         }
-    }
-
-    /// Apply a completion to the editor content
-    fn apply_completion(state: &mut AppState, content: &mut String, completion_text: &str) {
-        let editor_id = VARIABLE_OPTIONS_EDITOR_ID;
-        let Some(autocomplete) = state.get_autocomplete(editor_id) else {
-            return;
-        };
-
-        let trigger_pos = autocomplete.trigger_position;
-        let query_len = autocomplete.query.len();
-
-        let query_end = match &autocomplete.mode {
-            Some(AutocompleteMode::Options { variable_name }) => {
-                trigger_pos + 1 + variable_name.len() + 1 + query_len
-            }
-            _ => trigger_pos + 1 + query_len,
-        };
-
-        let before = content[..trigger_pos].to_string();
-        let after = if query_end <= content.len() {
-            content[query_end..].to_string()
-        } else {
-            String::new()
-        };
-
-        *content = format!("{}{}{}", before, completion_text, after);
-
-        let new_cursor_pos = trigger_pos + completion_text.len();
-        state.set_pending_cursor_position(editor_id, new_cursor_pos);
-        state.deactivate_autocomplete(editor_id);
-        state.mark_variable_editor_dirty();
     }
 
     /// Calculate option numbers for each line (None for delimiter lines)
@@ -512,13 +479,12 @@ impl VariableEditorPanel {
         // Save to disk
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Some(path) = state.library_paths.get(&library_id) {
-                if let Some(library) = state.libraries.iter().find(|lib| lib.id == library_id) {
-                    if let Err(e) = promptgen_core::save_library(library, path) {
-                        log::error!("Failed to save library: {}", e);
-                        // Still continue - the in-memory state is updated
-                    }
-                }
+            if let Some(path) = state.library_paths.get(&library_id)
+                && let Some(library) = state.libraries.iter().find(|lib| lib.id == library_id)
+                && let Err(e) = promptgen_core::save_library(library, path)
+            {
+                log::error!("Failed to save library: {}", e);
+                // Still continue - the in-memory state is updated
             }
         }
 
@@ -546,12 +512,11 @@ impl VariableEditorPanel {
         // Save to disk
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Some(path) = state.library_paths.get(&library_id) {
-                if let Some(library) = state.libraries.iter().find(|lib| lib.id == library_id) {
-                    if let Err(e) = promptgen_core::save_library(library, path) {
-                        log::error!("Failed to save library after delete: {}", e);
-                    }
-                }
+            if let Some(path) = state.library_paths.get(&library_id)
+                && let Some(library) = state.libraries.iter().find(|lib| lib.id == library_id)
+                && let Err(e) = promptgen_core::save_library(library, path)
+            {
+                log::error!("Failed to save library after delete: {}", e);
             }
         }
 

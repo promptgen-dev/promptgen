@@ -3,11 +3,11 @@
 use egui::TextBuffer;
 
 use crate::components::autocomplete::{
-    check_autocomplete_trigger, find_autocomplete_context, get_completions,
-    handle_autocomplete_keyboard, AutocompletePopup,
+    AutocompletePopup, apply_completion, check_autocomplete_trigger, find_autocomplete_context,
+    get_completions, handle_autocomplete_keyboard,
 };
 use crate::highlighting::highlight_template;
-use crate::state::{AppState, AutocompleteMode};
+use crate::state::AppState;
 use crate::theme::syntax;
 use promptgen_core::ParseResult;
 
@@ -41,8 +41,6 @@ pub struct TemplateEditorResponse {
     pub response: egui::Response,
     /// Parse result for the content (updated each frame)
     pub parse_result: ParseResult,
-    /// Current cursor position (character index), if available
-    pub cursor_position: Option<usize>,
 }
 
 /// Reusable template editor widget with syntax highlighting, line numbers, and autocomplete
@@ -81,7 +79,7 @@ impl TemplateEditor {
 
         // If we got a selection from keyboard, apply it before rendering
         if let Some(completion_text) = autocomplete_selection {
-            Self::apply_completion(state, content, editor_id, &completion_text);
+            *content = apply_completion(state, content, editor_id, &completion_text);
         }
 
         // Parse content for syntax highlighting
@@ -145,16 +143,16 @@ impl TemplateEditor {
             let response = ui.add(text_edit);
 
             // Apply pending cursor position if set
-            if let Some(cursor_pos) = cursor_position {
-                if let Some(mut text_state) = egui::TextEdit::load_state(ui.ctx(), text_edit_id) {
-                    let ccursor = egui::text::CCursor::new(cursor_pos);
-                    text_state
-                        .cursor
-                        .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
-                    text_state.store(ui.ctx(), text_edit_id);
-                    // Request focus to make sure the cursor is visible
-                    response.request_focus();
-                }
+            if let Some(cursor_pos) = cursor_position
+                && let Some(mut text_state) = egui::TextEdit::load_state(ui.ctx(), text_edit_id)
+            {
+                let ccursor = egui::text::CCursor::new(cursor_pos);
+                text_state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                text_state.store(ui.ctx(), text_edit_id);
+                // Request focus to make sure the cursor is visible
+                response.request_focus();
             }
 
             // Read current cursor position
@@ -202,7 +200,7 @@ impl TemplateEditor {
                 if let Some(completion_text) =
                     AutocompletePopup::show(ui, state, editor_id, &response, &completions)
                 {
-                    Self::apply_completion(state, content, editor_id, &completion_text);
+                    *content = apply_completion(state, content, editor_id, &completion_text);
                 }
             }
         }
@@ -210,58 +208,7 @@ impl TemplateEditor {
         TemplateEditorResponse {
             response,
             parse_result,
-            cursor_position: layout_response.inner.1,
         }
-    }
-
-    /// Apply a completion to the editor content
-    fn apply_completion(
-        state: &mut AppState,
-        content: &mut String,
-        editor_id: &str,
-        completion_text: &str,
-    ) {
-        let Some(autocomplete) = state.get_autocomplete(editor_id) else {
-            return;
-        };
-
-        // Replace from trigger position to end of the autocomplete query
-        let trigger_pos = autocomplete.trigger_position;
-        let query_len = autocomplete.query.len();
-
-        // Calculate where the @query ends based on mode:
-        // - Variables mode: @{query} -> trigger_pos + 1 + query_len
-        // - Options mode: @{variable_name}/{query} -> trigger_pos + 1 + var_len + 1 + query_len
-        let query_end = match &autocomplete.mode {
-            Some(AutocompleteMode::Options { variable_name }) => {
-                // @variable_name/query
-                trigger_pos + 1 + variable_name.len() + 1 + query_len
-            }
-            _ => {
-                // @query
-                trigger_pos + 1 + query_len
-            }
-        };
-
-        // Build the new content, preserving text before @ and after the query
-        let before = content[..trigger_pos].to_string();
-        let after = if query_end <= content.len() {
-            content[query_end..].to_string()
-        } else {
-            String::new()
-        };
-
-        *content = format!("{}{}{}", before, completion_text, after);
-
-        // Set cursor position to end of inserted text
-        let new_cursor_pos = trigger_pos + completion_text.len();
-        state.set_pending_cursor_position(editor_id, new_cursor_pos);
-
-        // Deactivate autocomplete now that we've used the state
-        state.deactivate_autocomplete(editor_id);
-
-        // Request render update
-        state.request_render();
     }
 
     /// Show parse errors below the editor (call after show())

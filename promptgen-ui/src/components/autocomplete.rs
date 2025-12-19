@@ -6,8 +6,8 @@ use egui::Key;
 
 use crate::state::{AppState, AutocompleteMode};
 use crate::theme::syntax;
-use promptgen_core::search::VariableSearchResult;
 use promptgen_core::Workspace;
+use promptgen_core::search::VariableSearchResult;
 
 /// Maximum number of completions to show in the popup
 const MAX_COMPLETIONS: usize = 10;
@@ -31,14 +31,6 @@ pub enum CompletionItem {
 }
 
 impl CompletionItem {
-    /// Get the display text for this completion
-    pub fn display_text(&self) -> &str {
-        match self {
-            CompletionItem::Variable { name, .. } => name,
-            CompletionItem::Option { text, .. } => text,
-        }
-    }
-
     /// Get the text to insert when this completion is selected
     pub fn insert_text(&self) -> String {
         match self {
@@ -57,7 +49,11 @@ impl CompletionItem {
 }
 
 /// Get completions based on current autocomplete state for a specific editor
-pub fn get_completions(workspace: &Workspace, state: &AppState, editor_id: &str) -> Vec<CompletionItem> {
+pub fn get_completions(
+    workspace: &Workspace,
+    state: &AppState,
+    editor_id: &str,
+) -> Vec<CompletionItem> {
     let Some(autocomplete) = state.get_autocomplete(editor_id) else {
         return Vec::new();
     };
@@ -70,7 +66,9 @@ pub fn get_completions(workspace: &Workspace, state: &AppState, editor_id: &str)
 
             // If the query exactly matches a variable name (case-insensitive), don't show completions.
             // This allows Enter to work normally when the user has typed a complete variable reference.
-            let has_exact_match = results.iter().any(|r| r.variable_name.eq_ignore_ascii_case(query));
+            let has_exact_match = results
+                .iter()
+                .any(|r| r.variable_name.eq_ignore_ascii_case(query));
             if has_exact_match {
                 return Vec::new();
             }
@@ -149,116 +147,132 @@ impl AutocompletePopup {
         // popup_below_widget will check if it's open and skip rendering since it wasn't open yet.
         ui.memory_mut(|mem| mem.open_popup(popup_id));
 
-        egui::popup_below_widget(ui, popup_id, editor_response, egui::PopupCloseBehavior::CloseOnClick, |ui| {
-            ui.set_min_width(300.0);
+        egui::popup_below_widget(
+            ui,
+            popup_id,
+            editor_response,
+            egui::PopupCloseBehavior::CloseOnClick,
+            |ui| {
+                ui.set_min_width(300.0);
 
-            let scroll_id = ui.make_persistent_id(format!("autocomplete_scroll_{}", editor_id_owned));
-            egui::ScrollArea::vertical()
-                .id_salt(scroll_id)
-                .max_height(250.0)
-                .show(ui, |ui| {
-                    for (idx, item) in completions.iter().enumerate() {
-                        let is_selected = idx == selected_index;
+                let scroll_id =
+                    ui.make_persistent_id(format!("autocomplete_scroll_{}", editor_id_owned));
+                egui::ScrollArea::vertical()
+                    .id_salt(scroll_id)
+                    .max_height(250.0)
+                    .show(ui, |ui| {
+                        for (idx, item) in completions.iter().enumerate() {
+                            let is_selected = idx == selected_index;
 
-                        // Build the label with highlighted characters
-                        let label = match item {
-                            CompletionItem::Variable { name, library_name, option_count, match_indices } => {
-                                let mut job = egui::text::LayoutJob::default();
+                            // Build the label with highlighted characters
+                            let label = match item {
+                                CompletionItem::Variable {
+                                    name,
+                                    library_name,
+                                    option_count,
+                                    match_indices,
+                                } => {
+                                    let mut job = egui::text::LayoutJob::default();
 
-                                // Add @ prefix
-                                job.append(
-                                    "@",
-                                    0.0,
-                                    egui::TextFormat {
-                                        color: syntax::VARIABLE_REF,
-                                        ..Default::default()
-                                    },
-                                );
-
-                                // Add variable name with match highlighting
-                                for (i, c) in name.chars().enumerate() {
-                                    let color = if match_indices.contains(&i) {
-                                        syntax::MATCH_HIGHLIGHT
-                                    } else {
-                                        syntax::VARIABLE_REF
-                                    };
+                                    // Add @ prefix
                                     job.append(
-                                        &c.to_string(),
+                                        "@",
                                         0.0,
                                         egui::TextFormat {
-                                            color,
+                                            color: syntax::VARIABLE_REF,
                                             ..Default::default()
                                         },
                                     );
-                                }
 
-                                // Add option count and library name
-                                job.append(
-                                    &format!(" ({}) - {}", option_count, library_name),
-                                    0.0,
-                                    egui::TextFormat {
-                                        color: egui::Color32::from_rgb(108, 112, 134), // overlay0
-                                        ..Default::default()
-                                    },
-                                );
+                                    // Add variable name with match highlighting
+                                    for (i, c) in name.chars().enumerate() {
+                                        let color = if match_indices.contains(&i) {
+                                            syntax::MATCH_HIGHLIGHT
+                                        } else {
+                                            syntax::VARIABLE_REF
+                                        };
+                                        job.append(
+                                            &c.to_string(),
+                                            0.0,
+                                            egui::TextFormat {
+                                                color,
+                                                ..Default::default()
+                                            },
+                                        );
+                                    }
 
-                                job
-                            }
-                            CompletionItem::Option { text, variable_name, match_indices } => {
-                                let mut job = egui::text::LayoutJob::default();
-
-                                // Truncate long options
-                                let display_text = if text.len() > 50 {
-                                    format!("{}...", &text[..47])
-                                } else {
-                                    text.clone()
-                                };
-
-                                // Add option text with match highlighting
-                                for (i, c) in display_text.chars().enumerate() {
-                                    let color = if match_indices.contains(&i) {
-                                        syntax::MATCH_HIGHLIGHT
-                                    } else {
-                                        ui.visuals().text_color()
-                                    };
+                                    // Add option count and library name
                                     job.append(
-                                        &c.to_string(),
+                                        &format!(" ({}) - {}", option_count, library_name),
                                         0.0,
                                         egui::TextFormat {
-                                            color,
+                                            color: egui::Color32::from_rgb(108, 112, 134), // overlay0
                                             ..Default::default()
                                         },
                                     );
+
+                                    job
                                 }
+                                CompletionItem::Option {
+                                    text,
+                                    variable_name,
+                                    match_indices,
+                                } => {
+                                    let mut job = egui::text::LayoutJob::default();
 
-                                // Add variable name context
-                                job.append(
-                                    &format!(" (@{})", variable_name),
-                                    0.0,
-                                    egui::TextFormat {
-                                        color: egui::Color32::from_rgb(108, 112, 134), // overlay0
-                                        ..Default::default()
-                                    },
-                                );
+                                    // Truncate long options
+                                    let display_text = if text.len() > 50 {
+                                        format!("{}...", &text[..47])
+                                    } else {
+                                        text.clone()
+                                    };
 
-                                job
+                                    // Add option text with match highlighting
+                                    for (i, c) in display_text.chars().enumerate() {
+                                        let color = if match_indices.contains(&i) {
+                                            syntax::MATCH_HIGHLIGHT
+                                        } else {
+                                            ui.visuals().text_color()
+                                        };
+                                        job.append(
+                                            &c.to_string(),
+                                            0.0,
+                                            egui::TextFormat {
+                                                color,
+                                                ..Default::default()
+                                            },
+                                        );
+                                    }
+
+                                    // Add variable name context
+                                    job.append(
+                                        &format!(" (@{})", variable_name),
+                                        0.0,
+                                        egui::TextFormat {
+                                            color: egui::Color32::from_rgb(108, 112, 134), // overlay0
+                                            ..Default::default()
+                                        },
+                                    );
+
+                                    job
+                                }
+                            };
+
+                            let response = ui.selectable_label(is_selected, label);
+
+                            // Handle click - we'll return the completion text, caller handles deactivation
+                            if response.clicked() {
+                                selected_completion = Some(item.insert_text());
                             }
-                        };
 
-                        let response = ui.selectable_label(is_selected, label);
-
-                        // Handle click - we'll return the completion text, caller handles deactivation
-                        if response.clicked() {
-                            selected_completion = Some(item.insert_text());
+                            // Scroll to selected item
+                            if is_selected {
+                                response.scroll_to_me(Some(egui::Align::Center));
+                            }
                         }
-
-                        // Scroll to selected item
-                        if is_selected {
-                            response.scroll_to_me(Some(egui::Align::Center));
-                        }
-                    }
-                });
-        });
+                    });
+            },
+        );
 
         selected_completion
     }
@@ -315,6 +329,63 @@ pub fn handle_autocomplete_keyboard(
     None
 }
 
+/// Apply a completion to content, updating cursor position and deactivating autocomplete.
+///
+/// This is the central function for applying autocomplete completions. It:
+/// - Calculates the replacement range based on the autocomplete mode
+/// - Replaces the @query or @variable/query with the completion text
+/// - Sets the pending cursor position to after the inserted text
+/// - Deactivates autocomplete for this editor
+///
+/// Returns the new content string.
+pub fn apply_completion(
+    state: &mut AppState,
+    content: &str,
+    editor_id: &str,
+    completion_text: &str,
+) -> String {
+    let Some(autocomplete) = state.get_autocomplete(editor_id) else {
+        return content.to_string();
+    };
+
+    // Replace from trigger position to end of the autocomplete query
+    let trigger_pos = autocomplete.trigger_position;
+    let query_len = autocomplete.query.len();
+
+    // Calculate where the @query ends based on mode:
+    // - Variables mode: @{query} -> trigger_pos + 1 + query_len
+    // - Options mode: @{variable_name}/{query} -> trigger_pos + 1 + var_len + 1 + query_len
+    let query_end = match &autocomplete.mode {
+        Some(AutocompleteMode::Options { variable_name }) => {
+            // @variable_name/query
+            trigger_pos + 1 + variable_name.len() + 1 + query_len
+        }
+        _ => {
+            // @query
+            trigger_pos + 1 + query_len
+        }
+    };
+
+    // Build the new content, preserving text before @ and after the query
+    let before = &content[..trigger_pos];
+    let after = if query_end <= content.len() {
+        &content[query_end..]
+    } else {
+        ""
+    };
+
+    let new_content = format!("{}{}{}", before, completion_text, after);
+
+    // Set cursor position to end of inserted text
+    let new_cursor_pos = trigger_pos + completion_text.len();
+    state.set_pending_cursor_position(editor_id, new_cursor_pos);
+
+    // Deactivate autocomplete now that we've used the state
+    state.deactivate_autocomplete(editor_id);
+
+    new_content
+}
+
 /// Check if we should trigger autocomplete based on the just-typed character
 /// Returns the trigger position (byte offset of @) if autocomplete should be activated
 pub fn check_autocomplete_trigger(content: &str, cursor_byte_pos: usize) -> Option<usize> {
@@ -338,7 +409,9 @@ pub fn check_autocomplete_trigger(content: &str, cursor_byte_pos: usize) -> Opti
         let prev_char = before_cursor[..at_pos].chars().last();
         match prev_char {
             None => Some(at_pos),
-            Some(c) if c.is_whitespace() || c == '{' || c == '|' || c == '(' || c == ',' => Some(at_pos),
+            Some(c) if c.is_whitespace() || c == '{' || c == '|' || c == '(' || c == ',' => {
+                Some(at_pos)
+            }
             _ => None, // Don't trigger if @ is in the middle of a word
         }
     } else {
@@ -388,7 +461,9 @@ pub fn find_autocomplete_context(content: &str, cursor_pos: usize) -> Option<usi
     let prev_char = before_cursor[..at_pos].chars().last();
     match prev_char {
         None => Some(at_pos),
-        Some(c) if c.is_whitespace() || c == '{' || c == '|' || c == '(' || c == ',' => Some(at_pos),
+        Some(c) if c.is_whitespace() || c == '{' || c == '|' || c == '(' || c == ',' => {
+            Some(at_pos)
+        }
         _ => None, // @ is in the middle of a word, not valid
     }
 }

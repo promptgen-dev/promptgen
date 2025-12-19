@@ -1,6 +1,6 @@
 //! Reusable focusable frame component for consistent highlighting and click behavior.
 
-use egui::{Color32, Response, Ui};
+use egui::{Color32, Ui};
 
 /// A frame that provides consistent focus highlighting and click-to-focus behavior.
 ///
@@ -18,12 +18,8 @@ pub struct FocusableFrame {
 pub struct FocusableFrameResponse<T> {
     /// The inner content returned by the closure
     pub inner: T,
-    /// The full rectangle of the frame (for click detection)
-    pub rect: egui::Rect,
     /// Whether the frame was clicked (outside of inner widget interactions)
     pub clicked: bool,
-    /// The frame's response
-    pub response: Response,
 }
 
 impl FocusableFrame {
@@ -74,14 +70,11 @@ impl FocusableFrame {
         let rect = frame_response.response.rect;
 
         // Check for clicks on the frame area
-        let clicked = ui.rect_contains_pointer(rect)
-            && ui.input(|i| i.pointer.primary_clicked());
+        let clicked = ui.rect_contains_pointer(rect) && ui.input(|i| i.pointer.primary_clicked());
 
         FocusableFrameResponse {
             inner: frame_response.inner,
-            rect,
             clicked,
-            response: frame_response.response,
         }
     }
 }

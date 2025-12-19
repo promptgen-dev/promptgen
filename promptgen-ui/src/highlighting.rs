@@ -15,7 +15,6 @@ struct SyntaxColors {
     option: Color32,
     brace: Color32,
     comment: Color32,
-    error: Color32,
 }
 
 impl SyntaxColors {
@@ -27,7 +26,6 @@ impl SyntaxColors {
             option: syntax::option(ctx),
             brace: syntax::brace(ctx),
             comment: syntax::comment(ctx),
-            error: syntax::ERROR,
         }
     }
 }
@@ -47,8 +45,6 @@ pub enum TokenKind {
     Brace,
     /// Comment (# ...)
     Comment,
-    /// Error/invalid syntax
-    Error,
 }
 
 impl TokenKind {
@@ -61,7 +57,6 @@ impl TokenKind {
             TokenKind::Option => colors.option,
             TokenKind::Brace => colors.brace,
             TokenKind::Comment => colors.comment,
-            TokenKind::Error => colors.error,
         }
     }
 }
@@ -113,7 +108,13 @@ fn highlight_from_ast(
         // Add any gap before this node as plain text (shouldn't happen normally)
         if span.start > last_end && last_end < text_len {
             let gap_end = span.start.min(text_len);
-            append_token(job, &text[last_end..gap_end], TokenKind::Text, font_id, colors);
+            append_token(
+                job,
+                &text[last_end..gap_end],
+                TokenKind::Text,
+                font_id,
+                colors,
+            );
         }
 
         // Get the original source text for this span
@@ -150,12 +151,22 @@ fn highlight_from_ast(
 }
 
 /// Fallback highlighting for a range when AST is stale
-fn highlight_fallback_range(job: &mut LayoutJob, text: &str, font_id: &FontId, colors: &SyntaxColors) {
+fn highlight_fallback_range(
+    job: &mut LayoutJob,
+    text: &str,
+    font_id: &FontId,
+    colors: &SyntaxColors,
+) {
     highlight_fallback(job, text, font_id, colors);
 }
 
 /// Highlight inline options with colored braces and pipe separators
-fn highlight_inline_options(job: &mut LayoutJob, text: &str, font_id: &FontId, colors: &SyntaxColors) {
+fn highlight_inline_options(
+    job: &mut LayoutJob,
+    text: &str,
+    font_id: &FontId,
+    colors: &SyntaxColors,
+) {
     // Text format: {option1|option2|option3}
     if text.starts_with('{') && text.ends_with('}') {
         // Opening brace
@@ -291,7 +302,13 @@ fn highlight_fallback(job: &mut LayoutJob, text: &str, font_id: &FontId, colors:
 }
 
 /// Append a token with the appropriate styling to the LayoutJob
-fn append_token(job: &mut LayoutJob, text: &str, kind: TokenKind, font_id: &FontId, colors: &SyntaxColors) {
+fn append_token(
+    job: &mut LayoutJob,
+    text: &str,
+    kind: TokenKind,
+    font_id: &FontId,
+    colors: &SyntaxColors,
+) {
     if text.is_empty() {
         return;
     }

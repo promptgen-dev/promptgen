@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use promptgen_core::{
     Cardinality, EvalContext, Library, ParseResult, PickSource, RenderError, SlotDefKind,
@@ -87,15 +86,6 @@ pub struct AutocompleteState {
     pub trigger_position: usize,
     /// The response ID of the text editor for popup positioning
     pub editor_response_id: Option<egui::Id>,
-}
-
-/// Persisted application configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AppConfig {
-    pub workspace_path: Option<PathBuf>,
-    pub selected_library_id: Option<String>,
-    pub sidebar_width: f32,
-    pub sidebar_view_mode: SidebarViewMode,
 }
 
 /// Main application state (not serialized - rebuilt on startup)
@@ -207,21 +197,12 @@ impl AppState {
             // Clear focused slot if it no longer exists
             if let EditorFocus::PickSlot { ref label } | EditorFocus::TextareaSlot { ref label } =
                 self.editor_focus
-                && !self.slot_values.contains_key(label) {
-                    self.editor_focus = EditorFocus::None;
-                    self.sidebar_mode = SidebarMode::Normal;
-                }
+                && !self.slot_values.contains_key(label)
+            {
+                self.editor_focus = EditorFocus::None;
+                self.sidebar_mode = SidebarMode::Normal;
+            }
         }
-    }
-
-    /// Get the list of slot names from the current template
-    pub fn get_current_slots(&self) -> Vec<String> {
-        if let Some(result) = &self.parse_result
-            && let Some(ast) = &result.ast
-        {
-            return self.workspace.get_slots(ast);
-        }
-        Vec::new()
     }
 
     /// Render the current template with the given seed
@@ -347,32 +328,33 @@ impl AppState {
     pub fn get_pick_options(&self, slot_label: &str) -> Vec<String> {
         let definitions = self.get_slot_definitions();
         if let Some(def) = definitions.iter().find(|d| d.label == slot_label)
-            && let SlotDefKind::Pick { sources, .. } = &def.kind {
-                let mut options = Vec::new();
-                for source in sources {
-                    match source {
-                        PickSource::VariableRef(lib_ref) => {
-                            // Resolve variable reference
-                            let matches = if let Some(lib_name) = &lib_ref.library {
-                                self.workspace
-                                    .find_variable_in_library(lib_name, &lib_ref.variable)
-                                    .into_iter()
-                                    .collect::<Vec<_>>()
-                            } else {
-                                self.workspace.find_variables(&lib_ref.variable)
-                            };
-                            // Add all options from matched variables
-                            for (_lib, variable) in matches {
-                                options.extend(variable.options.iter().cloned());
-                            }
-                        }
-                        PickSource::Literal { value, .. } => {
-                            options.push(value.clone());
+            && let SlotDefKind::Pick { sources, .. } = &def.kind
+        {
+            let mut options = Vec::new();
+            for source in sources {
+                match source {
+                    PickSource::VariableRef(lib_ref) => {
+                        // Resolve variable reference
+                        let matches = if let Some(lib_name) = &lib_ref.library {
+                            self.workspace
+                                .find_variable_in_library(lib_name, &lib_ref.variable)
+                                .into_iter()
+                                .collect::<Vec<_>>()
+                        } else {
+                            self.workspace.find_variables(&lib_ref.variable)
+                        };
+                        // Add all options from matched variables
+                        for (_lib, variable) in matches {
+                            options.extend(variable.options.iter().cloned());
                         }
                     }
+                    PickSource::Literal { value, .. } => {
+                        options.push(value.clone());
+                    }
                 }
-                return options;
             }
+            return options;
+        }
         Vec::new()
     }
 
@@ -504,11 +486,6 @@ impl AppState {
         self.variable_editor_original_name = None;
         self.variable_editor_dirty = false;
         self.confirm_dialog = None;
-    }
-
-    /// Check if the variable editor has unsaved changes
-    pub fn is_variable_editor_dirty(&self) -> bool {
-        self.variable_editor_dirty
     }
 
     /// Mark the variable editor as having changes

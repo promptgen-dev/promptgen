@@ -4,7 +4,9 @@ use egui::{Align, Id, Label, Layout, UiBuilder, Vec2};
 use egui_dnd::dnd;
 use promptgen_core::{Cardinality, Node, ParseResult, SlotDefKind};
 
-use crate::components::autocomplete::{get_completions, handle_autocomplete_keyboard};
+use crate::components::autocomplete::{
+    apply_completion, get_completions, handle_autocomplete_keyboard,
+};
 use crate::components::focusable_frame::FocusableFrame;
 use crate::components::template_editor::{TemplateEditor, TemplateEditorConfig};
 use crate::state::AppState;
@@ -62,13 +64,12 @@ impl SlotPanel {
                 let editor_id = format!("slot_editor_{}", def.label);
                 if state.is_autocomplete_active(&editor_id) {
                     let completions = get_completions(&state.workspace, state, &editor_id);
-                    if !completions.is_empty() {
-                        if let Some(completion_text) =
+                    if !completions.is_empty()
+                        && let Some(completion_text) =
                             handle_autocomplete_keyboard(ui, state, &editor_id, &completions)
-                        {
-                            slot_autocomplete_selection = Some((editor_id, completion_text));
-                            break;
-                        }
+                    {
+                        slot_autocomplete_selection = Some((editor_id, completion_text));
+                        break;
                     }
                 }
             }
@@ -111,7 +112,10 @@ impl SlotPanel {
 
         // Apply pending completion from keyboard handling (done at SlotPanel level)
         if let Some(completion_text) = pending_completion {
-            Self::apply_slot_completion(state, &label_owned, &editor_id, &completion_text);
+            let current_value = state.get_textarea_value(&label_owned);
+            let new_value = apply_completion(state, &current_value, &editor_id, &completion_text);
+            state.set_textarea_value(&label_owned, new_value);
+            state.request_render();
         }
 
         let frame_response = FocusableFrame::new(is_focused).show(ui, |ui| {
@@ -167,55 +171,6 @@ impl SlotPanel {
         if (result.response.has_focus() || frame_response.clicked) && !is_focused {
             state.focus_textarea_slot(label);
         }
-    }
-
-    /// Apply a completion to a slot's textarea content
-    fn apply_slot_completion(
-        state: &mut AppState,
-        slot_label: &str,
-        editor_id: &str,
-        completion_text: &str,
-    ) {
-        use crate::state::AutocompleteMode;
-
-        let Some(autocomplete) = state.get_autocomplete(editor_id) else {
-            return;
-        };
-
-        let trigger_pos = autocomplete.trigger_position;
-        let query_len = autocomplete.query.len();
-
-        let query_end = match &autocomplete.mode {
-            Some(AutocompleteMode::Options { variable_name }) => {
-                trigger_pos + 1 + variable_name.len() + 1 + query_len
-            }
-            _ => trigger_pos + 1 + query_len,
-        };
-
-        // Get the current slot value
-        let current_value = state.get_textarea_value(slot_label);
-
-        // Build the new content
-        let before = current_value[..trigger_pos].to_string();
-        let after = if query_end <= current_value.len() {
-            current_value[query_end..].to_string()
-        } else {
-            String::new()
-        };
-
-        let new_value = format!("{}{}{}", before, completion_text, after);
-
-        // Update the slot value
-        state.set_textarea_value(slot_label, new_value);
-
-        // Set cursor position to end of inserted text
-        let new_cursor_pos = trigger_pos + completion_text.len();
-        state.set_pending_cursor_position(editor_id, new_cursor_pos);
-
-        // Deactivate autocomplete
-        state.deactivate_autocomplete(editor_id);
-
-        state.request_render();
     }
 
     /// Render a pick slot.

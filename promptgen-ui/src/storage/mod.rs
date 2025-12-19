@@ -9,8 +9,6 @@ use std::path::{Path, PathBuf};
 use promptgen_core::Library;
 use thiserror::Error;
 
-use crate::state::AppConfig;
-
 /// Summary information about a library (for listing without full load)
 #[derive(Debug, Clone)]
 pub struct LibrarySummary {
@@ -57,12 +55,6 @@ pub trait StorageBackend {
 
     /// Set the workspace path
     fn set_workspace_path(&mut self, path: PathBuf);
-
-    /// Load application config
-    fn load_config(&self) -> AppConfig;
-
-    /// Save application config
-    fn save_config(&self, config: &AppConfig) -> Result<(), StorageError>;
 }
 
 /// Create the appropriate storage backend for the current platform
