@@ -122,17 +122,19 @@ impl SidebarPanel {
 
             ui.add_space(4.0);
 
-            // Search input
+            // Search input - icon changes to clear button when text exists
             ui.horizontal(|ui| {
-                ui.label(ICON_SEARCH);
+                if state.search_query.is_empty() {
+                    ui.label(ICON_SEARCH);
+                } else if ui.small_button(ICON_CLOSE).on_hover_text("Clear search").clicked() {
+                    state.search_query.clear();
+                }
+
                 ui.add(
                     egui::TextEdit::singleline(&mut state.search_query)
                         .hint_text("Search...")
-                        .desired_width(ui.available_width() - 24.0),
+                        .desired_width(f32::INFINITY),
                 );
-                if !state.search_query.is_empty() && ui.small_button(ICON_CLOSE).clicked() {
-                    state.search_query.clear();
-                }
             });
 
             ui.separator();
@@ -387,8 +389,11 @@ impl SidebarPanel {
                     if var_display.is_option_search && !var_display.option_matches.is_empty() {
                         // Show options with highlighting as clickable buttons
                         for (option_text, match_indices) in &var_display.option_matches {
-                            let option_job =
-                                Self::build_option_button_job(option_text, match_indices, default_color);
+                            let option_job = Self::build_option_button_job(
+                                option_text,
+                                match_indices,
+                                default_color,
+                            );
                             let response = ui.add(
                                 egui::Button::new(option_job)
                                     .fill(egui::Color32::TRANSPARENT)
@@ -477,7 +482,11 @@ impl SidebarPanel {
 
         // Add count suffix - for option search, show match count instead of total
         let suffix = if is_option_search {
-            let match_word = if option_count == 1 { "match" } else { "matches" };
+            let match_word = if option_count == 1 {
+                "match"
+            } else {
+                "matches"
+            };
             format!(" ({} {})", option_count, match_word)
         } else {
             format!(" ({})", option_count)
@@ -584,7 +593,11 @@ impl SidebarPanel {
         ui.horizontal(|ui| {
             ui.heading(&slot_label);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(ICON_CLOSE).on_hover_text("Close picker").clicked() {
+                if ui
+                    .button(ICON_CLOSE)
+                    .on_hover_text("Close picker")
+                    .clicked()
+                {
                     state.unfocus_slot();
                 }
             });
@@ -653,9 +666,7 @@ impl SidebarPanel {
                         } else {
                             egui::Color32::TRANSPARENT
                         };
-                        let response = ui.add(
-                            egui::Button::new(display_text).fill(fill).wrap(),
-                        );
+                        let response = ui.add(egui::Button::new(display_text).fill(fill).wrap());
 
                         // Show full text on hover for truncated options
                         response.clone().on_hover_text(option);
