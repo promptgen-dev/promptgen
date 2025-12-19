@@ -1,10 +1,15 @@
-//! Reusable template editor widget with syntax highlighting and line numbers.
+//! Reusable template editor widget with syntax highlighting, line numbers, and autocomplete.
 
 use egui::TextBuffer;
 
+use crate::components::autocomplete::{
+    check_autocomplete_trigger, find_autocomplete_context, get_completions,
+    handle_autocomplete_keyboard, AutocompletePopup,
+};
 use crate::highlighting::highlight_template;
+use crate::state::{AppState, AutocompleteMode};
 use crate::theme::syntax;
-use promptgen_core::{ParseResult, Workspace};
+use promptgen_core::ParseResult;
 
 /// Configuration for the template editor widget
 #[derive(Clone)]
@@ -17,8 +22,6 @@ pub struct TemplateEditorConfig {
     pub hint_text: Option<String>,
     /// Whether to show line numbers (default: true)
     pub show_line_numbers: bool,
-    /// If set, move cursor to this byte position on next render (then clear it)
-    pub cursor_position: Option<usize>,
 }
 
 impl Default for TemplateEditorConfig {
@@ -28,7 +31,6 @@ impl Default for TemplateEditorConfig {
             min_lines: 5,
             hint_text: None,
             show_line_numbers: true,
-            cursor_position: None,
         }
     }
 }
@@ -37,29 +39,53 @@ impl Default for TemplateEditorConfig {
 pub struct TemplateEditorResponse {
     /// The egui Response for the text edit widget
     pub response: egui::Response,
-    /// The full rect of the editor layout (including line numbers)
-    pub full_rect: egui::Rect,
     /// Parse result for the content (updated each frame)
     pub parse_result: ParseResult,
     /// Current cursor position (character index), if available
     pub cursor_position: Option<usize>,
 }
 
-/// Reusable template editor widget with syntax highlighting and line numbers
+/// Reusable template editor widget with syntax highlighting, line numbers, and autocomplete
 pub struct TemplateEditor;
 
 impl TemplateEditor {
-    /// Show the editor widget
+    /// Show the editor widget with full autocomplete support.
+    ///
+    /// This is the main entry point that handles:
+    /// - Syntax highlighting
+    /// - Line numbers (optional)
+    /// - Autocomplete activation, keyboard handling, and popup display
     ///
     /// Returns TemplateEditorResponse with the response and parse result
     pub fn show(
         ui: &mut egui::Ui,
         content: &mut String,
-        workspace: &Workspace,
+        state: &mut AppState,
         config: &TemplateEditorConfig,
     ) -> TemplateEditorResponse {
+        let editor_id = &config.id;
+
+        // Take pending cursor position (will be cleared after use)
+        let cursor_position = state.take_pending_cursor_position(editor_id);
+
+        // IMPORTANT: Handle autocomplete keyboard BEFORE the text editor processes input
+        // This prevents Enter/Tab/Arrow keys from being handled by the text editor
+        let mut autocomplete_selection: Option<String> = None;
+        if state.is_autocomplete_active(editor_id) {
+            let completions = get_completions(&state.workspace, state, editor_id);
+            if !completions.is_empty() {
+                autocomplete_selection =
+                    handle_autocomplete_keyboard(ui, state, editor_id, &completions);
+            }
+        }
+
+        // If we got a selection from keyboard, apply it before rendering
+        if let Some(completion_text) = autocomplete_selection {
+            Self::apply_completion(state, content, editor_id, &completion_text);
+        }
+
         // Parse content for syntax highlighting
-        let parse_result = workspace.parse_template(content);
+        let parse_result = state.workspace.parse_template(content);
 
         // Clone parse result for the layouter closure
         let parse_result_clone = parse_result.clone();
@@ -103,7 +129,7 @@ impl TemplateEditor {
             }
 
             // Main editor - auto-size to content
-            let text_edit_id = ui.make_persistent_id(&config.id);
+            let text_edit_id = ui.make_persistent_id(editor_id);
             let mut text_edit = egui::TextEdit::multiline(content)
                 .id(text_edit_id)
                 .desired_width(f32::INFINITY)
@@ -119,13 +145,13 @@ impl TemplateEditor {
             let response = ui.add(text_edit);
 
             // Apply pending cursor position if set
-            if let Some(cursor_pos) = config.cursor_position {
-                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), text_edit_id) {
+            if let Some(cursor_pos) = cursor_position {
+                if let Some(mut text_state) = egui::TextEdit::load_state(ui.ctx(), text_edit_id) {
                     let ccursor = egui::text::CCursor::new(cursor_pos);
-                    state
+                    text_state
                         .cursor
                         .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
-                    state.store(ui.ctx(), text_edit_id);
+                    text_state.store(ui.ctx(), text_edit_id);
                     // Request focus to make sure the cursor is visible
                     response.request_focus();
                 }
@@ -133,18 +159,109 @@ impl TemplateEditor {
 
             // Read current cursor position
             let cursor_position = egui::TextEdit::load_state(ui.ctx(), text_edit_id)
-                .and_then(|state| state.cursor.char_range())
+                .and_then(|text_state| text_state.cursor.char_range())
                 .map(|range| range.primary.index);
 
             (response, cursor_position)
         });
 
+        let response = layout_response.inner.0;
+        let cursor_pos = layout_response.inner.1.unwrap_or(content.len());
+
+        // Handle autocomplete activation/update based on cursor position
+        if !state.is_autocomplete_active(editor_id) {
+            // Check if we're in an autocomplete context (either just typed @ or cursor is after @)
+            if let Some(trigger_pos) = check_autocomplete_trigger(content, cursor_pos)
+                .or_else(|| find_autocomplete_context(content, cursor_pos))
+            {
+                state.activate_autocomplete(editor_id, trigger_pos);
+                // Deactivate autocomplete in other editors
+                state.deactivate_autocomplete_except(editor_id);
+                // Update the query immediately
+                state.update_autocomplete_query(editor_id, content, cursor_pos);
+            }
+        } else {
+            // Autocomplete is active, update the query with actual cursor position
+            state.update_autocomplete_query(editor_id, content, cursor_pos);
+        }
+
+        // Deactivate autocomplete if editor loses focus
+        if !response.has_focus() && state.is_autocomplete_active(editor_id) {
+            state.deactivate_autocomplete(editor_id);
+        }
+
+        // Show autocomplete popup if active (visual only, keyboard already handled above)
+        if state.is_autocomplete_active(editor_id) {
+            let completions = get_completions(&state.workspace, state, editor_id);
+
+            if completions.is_empty() {
+                // No completions, deactivate
+                state.deactivate_autocomplete(editor_id);
+            } else {
+                // Show popup and handle mouse clicks
+                if let Some(completion_text) =
+                    AutocompletePopup::show(ui, state, editor_id, &response, &completions)
+                {
+                    Self::apply_completion(state, content, editor_id, &completion_text);
+                }
+            }
+        }
+
         TemplateEditorResponse {
-            response: layout_response.inner.0,
-            full_rect: layout_response.response.rect,
+            response,
             parse_result,
             cursor_position: layout_response.inner.1,
         }
+    }
+
+    /// Apply a completion to the editor content
+    fn apply_completion(
+        state: &mut AppState,
+        content: &mut String,
+        editor_id: &str,
+        completion_text: &str,
+    ) {
+        let Some(autocomplete) = state.get_autocomplete(editor_id) else {
+            return;
+        };
+
+        // Replace from trigger position to end of the autocomplete query
+        let trigger_pos = autocomplete.trigger_position;
+        let query_len = autocomplete.query.len();
+
+        // Calculate where the @query ends based on mode:
+        // - Variables mode: @{query} -> trigger_pos + 1 + query_len
+        // - Options mode: @{variable_name}/{query} -> trigger_pos + 1 + var_len + 1 + query_len
+        let query_end = match &autocomplete.mode {
+            Some(AutocompleteMode::Options { variable_name }) => {
+                // @variable_name/query
+                trigger_pos + 1 + variable_name.len() + 1 + query_len
+            }
+            _ => {
+                // @query
+                trigger_pos + 1 + query_len
+            }
+        };
+
+        // Build the new content, preserving text before @ and after the query
+        let before = content[..trigger_pos].to_string();
+        let after = if query_end <= content.len() {
+            content[query_end..].to_string()
+        } else {
+            String::new()
+        };
+
+        *content = format!("{}{}{}", before, completion_text, after);
+
+        // Set cursor position to end of inserted text
+        let new_cursor_pos = trigger_pos + completion_text.len();
+        state.set_pending_cursor_position(editor_id, new_cursor_pos);
+
+        // Deactivate autocomplete now that we've used the state
+        state.deactivate_autocomplete(editor_id);
+
+        // Request render update
+        state.request_render();
     }
 
     /// Show parse errors below the editor (call after show())

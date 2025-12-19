@@ -67,6 +67,14 @@ pub fn get_completions(workspace: &Workspace, state: &AppState, editor_id: &str)
         Some(AutocompleteMode::Variables) => {
             // Search for variable names
             let results = workspace.search_variables(query);
+
+            // If the query exactly matches a variable name (case-insensitive), don't show completions.
+            // This allows Enter to work normally when the user has typed a complete variable reference.
+            let has_exact_match = results.iter().any(|r| r.variable_name.eq_ignore_ascii_case(query));
+            if has_exact_match {
+                return Vec::new();
+            }
+
             results
                 .into_iter()
                 .take(MAX_COMPLETIONS)

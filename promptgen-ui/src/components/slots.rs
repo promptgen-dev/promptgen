@@ -4,13 +4,10 @@ use egui::{Align, Id, Label, Layout, UiBuilder, Vec2};
 use egui_dnd::dnd;
 use promptgen_core::{Cardinality, Node, ParseResult, SlotDefKind};
 
-use crate::components::autocomplete::{
-    check_autocomplete_trigger, find_autocomplete_context, get_completions,
-    handle_autocomplete_keyboard, AutocompletePopup,
-};
+use crate::components::autocomplete::{get_completions, handle_autocomplete_keyboard};
 use crate::components::focusable_frame::FocusableFrame;
 use crate::components::template_editor::{TemplateEditor, TemplateEditorConfig};
-use crate::state::{AppState, AutocompleteMode};
+use crate::state::AppState;
 use crate::theme::syntax;
 
 /// Measure text size in the UI (based on hello_egui_utils::measure_text)
@@ -56,13 +53,39 @@ impl SlotPanel {
             return;
         }
 
+        // IMPORTANT: Handle autocomplete keyboard for any active slot editor BEFORE rendering.
+        // This must happen at the SlotPanel level, before the FocusableFrame creates nested UIs,
+        // to ensure keyboard events are consumed before any TextEdit widget processes them.
+        let mut slot_autocomplete_selection: Option<(String, String)> = None; // (editor_id, completion_text)
+        for def in &definitions {
+            if matches!(def.kind, SlotDefKind::Textarea) {
+                let editor_id = format!("slot_editor_{}", def.label);
+                if state.is_autocomplete_active(&editor_id) {
+                    let completions = get_completions(&state.workspace, state, &editor_id);
+                    if !completions.is_empty() {
+                        if let Some(completion_text) =
+                            handle_autocomplete_keyboard(ui, state, &editor_id, &completions)
+                        {
+                            slot_autocomplete_selection = Some((editor_id, completion_text));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         // No internal scroll - parent handles scrolling
         for def in &definitions {
             let is_focused = state.is_slot_focused(&def.label);
 
             match &def.kind {
                 SlotDefKind::Textarea => {
-                    Self::show_textarea_slot(ui, state, &def.label, is_focused);
+                    // Check if we have a pending autocomplete selection for this slot
+                    let pending_completion = slot_autocomplete_selection
+                        .as_ref()
+                        .filter(|(id, _)| *id == format!("slot_editor_{}", def.label))
+                        .map(|(_, text)| text.clone());
+                    Self::show_textarea_slot(ui, state, &def.label, is_focused, pending_completion);
                 }
                 SlotDefKind::Pick {
                     cardinality, sep, ..
@@ -76,25 +99,18 @@ impl SlotPanel {
     }
 
     /// Render a textarea slot.
-    fn show_textarea_slot(ui: &mut egui::Ui, state: &mut AppState, label: &str, is_focused: bool) {
+    fn show_textarea_slot(
+        ui: &mut egui::Ui,
+        state: &mut AppState,
+        label: &str,
+        is_focused: bool,
+        pending_completion: Option<String>,
+    ) {
         let label_owned = label.to_string();
         let editor_id = format!("slot_editor_{}", label_owned);
 
-        // Take pending cursor position (will be cleared after use)
-        let cursor_position = state.take_pending_cursor_position(&editor_id);
-
-        // IMPORTANT: Handle autocomplete keyboard BEFORE the text editor processes input
-        let mut autocomplete_selection: Option<String> = None;
-        if state.is_autocomplete_active(&editor_id) {
-            let completions = get_completions(&state.workspace, state, &editor_id);
-            if !completions.is_empty() {
-                autocomplete_selection =
-                    handle_autocomplete_keyboard(ui, state, &editor_id, &completions);
-            }
-        }
-
-        // If we got a selection from keyboard, apply it before rendering
-        if let Some(completion_text) = autocomplete_selection.clone() {
+        // Apply pending completion from keyboard handling (done at SlotPanel level)
+        if let Some(completion_text) = pending_completion {
             Self::apply_slot_completion(state, &label_owned, &editor_id, &completion_text);
         }
 
@@ -115,54 +131,16 @@ impl SlotPanel {
                 min_lines: 3,
                 hint_text: Some("Enter text...".to_string()),
                 show_line_numbers: true,
-                cursor_position,
             };
 
-            let mut value = state.get_textarea_value(&label_owned);
-            let result = TemplateEditor::show(ui, &mut value, &state.workspace, &config);
+            let original_value = state.get_textarea_value(&label_owned);
+            let mut value = original_value.clone();
+            let result = TemplateEditor::show(ui, &mut value, state, &config);
 
-            if result.response.changed() {
+            // Update if changed by user typing OR by autocomplete completion
+            if value != original_value {
                 state.set_textarea_value(&label_owned, value.clone());
                 state.request_render();
-            }
-
-            // Get cursor position from the editor
-            let cursor_pos = result.cursor_position.unwrap_or(value.len());
-
-            // Handle autocomplete activation/update based on cursor position
-            if !state.is_autocomplete_active(&editor_id) {
-                if let Some(trigger_pos) = check_autocomplete_trigger(&value, cursor_pos)
-                    .or_else(|| find_autocomplete_context(&value, cursor_pos))
-                {
-                    state.activate_autocomplete(&editor_id, trigger_pos);
-                    // Deactivate autocomplete in other editors
-                    state.deactivate_autocomplete_except(&editor_id);
-                    // Update the query immediately
-                    state.update_autocomplete_query(&editor_id, &value, cursor_pos);
-                }
-            } else {
-                // Autocomplete is active, update the query with actual cursor position
-                state.update_autocomplete_query(&editor_id, &value, cursor_pos);
-            }
-
-            // Deactivate autocomplete if editor loses focus
-            if !result.response.has_focus() && state.is_autocomplete_active(&editor_id) {
-                state.deactivate_autocomplete(&editor_id);
-            }
-
-            // Show autocomplete popup if active
-            if state.is_autocomplete_active(&editor_id) {
-                let completions = get_completions(&state.workspace, state, &editor_id);
-
-                if completions.is_empty() {
-                    state.deactivate_autocomplete(&editor_id);
-                } else if let Some(completion_text) =
-                    AutocompletePopup::show(ui, state, &editor_id, &result.response, &completions)
-                {
-                    // Store for after frame_response - can't mutate state here
-                    // We'll handle this after the frame
-                    Self::apply_slot_completion(state, &label_owned, &editor_id, &completion_text);
-                }
             }
 
             // Show parse errors below the editor
@@ -198,6 +176,8 @@ impl SlotPanel {
         editor_id: &str,
         completion_text: &str,
     ) {
+        use crate::state::AutocompleteMode;
+
         let Some(autocomplete) = state.get_autocomplete(editor_id) else {
             return;
         };

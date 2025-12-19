@@ -4,9 +4,16 @@ use egui::{Color32, RichText, Vec2};
 
 use egui_material_icons::icons::ICON_ARROW_BACK;
 
+use crate::components::autocomplete::{
+    check_autocomplete_trigger, find_autocomplete_context, get_completions,
+    handle_autocomplete_keyboard, AutocompletePopup,
+};
 use crate::highlighting::highlight_template;
-use crate::state::{AppState, ConfirmDialog};
+use crate::state::{AppState, AutocompleteMode, ConfirmDialog};
 use crate::theme::syntax;
+
+/// The editor ID for the variable options editor
+const VARIABLE_OPTIONS_EDITOR_ID: &str = "variable_options_editor";
 
 /// Variable editor panel for editing variable variable names and options.
 pub struct VariableEditorPanel;
@@ -98,7 +105,7 @@ impl VariableEditorPanel {
             });
         });
 
-        // Options textarea with syntax highlighting
+        // Options textarea with syntax highlighting and autocomplete
         Self::show_options_editor(ui, state);
 
         // Show option parse errors
@@ -125,10 +132,32 @@ impl VariableEditorPanel {
         should_close
     }
 
-    /// Render the options editor with syntax highlighting and option-based line numbers
+    /// Render the options editor with syntax highlighting, option-based line numbers, and autocomplete
     fn show_options_editor(ui: &mut egui::Ui, state: &mut AppState) {
         let editor_bg = ui.visuals().extreme_bg_color;
         let ctx = ui.ctx().clone();
+        let editor_id = VARIABLE_OPTIONS_EDITOR_ID;
+
+        // Take pending cursor position (will be cleared after use)
+        let pending_cursor_position = state.take_pending_cursor_position(editor_id);
+
+        // Clone content to avoid double mutable borrow
+        let mut content = state.variable_editor_content.clone();
+
+        // IMPORTANT: Handle autocomplete keyboard BEFORE the text editor processes input
+        let mut autocomplete_selection: Option<String> = None;
+        if state.is_autocomplete_active(editor_id) {
+            let completions = get_completions(&state.workspace, state, editor_id);
+            if !completions.is_empty() {
+                autocomplete_selection =
+                    handle_autocomplete_keyboard(ui, state, editor_id, &completions);
+            }
+        }
+
+        // If we got a selection from keyboard, apply it before rendering
+        if let Some(completion_text) = autocomplete_selection {
+            Self::apply_completion(state, &mut content, &completion_text);
+        }
 
         egui::Frame::NONE
             .fill(editor_bg)
@@ -138,8 +167,8 @@ impl VariableEditorPanel {
                 ui.set_width(ui.available_width());
 
                 // Calculate option numbers for each line
-                let option_numbers = Self::calculate_option_numbers(&state.variable_editor_content);
-                let line_count = state.variable_editor_content.lines().count().max(5);
+                let option_numbers = Self::calculate_option_numbers(&content);
+                let line_count = content.lines().count().max(5);
 
                 ui.horizontal(|ui| {
                     // Option numbers column
@@ -177,19 +206,108 @@ impl VariableEditorPanel {
                             ui.ctx().fonts_mut(|f| f.layout_job(job))
                         };
 
+                    let text_edit_id = ui.make_persistent_id(editor_id);
                     let response = ui.add(
-                        egui::TextEdit::multiline(&mut state.variable_editor_content)
+                        egui::TextEdit::multiline(&mut content)
+                            .id(text_edit_id)
                             .font(egui::TextStyle::Monospace)
                             .desired_width(f32::INFINITY)
                             .desired_rows(line_count)
                             .layouter(&mut layouter),
                     );
 
+                    // Apply pending cursor position if set
+                    if let Some(cursor_pos) = pending_cursor_position {
+                        if let Some(mut text_state) = egui::TextEdit::load_state(ui.ctx(), text_edit_id)
+                        {
+                            let ccursor = egui::text::CCursor::new(cursor_pos);
+                            text_state
+                                .cursor
+                                .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                            text_state.store(ui.ctx(), text_edit_id);
+                            response.request_focus();
+                        }
+                    }
+
+                    // Read current cursor position
+                    let cursor_pos = egui::TextEdit::load_state(ui.ctx(), text_edit_id)
+                        .and_then(|text_state| text_state.cursor.char_range())
+                        .map(|range| range.primary.index)
+                        .unwrap_or(content.len());
+
+                    // Handle autocomplete activation/update based on cursor position
+                    if !state.is_autocomplete_active(editor_id) {
+                        if let Some(trigger_pos) = check_autocomplete_trigger(&content, cursor_pos)
+                            .or_else(|| find_autocomplete_context(&content, cursor_pos))
+                        {
+                            state.activate_autocomplete(editor_id, trigger_pos);
+                            state.deactivate_autocomplete_except(editor_id);
+                            state.update_autocomplete_query(editor_id, &content, cursor_pos);
+                        }
+                    } else {
+                        state.update_autocomplete_query(editor_id, &content, cursor_pos);
+                    }
+
+                    // Deactivate autocomplete if editor loses focus
+                    if !response.has_focus() && state.is_autocomplete_active(editor_id) {
+                        state.deactivate_autocomplete(editor_id);
+                    }
+
+                    // Show autocomplete popup if active
+                    if state.is_autocomplete_active(editor_id) {
+                        let completions = get_completions(&state.workspace, state, editor_id);
+
+                        if completions.is_empty() {
+                            state.deactivate_autocomplete(editor_id);
+                        } else if let Some(completion_text) =
+                            AutocompletePopup::show(ui, state, editor_id, &response, &completions)
+                        {
+                            Self::apply_completion(state, &mut content, &completion_text);
+                        }
+                    }
+
                     if response.changed() {
                         state.mark_variable_editor_dirty();
                     }
                 });
             });
+
+        // Update state content if it changed
+        if content != state.variable_editor_content {
+            state.variable_editor_content = content;
+        }
+    }
+
+    /// Apply a completion to the editor content
+    fn apply_completion(state: &mut AppState, content: &mut String, completion_text: &str) {
+        let editor_id = VARIABLE_OPTIONS_EDITOR_ID;
+        let Some(autocomplete) = state.get_autocomplete(editor_id) else {
+            return;
+        };
+
+        let trigger_pos = autocomplete.trigger_position;
+        let query_len = autocomplete.query.len();
+
+        let query_end = match &autocomplete.mode {
+            Some(AutocompleteMode::Options { variable_name }) => {
+                trigger_pos + 1 + variable_name.len() + 1 + query_len
+            }
+            _ => trigger_pos + 1 + query_len,
+        };
+
+        let before = content[..trigger_pos].to_string();
+        let after = if query_end <= content.len() {
+            content[query_end..].to_string()
+        } else {
+            String::new()
+        };
+
+        *content = format!("{}{}{}", before, completion_text, after);
+
+        let new_cursor_pos = trigger_pos + completion_text.len();
+        state.set_pending_cursor_position(editor_id, new_cursor_pos);
+        state.deactivate_autocomplete(editor_id);
+        state.mark_variable_editor_dirty();
     }
 
     /// Calculate option numbers for each line (None for delimiter lines)
