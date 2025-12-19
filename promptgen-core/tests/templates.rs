@@ -13,7 +13,7 @@ use common::{eval_template, lib};
 #[test]
 fn basic_character_template_renders() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde hair
@@ -37,7 +37,7 @@ templates:
 #[test]
 fn template_with_slots_renders() {
     let lib = lib(r#"
-groups: []
+variables: []
 templates:
   - name: Greeting
     source: "Hello {{ Name }}"
@@ -52,7 +52,7 @@ templates:
 #[test]
 fn template_with_inline_options_renders() {
     let lib = lib(r#"
-groups: []
+variables: []
 templates:
   - name: Mood
     source: "Feeling {happy|sad|excited} today"
@@ -67,7 +67,7 @@ templates:
 #[test]
 fn complex_template_renders() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde hair
@@ -96,7 +96,7 @@ templates:
 #[test]
 fn template_chosen_options_are_tracked() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Color
     options:
       - red
@@ -109,14 +109,14 @@ templates:
     let result = eval_template(&lib, "Simple", Some(42));
 
     assert_eq!(result.chosen_options.len(), 1);
-    assert_eq!(result.chosen_options[0].group_name, "Color");
+    assert_eq!(result.chosen_options[0].variable_name, "Color");
     assert!(result.chosen_options[0].option_text == "red" || result.chosen_options[0].option_text == "blue");
 }
 
 #[test]
 fn template_with_nested_grammar_renders() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Size
     options:
       - big

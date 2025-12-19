@@ -17,7 +17,7 @@ impl EditorPanel {
             min_lines: 5,
             hint_text: Some(
                 "Enter your prompt template here...\n\n\
-                 Use @GroupName to reference variables.\n\
+                 Use @VariableName to reference variables.\n\
                  Use {option1|option2|option3} for inline choices.\n\
                  Use {{ slot_name }} for user-filled slots."
                     .to_string(),

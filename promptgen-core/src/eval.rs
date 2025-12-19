@@ -3,7 +3,7 @@
 //! Evaluates templates against a Workspace to produce resolved prompts.
 //!
 //! Key features:
-//! - LibraryRef resolution (finds groups by name, supports multi-library)
+//! - LibraryRef resolution (finds variables by name, supports multi-library)
 //! - InlineOptions evaluation (random selection from {a|b|c})
 //! - Lazy parsing of option text for nested grammar
 //! - Cycle detection for circular references
@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use rand::prelude::*;
 
 use crate::ast::{LibraryRef, Node, OptionItem, PickOperator, PickSlot, SlotKind, Template};
-use crate::library::PromptGroup;
+use crate::library::PromptVariable;
 use crate::parser::parse_template;
 use crate::workspace::Workspace;
 
@@ -27,7 +27,7 @@ pub struct EvalContext<'a, R: Rng = StdRng> {
     /// For `| one` slots, provide a single-element vec.
     /// For `| many` slots, provide multiple values.
     pub slot_overrides: HashMap<String, Vec<String>>,
-    /// Stack of group names being evaluated (for cycle detection).
+    /// Stack of variable names being evaluated (for cycle detection).
     eval_stack: Vec<String>,
 }
 
@@ -86,16 +86,16 @@ impl<'a, R: Rng> EvalContext<'a, R> {
     }
 }
 
-/// Record of which option was chosen from a group.
+/// Record of which option was chosen from a variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChosenOption {
-    /// The group name that was referenced.
-    pub group_name: String,
+    /// The variable name that was referenced.
+    pub variable_name: String,
     /// The library name (if qualified reference or resolved).
     pub library_name: Option<String>,
     /// The text of the option that was selected.
     pub option_text: String,
-    /// The index of the option in the group.
+    /// The index of the option in the variable.
     pub option_index: usize,
 }
 
@@ -113,14 +113,14 @@ pub struct RenderResult {
 /// Error that can occur during rendering.
 #[derive(Debug, thiserror::Error)]
 pub enum RenderError {
-    #[error("group not found: {0}")]
-    GroupNotFound(String),
+    #[error("variable not found: {0}")]
+    VariableNotFound(String),
 
     #[error("library not found: {0}")]
     LibraryNotFound(String),
 
-    #[error("group has no options: {0}")]
-    EmptyGroup(String),
+    #[error("variable has no options: {0}")]
+    EmptyVariable(String),
 
     #[error("circular reference detected: {0}")]
     CircularReference(String),
@@ -128,8 +128,8 @@ pub enum RenderError {
     #[error("parse error in option text: {0}")]
     OptionParseError(String),
 
-    #[error("ambiguous group reference '{group}' found in libraries: {libraries}")]
-    AmbiguousGroup { group: String, libraries: String },
+    #[error("ambiguous variable reference '{variable}' found in libraries: {libraries}")]
+    AmbiguousVariable { variable: String, libraries: String },
 
     #[error("slot '{slot}' expects exactly one value, but got {count}")]
     TooManyValuesForOne { slot: String, count: usize },
@@ -274,13 +274,14 @@ fn eval_pick_slot_value<R: Rng>(
     }
 
     if let Some(max_val) = max
-        && count > max_val as usize {
-            return Err(RenderError::TooManyValuesForMany {
-                slot: slot_name.to_string(),
-                max: max_val,
-                count,
-            });
-        }
+        && count > max_val as usize
+    {
+        return Err(RenderError::TooManyValuesForMany {
+            slot: slot_name.to_string(),
+            max: max_val,
+            count,
+        });
+    }
 
     // Evaluate each value (may contain grammar like @Color or {a|b})
     let mut evaluated: Vec<String> = Vec::with_capacity(count);
@@ -323,30 +324,30 @@ fn resolve_library_ref<R: Rng>(
     ctx: &mut EvalContext<'_, R>,
     chosen_options: &mut Vec<ChosenOption>,
 ) -> Result<(String, ChosenOption), RenderError> {
-    let group_name = &lib_ref.group;
+    let variable_name = &lib_ref.variable;
 
     // Check for circular reference
-    if ctx.eval_stack.contains(group_name) {
+    if ctx.eval_stack.contains(variable_name) {
         let chain = ctx.eval_stack.join(" -> ");
         return Err(RenderError::CircularReference(format!(
             "{} -> {}",
-            chain, group_name
+            chain, variable_name
         )));
     }
 
-    // Find the group using workspace resolution
-    let (library_name, group) = resolve_group(ctx.workspace, lib_ref)?;
+    // Find the variable using workspace resolution
+    let (library_name, variable) = resolve_variable(ctx.workspace, lib_ref)?;
 
-    if group.options.is_empty() {
-        return Err(RenderError::EmptyGroup(group_name.clone()));
+    if variable.options.is_empty() {
+        return Err(RenderError::EmptyVariable(variable_name.clone()));
     }
 
     // Pick a random option
-    let idx = ctx.rng.random_range(0..group.options.len());
-    let option_text = &group.options[idx];
+    let idx = ctx.rng.random_range(0..variable.options.len());
+    let option_text = &variable.options[idx];
 
     // Push to eval stack for cycle detection
-    ctx.eval_stack.push(group_name.clone());
+    ctx.eval_stack.push(variable_name.clone());
 
     // Parse and evaluate the option (lazy evaluation for nested grammar)
     let evaluated_text = eval_text_with_grammar(option_text, ctx, chosen_options)?;
@@ -355,7 +356,7 @@ fn resolve_library_ref<R: Rng>(
     ctx.eval_stack.pop();
 
     let chosen = ChosenOption {
-        group_name: group_name.clone(),
+        variable_name: variable_name.clone(),
         library_name: Some(library_name),
         option_text: evaluated_text.clone(),
         option_index: idx,
@@ -364,37 +365,37 @@ fn resolve_library_ref<R: Rng>(
     Ok((evaluated_text, chosen))
 }
 
-/// Resolve a library reference to find the group.
-/// Returns (library_name, group) on success.
-fn resolve_group<'a>(
+/// Resolve a library reference to find the variable.
+/// Returns (library_name, variable) on success.
+fn resolve_variable<'a>(
     workspace: &'a Workspace,
     lib_ref: &LibraryRef,
-) -> Result<(String, &'a PromptGroup), RenderError> {
+) -> Result<(String, &'a PromptVariable), RenderError> {
     match &lib_ref.library {
-        // Qualified reference: @"LibName:GroupName"
+        // Qualified reference: @"LibName:VariableName"
         Some(lib_name) => {
             let lib = workspace
                 .get_library_by_name(lib_name)
                 .ok_or_else(|| RenderError::LibraryNotFound(lib_name.clone()))?;
 
-            let group = lib
-                .find_group(&lib_ref.group)
-                .ok_or_else(|| RenderError::GroupNotFound(lib_ref.group.clone()))?;
+            let variable = lib
+                .find_variable(&lib_ref.variable)
+                .ok_or_else(|| RenderError::VariableNotFound(lib_ref.variable.clone()))?;
 
-            Ok((lib.name.clone(), group))
+            Ok((lib.name.clone(), variable))
         }
 
-        // Unqualified reference: @GroupName
+        // Unqualified reference: @VariableName
         None => {
-            let matches = workspace.find_groups(&lib_ref.group);
+            let matches = workspace.find_variables(&lib_ref.variable);
 
             match matches.len() {
-                0 => Err(RenderError::GroupNotFound(lib_ref.group.clone())),
+                0 => Err(RenderError::VariableNotFound(lib_ref.variable.clone())),
                 1 => Ok((matches[0].0.name.clone(), matches[0].1)),
                 _ => {
                     let lib_names: Vec<_> = matches.iter().map(|(l, _)| l.name.as_str()).collect();
-                    Err(RenderError::AmbiguousGroup {
-                        group: lib_ref.group.clone(),
+                    Err(RenderError::AmbiguousVariable {
+                        variable: lib_ref.variable.clone(),
                         libraries: lib_names.join(", "),
                     })
                 }
@@ -437,23 +438,23 @@ fn eval_inline_options<R: Rng>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::library::{Library, PromptGroup};
+    use crate::library::{Library, PromptVariable};
     use crate::workspace::WorkspaceBuilder;
 
     fn make_test_workspace() -> Workspace {
         let mut lib = Library::with_id("test-lib", "Test Library");
 
-        lib.groups.push(PromptGroup::with_options(
+        lib.variables.push(PromptVariable::with_options(
             "Hair",
             vec!["blonde hair", "red hair", "black hair"],
         ));
 
-        lib.groups.push(PromptGroup::with_options(
+        lib.variables.push(PromptVariable::with_options(
             "Eyes",
             vec!["blue eyes", "green eyes"],
         ));
 
-        lib.groups.push(PromptGroup::with_options(
+        lib.variables.push(PromptVariable::with_options(
             "Color",
             vec!["red", "blue", "green"],
         ));
@@ -463,19 +464,19 @@ mod tests {
 
     fn make_multi_library_workspace() -> Workspace {
         let mut lib1 = Library::with_id("lib1", "Characters");
-        lib1.groups.push(PromptGroup::with_options(
+        lib1.variables.push(PromptVariable::with_options(
             "Hair",
             vec!["blonde", "red", "black"],
         ));
-        lib1.groups
-            .push(PromptGroup::with_options("Eyes", vec!["blue", "green"]));
+        lib1.variables
+            .push(PromptVariable::with_options("Eyes", vec!["blue", "green"]));
 
         let mut lib2 = Library::with_id("lib2", "Settings");
-        lib2.groups.push(PromptGroup::with_options(
+        lib2.variables.push(PromptVariable::with_options(
             "Weather",
             vec!["sunny", "rainy", "cloudy"],
         ));
-        lib2.groups.push(PromptGroup::with_options(
+        lib2.variables.push(PromptVariable::with_options(
             "Time",
             vec!["morning", "evening"],
         ));
@@ -511,13 +512,13 @@ mod tests {
                 || result.text.contains("black hair")
         );
         assert_eq!(result.chosen_options.len(), 1);
-        assert_eq!(result.chosen_options[0].group_name, "Hair");
+        assert_eq!(result.chosen_options[0].variable_name, "Hair");
     }
 
     #[test]
     fn test_render_quoted_library_ref() {
         let mut lib = Library::with_id("test", "Test");
-        lib.groups.push(PromptGroup::with_options(
+        lib.variables.push(PromptVariable::with_options(
             "Eye Color",
             vec!["amber", "violet"],
         ));
@@ -612,13 +613,13 @@ mod tests {
     }
 
     #[test]
-    fn test_render_group_not_found_error() {
+    fn test_render_variable_not_found_error() {
         let ws = make_test_workspace();
         let ast = parse_template("@NonExistent").unwrap();
         let mut ctx = EvalContext::with_seed(&ws, 42);
 
         let result = render(&ast, &mut ctx);
-        assert!(matches!(result, Err(RenderError::GroupNotFound(_))));
+        assert!(matches!(result, Err(RenderError::VariableNotFound(_))));
     }
 
     #[test]
@@ -632,28 +633,30 @@ mod tests {
     }
 
     #[test]
-    fn test_render_empty_group_error() {
+    fn test_render_empty_variable_error() {
         let mut lib = Library::with_id("test", "Test");
-        lib.groups.push(PromptGroup::new("Empty", vec![]));
+        lib.variables.push(PromptVariable::new("Empty", vec![]));
 
         let ws = WorkspaceBuilder::new().add_library(lib).build();
         let ast = parse_template("@Empty").unwrap();
         let mut ctx = EvalContext::with_seed(&ws, 42);
 
         let result = render(&ast, &mut ctx);
-        assert!(matches!(result, Err(RenderError::EmptyGroup(_))));
+        assert!(matches!(result, Err(RenderError::EmptyVariable(_))));
     }
 
     #[test]
-    fn test_render_ambiguous_group_error() {
-        // Create two libraries with the same group name
+    fn test_render_ambiguous_variable_error() {
+        // Create two libraries with the same variable name
         let mut lib1 = Library::with_id("lib1", "Lib1");
-        lib1.groups
-            .push(PromptGroup::with_options("Color", vec!["red", "blue"]));
+        lib1.variables
+            .push(PromptVariable::with_options("Color", vec!["red", "blue"]));
 
         let mut lib2 = Library::with_id("lib2", "Lib2");
-        lib2.groups
-            .push(PromptGroup::with_options("Color", vec!["green", "yellow"]));
+        lib2.variables.push(PromptVariable::with_options(
+            "Color",
+            vec!["green", "yellow"],
+        ));
 
         let ws = WorkspaceBuilder::new()
             .add_library(lib1)
@@ -664,17 +667,17 @@ mod tests {
         let mut ctx = EvalContext::with_seed(&ws, 42);
 
         let result = render(&ast, &mut ctx);
-        assert!(matches!(result, Err(RenderError::AmbiguousGroup { .. })));
+        assert!(matches!(result, Err(RenderError::AmbiguousVariable { .. })));
     }
 
     #[test]
     fn test_render_nested_grammar_in_options() {
         let mut lib = Library::with_id("test", "Test");
-        lib.groups.push(PromptGroup::with_options(
+        lib.variables.push(PromptVariable::with_options(
             "Color",
             vec!["red", "blue", "green"],
         ));
-        lib.groups.push(PromptGroup::with_options(
+        lib.variables.push(PromptVariable::with_options(
             "FancyEyes",
             vec!["@Color eyes", "sparkling eyes"],
         ));
@@ -711,8 +714,10 @@ mod tests {
         let mut lib = Library::with_id("test", "Test");
 
         // Create a cycle: A references B, B references A
-        lib.groups.push(PromptGroup::with_options("A", vec!["@B"]));
-        lib.groups.push(PromptGroup::with_options("B", vec!["@A"]));
+        lib.variables
+            .push(PromptVariable::with_options("A", vec!["@B"]));
+        lib.variables
+            .push(PromptVariable::with_options("B", vec!["@A"]));
 
         let ws = WorkspaceBuilder::new().add_library(lib).build();
         let ast = parse_template("@A").unwrap();

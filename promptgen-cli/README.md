@@ -27,23 +27,23 @@ cargo run -p promptgen-cli -- <command> [options]
 Create a new library file in the current directory.
 
 ```bash
-# Creates my-library.yml with example groups and templates
+# Creates my-library.yml with example variables and templates
 promptgen create my-library
 ```
 
-### `promptgen list <groups|templates> -l <path>`
+### `promptgen list <variables|templates> -l <path>`
 
-List groups or templates in a library.
+List variables or templates in a library.
 
 ```bash
-# List all groups
-promptgen list groups -l example.yml
+# List all variables
+promptgen list variables -l example.yml
 
 # List all templates
 promptgen list templates -l example.yml
 
 # Output as JSON (for scripting/editor integration)
-promptgen list groups -l example.yml -f json
+promptgen list variables -l example.yml -f json
 ```
 
 ### `promptgen parse -l <path> [-t <name> | -i <source>]`
@@ -87,13 +87,13 @@ promptgen render -l example.yml -t "Character" -f json
 
 Common options available across commands:
 
-| Short | Long | Description |
-|-------|------|-------------|
-| `-l` | `--lib` | Path to the library file |
-| `-t` | `--template` | Template name |
-| `-i` | `--inline` | Inline template source |
-| `-s` | `--seed` | Random seed for deterministic output |
-| `-f` | `--format` | Output format (`text` or `json`) |
+| Short | Long         | Description                          |
+| ----- | ------------ | ------------------------------------ |
+| `-l`  | `--lib`      | Path to the library file             |
+| `-t`  | `--template` | Template name                        |
+| `-i`  | `--inline`   | Inline template source               |
+| `-s`  | `--seed`     | Random seed for deterministic output |
+| `-f`  | `--format`   | Output format (`text` or `json`)     |
 
 ## Output Formats
 
@@ -117,7 +117,7 @@ id: example
 name: example
 description: Example Prompts
 
-groups:
+variables:
   - tags: [Hair, appearance]
     options:
       - blonde hair
@@ -136,9 +136,9 @@ templates:
 
 ## Template Syntax
 
-- `{Tag}` - Select randomly from groups with this tag
-- `{Tag1 + Tag2}` - Select from groups with Tag1 OR Tag2
-- `{Tag - exclude}` - Select from Tag groups, excluding groups tagged "exclude"
+- `{Tag}` - Select randomly from variables with this tag
+- `{Tag1 + Tag2}` - Select from variables with Tag1 OR Tag2
+- `{Tag - exclude}` - Select from Tag variables, excluding variables tagged "exclude"
 - `{{ SlotName }}` - Freeform slot for user input
 - `# comment` - Comments (ignored in output)
 - `[[ "Tag" | some | assign("var") ]]` - Expression blocks with pipelines
@@ -153,7 +153,7 @@ cargo build -p promptgen-cli
 cargo test
 
 # Test with the included example library
-cargo run -p promptgen-cli -- list groups -l promptgen-cli/example.yml
+cargo run -p promptgen-cli -- list variables -l promptgen-cli/example.yml
 cargo run -p promptgen-cli -- list templates -l promptgen-cli/example.yml
 cargo run -p promptgen-cli -- parse -l promptgen-cli/example.yml -t "Character"
 cargo run -p promptgen-cli -- render -l promptgen-cli/example.yml -t "Character" -s 42

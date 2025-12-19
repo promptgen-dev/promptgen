@@ -10,13 +10,13 @@
 
 use std::rc::Rc;
 
-use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::ast::{LibraryRef, Node, SlotDefinition, Template};
-use crate::library::{Library, PromptGroup};
+use crate::library::{Library, PromptVariable};
 use crate::parser::parse_template;
 use crate::span::Span;
 
@@ -104,10 +104,10 @@ impl Workspace {
         self.libraries.iter().map(|rc| &**rc)
     }
 
-    /// Get all group names across all libraries.
-    /// If `library_id` is Some, only returns groups from that library.
-    pub fn group_names(&self, library_id: Option<&str>) -> Vec<GroupInfo> {
-        let mut groups = Vec::new();
+    /// Get all variable names across all libraries.
+    /// If `library_id` is Some, only returns variables from that library.
+    pub fn variable_names(&self, library_id: Option<&str>) -> Vec<VariableInfo> {
+        let mut variables = Vec::new();
 
         for lib in &self.libraries {
             if let Some(id) = library_id
@@ -116,41 +116,41 @@ impl Workspace {
                 continue;
             }
 
-            for group in &lib.groups {
-                groups.push(GroupInfo {
+            for variable in &lib.variables {
+                variables.push(VariableInfo {
                     library_id: lib.id.clone(),
                     library_name: lib.name.clone(),
-                    group_name: group.name.clone(),
-                    option_count: group.options.len(),
+                    variable_name: variable.name.clone(),
+                    option_count: variable.options.len(),
                 });
             }
         }
 
-        groups
+        variables
     }
 
-    /// Find a group by name across all libraries.
+    /// Find a variable by name across all libraries.
     /// Returns all matches (for ambiguity detection).
-    pub fn find_groups(&self, group_name: &str) -> Vec<(&Library, &PromptGroup)> {
+    pub fn find_variables(&self, variable_name: &str) -> Vec<(&Library, &PromptVariable)> {
         let mut matches = Vec::new();
 
         for lib in &self.libraries {
-            if let Some(group) = lib.find_group(group_name) {
-                matches.push((&**lib, group));
+            if let Some(variable) = lib.find_variable(variable_name) {
+                matches.push((&**lib, variable));
             }
         }
 
         matches
     }
 
-    /// Find a group in a specific library by library name.
-    pub fn find_group_in_library(
+    /// Find a variable in a specific library by library name.
+    pub fn find_variable_in_library(
         &self,
         library_name: &str,
-        group_name: &str,
-    ) -> Option<(&Library, &PromptGroup)> {
+        variable_name: &str,
+    ) -> Option<(&Library, &PromptVariable)> {
         self.get_library_by_name(library_name)
-            .and_then(|lib| lib.find_group(group_name).map(|g| (lib, g)))
+            .and_then(|lib| lib.find_variable(variable_name).map(|g| (lib, g)))
     }
 
     /// Parse a template and validate all references against the workspace.
@@ -200,7 +200,7 @@ impl Workspace {
     /// Validate a single library reference.
     fn validate_reference(&self, lib_ref: &LibraryRef, span: Span) -> Result<(), DiagnosticError> {
         match &lib_ref.library {
-            // Qualified reference: @"LibName:GroupName"
+            // Qualified reference: @"LibName:VariableName"
             Some(lib_name) => {
                 let lib = self.get_library_by_name(lib_name).ok_or_else(|| {
                     let suggestion = self.suggest_library_name(lib_name);
@@ -212,12 +212,12 @@ impl Workspace {
                     }
                 })?;
 
-                if lib.find_group(&lib_ref.group).is_none() {
-                    let suggestion = self.suggest_group_name(&lib_ref.group, Some(lib_name));
+                if lib.find_variable(&lib_ref.variable).is_none() {
+                    let suggestion = self.suggest_variable_name(&lib_ref.variable, Some(lib_name));
                     return Err(DiagnosticError {
                         message: format!(
-                            "Unknown group '{}' in library '{}'",
-                            lib_ref.group, lib_name
+                            "Unknown variable '{}' in library '{}'",
+                            lib_ref.variable, lib_name
                         ),
                         span,
                         kind: ErrorKind::UnknownReference,
@@ -226,14 +226,14 @@ impl Workspace {
                 }
             }
 
-            // Unqualified reference: @GroupName
+            // Unqualified reference: @VariableName
             None => {
-                let matches = self.find_groups(&lib_ref.group);
+                let matches = self.find_variables(&lib_ref.variable);
 
                 if matches.is_empty() {
-                    let suggestion = self.suggest_group_name(&lib_ref.group, None);
+                    let suggestion = self.suggest_variable_name(&lib_ref.variable, None);
                     return Err(DiagnosticError {
-                        message: format!("Unknown group: {}", lib_ref.group),
+                        message: format!("Unknown variable: {}", lib_ref.variable),
                         span,
                         kind: ErrorKind::UnknownReference,
                         suggestion,
@@ -245,14 +245,14 @@ impl Workspace {
                     return Err(DiagnosticError {
                         message: format!(
                             "Ambiguous reference '{}' found in multiple libraries: {}",
-                            lib_ref.group,
+                            lib_ref.variable,
                             lib_names.join(", ")
                         ),
                         span,
                         kind: ErrorKind::AmbiguousReference,
                         suggestion: Some(format!(
                             "Use qualified syntax: @\"{}:{}\"",
-                            lib_names[0], lib_ref.group
+                            lib_names[0], lib_ref.variable
                         )),
                     });
                 }
@@ -278,8 +278,8 @@ impl Workspace {
             .map(|l| format!("Did you mean '{}'?", l.name))
     }
 
-    /// Suggest a similar group name.
-    fn suggest_group_name(&self, name: &str, library_name: Option<&str>) -> Option<String> {
+    /// Suggest a similar variable name.
+    fn suggest_variable_name(&self, name: &str, library_name: Option<&str>) -> Option<String> {
         let name_lower = name.to_lowercase();
         let mut best_match: Option<(&str, &str, usize)> = None;
 
@@ -290,23 +290,21 @@ impl Workspace {
                 continue;
             }
 
-            for group in &lib.groups {
-                let group_lower = group.name.to_lowercase();
-                let dist = levenshtein_distance(&group_lower, &name_lower);
+            for variable in &lib.variables {
+                let variable_lower = variable.name.to_lowercase();
+                let dist = levenshtein_distance(&variable_lower, &name_lower);
 
-                if dist <= 3
-                    && (best_match.is_none() || dist < best_match.unwrap().2)
-                {
-                    best_match = Some((&lib.name, &group.name, dist));
+                if dist <= 3 && (best_match.is_none() || dist < best_match.unwrap().2) {
+                    best_match = Some((&lib.name, &variable.name, dist));
                 }
             }
         }
 
-        best_match.map(|(lib_name, group_name, _)| {
+        best_match.map(|(lib_name, variable_name, _)| {
             if self.libraries.len() == 1 {
-                format!("Did you mean @{}?", group_name)
+                format!("Did you mean @{}?", variable_name)
             } else {
-                format!("Did you mean @\"{}:{}\"?", lib_name, group_name)
+                format!("Did you mean @\"{}:{}\"?", lib_name, variable_name)
             }
         })
     }
@@ -318,12 +316,12 @@ impl Workspace {
 
         match context {
             CompletionContext::AfterAt { prefix, in_quotes } => {
-                self.complete_group_reference(&prefix, in_quotes)
+                self.complete_variable_reference(&prefix, in_quotes)
             }
             CompletionContext::AfterLibraryColon {
                 library_name,
                 prefix,
-            } => self.complete_qualified_group(&library_name, &prefix),
+            } => self.complete_qualified_variable(&library_name, &prefix),
             CompletionContext::InInlineOptions { prefix } => self.complete_in_options(&prefix),
             CompletionContext::None => vec![],
         }
@@ -383,8 +381,8 @@ impl Workspace {
         CompletionContext::None
     }
 
-    /// Complete group references after @.
-    fn complete_group_reference(&self, prefix: &str, in_quotes: bool) -> Vec<CompletionItem> {
+    /// Complete variable references after @.
+    fn complete_variable_reference(&self, prefix: &str, in_quotes: bool) -> Vec<CompletionItem> {
         let matcher = SkimMatcherV2::default().ignore_case();
         let prefix = prefix.trim();
         let mut scored_completions: Vec<(i64, CompletionItem)> = Vec::new();
@@ -404,7 +402,7 @@ impl Workspace {
                         CompletionItem {
                             label: format!("{}:", lib.name),
                             kind: CompletionKind::Library,
-                            detail: Some(format!("{} groups", lib.groups.len())),
+                            detail: Some(format!("{} variables", lib.variables.len())),
                             insert_text: format!("{}:", lib.name),
                             library_id: Some(lib.id.clone()),
                         },
@@ -412,31 +410,31 @@ impl Workspace {
                 }
             }
 
-            // Suggest groups
-            for group in &lib.groups {
+            // Suggest variables
+            for variable in &lib.variables {
                 let score = if prefix.is_empty() {
                     Some(0)
                 } else {
-                    matcher.fuzzy_match(&group.name, prefix)
+                    matcher.fuzzy_match(&variable.name, prefix)
                 };
 
                 if let Some(score) = score {
-                    let insert_text = if group.name.contains(' ') || in_quotes {
+                    let insert_text = if variable.name.contains(' ') || in_quotes {
                         if self.libraries.len() > 1 {
-                            format!("\"{}:{}\"", lib.name, group.name)
+                            format!("\"{}:{}\"", lib.name, variable.name)
                         } else {
-                            format!("\"{}\"", group.name)
+                            format!("\"{}\"", variable.name)
                         }
                     } else {
-                        group.name.clone()
+                        variable.name.clone()
                     };
 
                     scored_completions.push((
                         score,
                         CompletionItem {
-                            label: group.name.clone(),
-                            kind: CompletionKind::Group,
-                            detail: Some(format!("{} options", group.options.len())),
+                            label: variable.name.clone(),
+                            kind: CompletionKind::Variable,
+                            detail: Some(format!("{} options", variable.options.len())),
                             insert_text,
                             library_id: Some(lib.id.clone()),
                         },
@@ -447,31 +445,34 @@ impl Workspace {
 
         // Sort by score descending (highest first)
         scored_completions.sort_by(|a, b| b.0.cmp(&a.0));
-        scored_completions.into_iter().map(|(_, item)| item).collect()
+        scored_completions
+            .into_iter()
+            .map(|(_, item)| item)
+            .collect()
     }
 
-    /// Complete groups within a specific library.
-    fn complete_qualified_group(&self, library_name: &str, prefix: &str) -> Vec<CompletionItem> {
+    /// Complete variables within a specific library.
+    fn complete_qualified_variable(&self, library_name: &str, prefix: &str) -> Vec<CompletionItem> {
         let matcher = SkimMatcherV2::default().ignore_case();
         let prefix = prefix.trim();
         let mut scored_completions: Vec<(i64, CompletionItem)> = Vec::new();
 
         if let Some(lib) = self.get_library_by_name(library_name) {
-            for group in &lib.groups {
+            for variable in &lib.variables {
                 let score = if prefix.is_empty() {
                     Some(0)
                 } else {
-                    matcher.fuzzy_match(&group.name, prefix)
+                    matcher.fuzzy_match(&variable.name, prefix)
                 };
 
                 if let Some(score) = score {
                     scored_completions.push((
                         score,
                         CompletionItem {
-                            label: group.name.clone(),
-                            kind: CompletionKind::Group,
-                            detail: Some(format!("{} options", group.options.len())),
-                            insert_text: format!("{}\"", group.name), // Close the quote
+                            label: variable.name.clone(),
+                            kind: CompletionKind::Variable,
+                            detail: Some(format!("{} options", variable.options.len())),
+                            insert_text: format!("{}\"", variable.name), // Close the quote
                             library_id: Some(lib.id.clone()),
                         },
                     ));
@@ -481,14 +482,17 @@ impl Workspace {
 
         // Sort by score descending (highest first)
         scored_completions.sort_by(|a, b| b.0.cmp(&a.0));
-        scored_completions.into_iter().map(|(_, item)| item).collect()
+        scored_completions
+            .into_iter()
+            .map(|(_, item)| item)
+            .collect()
     }
 
     /// Complete inside inline options.
     fn complete_in_options(&self, prefix: &str) -> Vec<CompletionItem> {
         // If prefix starts with @, complete references
         if let Some(ref_prefix) = prefix.strip_prefix('@') {
-            return self.complete_group_reference(ref_prefix, false);
+            return self.complete_variable_reference(ref_prefix, false);
         }
 
         // Otherwise, no completions for plain text
@@ -522,9 +526,10 @@ impl Workspace {
                 let label = &slot_block.label.0;
                 // Only include first occurrence of each slot label
                 if seen_labels.insert(label.clone())
-                    && let Ok(def) = slot_block.to_definition() {
-                        slots.push(def);
-                    }
+                    && let Ok(def) = slot_block.to_definition()
+                {
+                    slots.push(def);
+                }
             }
         }
 
@@ -538,7 +543,7 @@ impl Workspace {
         for (node, span) in &ast.nodes {
             if let Node::LibraryRef(lib_ref) = node {
                 refs.push(ReferenceInfo {
-                    group: lib_ref.group.clone(),
+                    variable: lib_ref.variable.clone(),
                     library: lib_ref.library.clone(),
                     span: span.clone(),
                 });
@@ -577,13 +582,13 @@ impl WorkspaceBuilder {
     }
 }
 
-/// Information about a group.
+/// Information about a variable.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct GroupInfo {
+pub struct VariableInfo {
     pub library_id: String,
     pub library_name: String,
-    pub group_name: String,
+    pub variable_name: String,
     pub option_count: usize,
 }
 
@@ -673,7 +678,7 @@ pub struct CompletionItem {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum CompletionKind {
-    Group,
+    Variable,
     Library,
     Option,
 }
@@ -682,7 +687,7 @@ pub enum CompletionKind {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ReferenceInfo {
-    pub group: String,
+    pub variable: String,
     pub library: Option<String>,
     pub span: Span,
 }
@@ -748,23 +753,25 @@ mod tests {
 
     fn make_test_workspace() -> Workspace {
         let mut lib1 = Library::with_id("lib1", "Characters");
-        lib1.groups.push(PromptGroup::with_options(
+        lib1.variables.push(PromptVariable::with_options(
             "Hair",
             vec!["blonde hair", "red hair", "black hair"],
         ));
-        lib1.groups.push(PromptGroup::with_options(
+        lib1.variables.push(PromptVariable::with_options(
             "Eyes",
             vec!["blue eyes", "green eyes"],
         ));
-        lib1.groups
-            .push(PromptGroup::with_options("Eye Color", vec!["amber", "violet"]));
+        lib1.variables.push(PromptVariable::with_options(
+            "Eye Color",
+            vec!["amber", "violet"],
+        ));
 
         let mut lib2 = Library::with_id("lib2", "Settings");
-        lib2.groups.push(PromptGroup::with_options(
+        lib2.variables.push(PromptVariable::with_options(
             "Weather",
             vec!["sunny", "rainy", "cloudy"],
         ));
-        lib2.groups.push(PromptGroup::with_options(
+        lib2.variables.push(PromptVariable::with_options(
             "Time",
             vec!["morning", "afternoon", "evening"],
         ));
@@ -777,12 +784,12 @@ mod tests {
 
     fn make_single_library_workspace() -> Workspace {
         let mut lib = Library::with_id("lib1", "TestLib");
-        lib.groups.push(PromptGroup::with_options(
+        lib.variables.push(PromptVariable::with_options(
             "Hair",
             vec!["blonde", "red", "black"],
         ));
-        lib.groups
-            .push(PromptGroup::with_options("Eyes", vec!["blue", "green"]));
+        lib.variables
+            .push(PromptVariable::with_options("Eyes", vec!["blue", "green"]));
 
         Workspace::with_single_library(lib)
     }
@@ -831,31 +838,31 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_find_groups_single_match() {
+    fn test_find_variables_single_match() {
         let ws = make_test_workspace();
-        let matches = ws.find_groups("Hair");
+        let matches = ws.find_variables("Hair");
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].0.name, "Characters");
     }
 
     #[test]
-    fn test_find_groups_no_match() {
+    fn test_find_variables_no_match() {
         let ws = make_test_workspace();
-        let matches = ws.find_groups("NonExistent");
+        let matches = ws.find_variables("NonExistent");
 
         assert!(matches.is_empty());
     }
 
     #[test]
-    fn test_find_group_in_library() {
+    fn test_find_variable_in_library() {
         let ws = make_test_workspace();
-        let result = ws.find_group_in_library("Characters", "Hair");
+        let result = ws.find_variable_in_library("Characters", "Hair");
 
         assert!(result.is_some());
-        let (lib, group) = result.unwrap();
+        let (lib, variable) = result.unwrap();
         assert_eq!(lib.name, "Characters");
-        assert_eq!(group.name, "Hair");
+        assert_eq!(variable.name, "Hair");
     }
 
     // =========================================================================
@@ -879,7 +886,7 @@ mod tests {
         assert!(result.has_errors());
         assert_eq!(result.errors.len(), 1);
         assert_eq!(result.errors[0].kind, ErrorKind::UnknownReference);
-        assert!(result.errors[0].message.contains("Unknown group"));
+        assert!(result.errors[0].message.contains("Unknown variable"));
     }
 
     #[test]
@@ -889,11 +896,13 @@ mod tests {
 
         assert!(result.has_errors());
         assert!(result.errors[0].suggestion.is_some());
-        assert!(result.errors[0]
-            .suggestion
-            .as_ref()
-            .unwrap()
-            .contains("Hair"));
+        assert!(
+            result.errors[0]
+                .suggestion
+                .as_ref()
+                .unwrap()
+                .contains("Hair")
+        );
     }
 
     #[test]
@@ -950,7 +959,7 @@ mod tests {
         let ws = make_test_workspace();
         let completions = ws.get_completions("@\"", 2);
 
-        // Should include library names and group names
+        // Should include library names and variable names
         let labels: Vec<_> = completions.iter().map(|c| c.label.as_str()).collect();
         assert!(labels.contains(&"Characters:"));
         assert!(labels.contains(&"Settings:"));
@@ -997,8 +1006,8 @@ mod tests {
         let refs = ws.get_references(result.ast.as_ref().unwrap());
 
         assert_eq!(refs.len(), 2);
-        assert_eq!(refs[0].group, "Hair");
-        assert_eq!(refs[1].group, "Eyes");
+        assert_eq!(refs[0].variable, "Hair");
+        assert_eq!(refs[1].variable, "Eyes");
     }
 
     // =========================================================================

@@ -11,9 +11,9 @@ use common::{empty_lib, lib};
 // ============================================================================
 
 #[test]
-fn library_loads_groups() {
+fn library_loads_variables() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde
@@ -24,15 +24,15 @@ groups:
       - green
 "#);
 
-    assert_eq!(lib.groups.len(), 2);
-    assert!(lib.find_group("Hair").is_some());
-    assert!(lib.find_group("Eyes").is_some());
+    assert_eq!(lib.variables.len(), 2);
+    assert!(lib.find_variable("Hair").is_some());
+    assert!(lib.find_variable("Eyes").is_some());
 }
 
 #[test]
 fn library_loads_templates() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde
@@ -49,9 +49,9 @@ templates:
 }
 
 #[test]
-fn group_options_are_loaded() {
+fn variable_options_are_loaded() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Colors
     options:
       - red
@@ -59,40 +59,40 @@ groups:
       - blue
 "#);
 
-    let group = lib.find_group("Colors").unwrap();
-    assert_eq!(group.options.len(), 3);
-    assert!(group.options.contains(&"red".to_string()));
-    assert!(group.options.contains(&"green".to_string()));
-    assert!(group.options.contains(&"blue".to_string()));
+    let variable = lib.find_variable("Colors").unwrap();
+    assert_eq!(variable.options.len(), 3);
+    assert!(variable.options.contains(&"red".to_string()));
+    assert!(variable.options.contains(&"green".to_string()));
+    assert!(variable.options.contains(&"blue".to_string()));
 }
 
 #[test]
 fn empty_library_loads() {
     let lib = empty_lib();
 
-    assert!(lib.groups.is_empty());
+    assert!(lib.variables.is_empty());
     assert!(lib.templates.is_empty());
 }
 
 #[test]
-fn group_with_spaces_in_name() {
+fn variable_with_spaces_in_name() {
     let lib = lib(r#"
-groups:
+variables:
   - name: "Hair Color"
     options:
       - blonde
       - brunette
 "#);
 
-    let group = lib.find_group("Hair Color");
-    assert!(group.is_some());
-    assert_eq!(group.unwrap().options.len(), 2);
+    let variable = lib.find_variable("Hair Color");
+    assert!(variable.is_some());
+    assert_eq!(variable.unwrap().options.len(), 2);
 }
 
 #[test]
 fn template_extracts_library_refs() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde
@@ -102,17 +102,17 @@ templates:
 "#);
 
     let tmpl = lib.find_template("Test").unwrap();
-    let refs = tmpl.referenced_groups();
+    let refs = tmpl.referenced_variables();
 
     assert_eq!(refs.len(), 2);
-    assert_eq!(refs[0].group, "Hair");
-    assert_eq!(refs[1].group, "Eyes");
+    assert_eq!(refs[0].variable, "Hair");
+    assert_eq!(refs[1].variable, "Eyes");
 }
 
 #[test]
 fn template_extracts_slots() {
     let lib = lib(r#"
-groups: []
+variables: []
 templates:
   - name: Greeting
     source: "Hello {{ Name }}, welcome to {{ Place }}"
@@ -133,7 +133,7 @@ templates:
 #[test]
 fn library_has_metadata() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Test
     options:
       - value
@@ -149,11 +149,11 @@ groups:
 // ============================================================================
 
 #[test]
-#[should_panic(expected = "DuplicateGroupName")]
-fn duplicate_group_names_rejected() {
+#[should_panic(expected = "DuplicateVariableName")]
+fn duplicate_variable_names_rejected() {
     // This should panic because the common::lib helper uses expect()
     lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde

@@ -8,7 +8,7 @@ use promptgen_core::WorkspaceBuilder;
 
 fn test_library() -> promptgen_core::Library {
     lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde hair
@@ -27,55 +27,55 @@ groups:
 }
 
 // ============================================================================
-// Group Search Tests
+// Variable Search Tests
 // ============================================================================
 
 #[test]
-fn search_groups_empty_query_returns_all() {
+fn search_variables_empty_query_returns_all() {
     let ws = workspace(test_library());
-    let results = ws.search_groups("");
+    let results = ws.search_variables("");
     assert_eq!(results.len(), 3);
 }
 
 #[test]
-fn search_groups_finds_exact_match() {
+fn search_variables_finds_exact_match() {
     let ws = workspace(test_library());
-    let results = ws.search_groups("Hair");
+    let results = ws.search_variables("Hair");
     assert!(!results.is_empty());
-    assert_eq!(results[0].group_name, "Hair");
+    assert_eq!(results[0].variable_name, "Hair");
 }
 
 #[test]
-fn search_groups_case_insensitive() {
+fn search_variables_case_insensitive() {
     let ws = workspace(test_library());
-    let results = ws.search_groups("hair");
+    let results = ws.search_variables("hair");
     assert!(!results.is_empty());
-    assert_eq!(results[0].group_name, "Hair");
+    assert_eq!(results[0].variable_name, "Hair");
 }
 
 #[test]
-fn search_groups_fuzzy_match() {
+fn search_variables_fuzzy_match() {
     let ws = workspace(test_library());
-    let results = ws.search_groups("hr"); // fuzzy for "Hair"
+    let results = ws.search_variables("hr"); // fuzzy for "Hair"
     assert!(!results.is_empty());
     // Should find Hair and Hair Color
-    let names: Vec<&str> = results.iter().map(|r| r.group_name.as_str()).collect();
+    let names: Vec<&str> = results.iter().map(|r| r.variable_name.as_str()).collect();
     assert!(names.contains(&"Hair") || names.contains(&"Hair Color"));
 }
 
 #[test]
-fn search_groups_includes_match_indices() {
+fn search_variables_includes_match_indices() {
     let ws = workspace(test_library());
-    let results = ws.search_groups("Hair");
+    let results = ws.search_variables("Hair");
     assert!(!results.is_empty());
     // Exact match should have indices
     assert!(!results[0].match_indices.is_empty());
 }
 
 #[test]
-fn search_groups_sorted_by_score() {
+fn search_variables_sorted_by_score() {
     let ws = workspace(test_library());
-    let results = ws.search_groups("Hair");
+    let results = ws.search_variables("Hair");
     // Results should be sorted by score descending
     for i in 1..results.len() {
         assert!(results[i - 1].score >= results[i].score);
@@ -90,7 +90,7 @@ fn search_groups_sorted_by_score() {
 fn search_options_empty_query_returns_all() {
     let ws = workspace(test_library());
     let results = ws.search_options("", None);
-    // Should return results from all groups
+    // Should return results from all variables
     assert!(results.len() >= 2);
 }
 
@@ -109,19 +109,19 @@ fn search_options_finds_match() {
 }
 
 #[test]
-fn search_options_with_group_filter() {
+fn search_options_with_variable_filter() {
     let ws = workspace(test_library());
     let results = ws.search_options("blonde", Some("Hair"));
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].group_name, "Hair");
+    assert_eq!(results[0].variable_name, "Hair");
 }
 
 #[test]
-fn search_options_group_filter_case_insensitive() {
+fn search_options_variable_filter_case_insensitive() {
     let ws = workspace(test_library());
     let results = ws.search_options("blonde", Some("hair"));
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].group_name, "Hair");
+    assert_eq!(results[0].variable_name, "Hair");
 }
 
 // ============================================================================
@@ -129,63 +129,63 @@ fn search_options_group_filter_case_insensitive() {
 // ============================================================================
 
 #[test]
-fn unified_search_groups_with_at_prefix() {
+fn unified_search_variables_with_at_prefix() {
     let ws = workspace(test_library());
     let result = ws.search("@Hair");
     match result {
-        SearchResult::Groups(groups) => {
-            assert!(!groups.is_empty());
-            assert_eq!(groups[0].group_name, "Hair");
+        SearchResult::Variables(variables) => {
+            assert!(!variables.is_empty());
+            assert_eq!(variables[0].variable_name, "Hair");
         }
-        SearchResult::Options(_) => panic!("Expected groups result"),
+        SearchResult::Options(_) => panic!("Expected variables result"),
     }
 }
 
 #[test]
-fn unified_search_options_with_group() {
+fn unified_search_options_with_variable() {
     let ws = workspace(test_library());
     let result = ws.search("@Hair/blonde");
     match result {
         SearchResult::Options(options) => {
             assert!(!options.is_empty());
-            assert_eq!(options[0].group_name, "Hair");
+            assert_eq!(options[0].variable_name, "Hair");
             assert!(options[0].matches.iter().any(|m| m.text.contains("blonde")));
         }
-        SearchResult::Groups(_) => panic!("Expected options result"),
+        SearchResult::Variables(_) => panic!("Expected options result"),
     }
 }
 
 #[test]
-fn unified_search_options_all_groups() {
+fn unified_search_options_all_variables() {
     let ws = workspace(test_library());
     let result = ws.search("@/blonde");
     match result {
         SearchResult::Options(options) => {
             assert!(!options.is_empty());
-            // Should find blonde in multiple groups
+            // Should find blonde in multiple variables
             let all_matches: Vec<&str> = options
                 .iter()
                 .flat_map(|r| r.matches.iter().map(|m| m.text.as_str()))
                 .collect();
             assert!(all_matches.iter().any(|m| m.contains("blonde")));
         }
-        SearchResult::Groups(_) => panic!("Expected options result"),
+        SearchResult::Variables(_) => panic!("Expected options result"),
     }
 }
 
 #[test]
 fn unified_search_no_prefix_defaults_to_options() {
     let ws = workspace(test_library());
-    // Plain text search defaults to searching options across all groups
+    // Plain text search defaults to searching options across all variables
     let result = ws.search("blonde");
     match result {
         SearchResult::Options(options) => {
             assert!(!options.is_empty());
-            // Should find "blonde hair" in Hair group
-            let hair_result = options.iter().find(|r| r.group_name == "Hair");
+            // Should find "blonde hair" in Hair variable
+            let hair_result = options.iter().find(|r| r.variable_name == "Hair");
             assert!(hair_result.is_some());
         }
-        SearchResult::Groups(_) => panic!("Expected options result"),
+        SearchResult::Variables(_) => panic!("Expected options result"),
     }
 }
 
@@ -196,13 +196,13 @@ fn unified_search_no_prefix_defaults_to_options() {
 #[test]
 fn search_across_multiple_libraries() {
     let lib1 = lib(r#"
-groups:
+variables:
   - name: Style
     options: [modern]
 "#);
 
     let lib2 = lib(r#"
-groups:
+variables:
   - name: Style
     options: [vintage]
 "#);
@@ -212,6 +212,6 @@ groups:
         .add_library(lib2)
         .build();
 
-    let results = ws.search_groups("Style");
+    let results = ws.search_variables("Style");
     assert_eq!(results.len(), 2);
 }

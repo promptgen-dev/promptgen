@@ -46,7 +46,7 @@ enum Commands {
 
     /// List parts of the library
     List {
-        /// What to list (groups or templates)
+        /// What to list (variables or templates)
         what: ListTarget,
 
         /// Path to the library file
@@ -94,7 +94,7 @@ enum OutputFormat {
 
 #[derive(Clone, ValueEnum)]
 enum ListTarget {
-    Groups,
+    Variables,
     Templates,
 }
 
@@ -335,8 +335,8 @@ fn describe_node(node: &promptgen_core::Node) -> (String, String) {
 
 fn format_library_ref(lib_ref: &promptgen_core::LibraryRef) -> String {
     match &lib_ref.library {
-        Some(lib) => format!("{}:{}", lib, lib_ref.group),
-        None => lib_ref.group.clone(),
+        Some(lib) => format!("{}:{}", lib, lib_ref.variable),
+        None => lib_ref.variable.clone(),
     }
 }
 
@@ -345,7 +345,7 @@ fn format_library_ref(lib_ref: &promptgen_core::LibraryRef) -> String {
 // ============================================================================
 
 #[derive(Serialize)]
-struct GroupInfo {
+struct VariableInfo {
     name: String,
     option_count: usize,
 }
@@ -362,27 +362,27 @@ fn cmd_list(what: ListTarget, lib: PathBuf, format: OutputFormat) -> Result<(), 
     let library = parse_pack(&content)?;
 
     match what {
-        ListTarget::Groups => list_groups(&library, format),
+        ListTarget::Variables => list_variables(&library, format),
         ListTarget::Templates => list_templates(&library, format),
     }
 }
 
-fn list_groups(library: &Library, format: OutputFormat) -> Result<(), CliError> {
+fn list_variables(library: &Library, format: OutputFormat) -> Result<(), CliError> {
     match format {
         OutputFormat::Text => {
-            println!("Groups in '{}':", library.name);
-            for group in &library.groups {
-                println!("  {} ({} options)", group.name, group.options.len());
+            println!("Variables in '{}':", library.name);
+            for variable in &library.variables {
+                println!("  {} ({} options)", variable.name, variable.options.len());
             }
         }
         OutputFormat::Json => {
-            let groups: Vec<GroupInfo> = library.groups.iter().map(|g| {
-                GroupInfo {
+            let variables: Vec<VariableInfo> = library.variables.iter().map(|g| {
+                VariableInfo {
                     name: g.name.clone(),
                     option_count: g.options.len(),
                 }
             }).collect();
-            println!("{}", serde_json::to_string_pretty(&groups)?);
+            println!("{}", serde_json::to_string_pretty(&variables)?);
         }
     }
     Ok(())
@@ -426,7 +426,7 @@ struct RenderOutput {
 
 #[derive(Serialize)]
 struct ChosenOptionInfo {
-    group: String,
+    variable: String,
     library: Option<String>,
     option: String,
 }
@@ -490,7 +490,7 @@ fn cmd_render(
                 prompt: result.text,
                 chosen_options: result.chosen_options.into_iter().map(|c| {
                     ChosenOptionInfo {
-                        group: c.group_name,
+                        variable: c.variable_name,
                         library: c.library_name,
                         option: c.option_text,
                     }

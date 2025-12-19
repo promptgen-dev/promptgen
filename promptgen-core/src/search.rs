@@ -1,6 +1,6 @@
 //! Fuzzy search functionality for workspaces.
 //!
-//! Provides fuzzy matching for groups and options across all libraries
+//! Provides fuzzy matching for variables and options across all libraries
 //! in a workspace.
 
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -8,25 +8,25 @@ use fuzzy_matcher::FuzzyMatcher;
 
 use crate::workspace::Workspace;
 
-/// Result of a fuzzy search for a group.
+/// Result of a fuzzy search for a variable.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct GroupSearchResult {
-    /// ID of the library containing this group
+pub struct VariableSearchResult {
+    /// ID of the library containing this variable
     pub library_id: String,
     /// Display name of the library
     pub library_name: String,
-    /// Name of the matched group
-    pub group_name: String,
-    /// All options in this group
+    /// Name of the matched variable
+    pub variable_name: String,
+    /// All options in this variable
     pub options: Vec<String>,
     /// Raw fuzzy match score (higher is better)
     pub score: i64,
-    /// Indices of matched characters in the group name
+    /// Indices of matched characters in the variable name
     pub match_indices: Vec<usize>,
 }
 
-/// A single option match within a group.
+/// A single option match within a variable.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OptionMatch {
@@ -42,30 +42,30 @@ pub struct OptionMatch {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OptionSearchResult {
-    /// ID of the library containing this group
+    /// ID of the library containing this variable
     pub library_id: String,
     /// Display name of the library
     pub library_name: String,
-    /// Name of the group containing matched options
-    pub group_name: String,
+    /// Name of the variable containing matched options
+    pub variable_name: String,
     /// Matched options with their scores
     pub matches: Vec<OptionMatch>,
 }
 
-/// Unified search result that can contain either groups or options.
+/// Unified search result that can contain either variables or options.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SearchResult {
-    /// Group search results
-    Groups(Vec<GroupSearchResult>),
+    /// Variable search results
+    Variables(Vec<VariableSearchResult>),
     /// Option search results
     Options(Vec<OptionSearchResult>),
 }
 
 impl Workspace {
-    /// Search for groups matching the query across all libraries.
+    /// Search for variables matching the query across all libraries.
     ///
-    /// Returns all groups if query is empty. Results are sorted by score (highest first).
+    /// Returns all variables if query is empty. Results are sorted by score (highest first).
     /// Search is case-insensitive.
     ///
     /// # Example
@@ -76,34 +76,34 @@ impl Workspace {
     /// let workspace = WorkspaceBuilder::new()
     ///     .add_library(Library::new("My Library"))
     ///     .build();
-    /// let results = workspace.search_groups("hair");
+    /// let results = workspace.search_variables("hair");
     /// ```
-    pub fn search_groups(&self, query: &str) -> Vec<GroupSearchResult> {
+    pub fn search_variables(&self, query: &str) -> Vec<VariableSearchResult> {
         let matcher = SkimMatcherV2::default().ignore_case();
         let query = query.trim();
 
         let mut results = Vec::new();
 
         for library in self.libraries() {
-            for group in &library.groups {
-                let group_name = &group.name;
+            for variable in &library.variables {
+                let variable_name = &variable.name;
 
                 if query.is_empty() {
-                    // Return all groups with score 0 when query is empty
-                    results.push(GroupSearchResult {
+                    // Return all variables with score 0 when query is empty
+                    results.push(VariableSearchResult {
                         library_id: library.id.clone(),
                         library_name: library.name.clone(),
-                        group_name: group_name.to_string(),
-                        options: group.options.clone(),
+                        variable_name: variable_name.to_string(),
+                        options: variable.options.clone(),
                         score: 0,
                         match_indices: vec![],
                     });
-                } else if let Some((score, indices)) = matcher.fuzzy_indices(group_name, query) {
-                    results.push(GroupSearchResult {
+                } else if let Some((score, indices)) = matcher.fuzzy_indices(variable_name, query) {
+                    results.push(VariableSearchResult {
                         library_id: library.id.clone(),
                         library_name: library.name.clone(),
-                        group_name: group_name.to_string(),
-                        options: group.options.clone(),
+                        variable_name: variable_name.to_string(),
+                        options: variable.options.clone(),
                         score,
                         match_indices: indices,
                     });
@@ -117,15 +117,15 @@ impl Workspace {
         results
     }
 
-    /// Search for options matching the query, optionally filtered to a specific group.
+    /// Search for options matching the query, optionally filtered to a specific variable.
     ///
-    /// Returns all options if query is empty. Results are sorted by best match score within each group.
+    /// Returns all options if query is empty. Results are sorted by best match score within each variable.
     /// Search is case-insensitive.
     ///
     /// # Arguments
     ///
     /// * `query` - The search query
-    /// * `group_filter` - Optional group name to filter results to
+    /// * `variable_filter` - Optional variable name to filter results to
     ///
     /// # Example
     ///
@@ -139,29 +139,29 @@ impl Workspace {
     /// // Search all options
     /// let results = workspace.search_options("blonde", None);
     ///
-    /// // Search within a specific group
+    /// // Search within a specific variable
     /// let results = workspace.search_options("blonde", Some("Hair"));
     /// ```
-    pub fn search_options(&self, query: &str, group_filter: Option<&str>) -> Vec<OptionSearchResult> {
+    pub fn search_options(&self, query: &str, variable_filter: Option<&str>) -> Vec<OptionSearchResult> {
         let matcher = SkimMatcherV2::default().ignore_case();
         let query = query.trim();
 
         let mut results = Vec::new();
 
         for library in self.libraries() {
-            for group in &library.groups {
-                let group_name = &group.name;
+            for variable in &library.variables {
+                let variable_name = &variable.name;
 
-                // Skip if group filter is specified and doesn't match
-                if let Some(filter) = group_filter
-                    && !group_name.eq_ignore_ascii_case(filter)
+                // Skip if variable filter is specified and doesn't match
+                if let Some(filter) = variable_filter
+                    && !variable_name.eq_ignore_ascii_case(filter)
                 {
                     continue;
                 }
 
                 let mut matches = Vec::new();
 
-                for option in &group.options {
+                for option in &variable.options {
                     if query.is_empty() {
                         // Return all options with score 0 when query is empty
                         matches.push(OptionMatch {
@@ -185,14 +185,14 @@ impl Workspace {
                     results.push(OptionSearchResult {
                         library_id: library.id.clone(),
                         library_name: library.name.clone(),
-                        group_name: group_name.to_string(),
+                        variable_name: variable_name.to_string(),
                         matches,
                     });
                 }
             }
         }
 
-        // Sort result groups by their best match score
+        // Sort result variables by their best match score
         results.sort_by(|a, b| {
             let a_best = a.matches.first().map(|m| m.score).unwrap_or(0);
             let b_best = b.matches.first().map(|m| m.score).unwrap_or(0);
@@ -205,10 +205,10 @@ impl Workspace {
     /// Unified search with syntax parsing.
     ///
     /// Supports the following query syntax:
-    /// - Plain text (e.g., `blue`) - Search options across all groups
-    /// - `@group` or `@group_query` - Search for groups by name, show all options
-    /// - `@group/option` - Search for options within groups matching "group"
-    /// - `@/option` - Search for options across all groups (same as plain text)
+    /// - Plain text (e.g., `blue`) - Search options across all variables
+    /// - `@variable` or `@variable_query` - Search for variables by name, show all options
+    /// - `@variable/option` - Search for options within variables matching "variable"
+    /// - `@/option` - Search for options across all variables (same as plain text)
     ///
     /// # Example
     ///
@@ -220,16 +220,16 @@ impl Workspace {
     ///     .add_library(Library::new("My Library"))
     ///     .build();
     ///
-    /// // Search options across all groups
+    /// // Search options across all variables
     /// let results = workspace.search("blue");
     ///
-    /// // Search groups by name
+    /// // Search variables by name
     /// let results = workspace.search("@hair");
     ///
-    /// // Search options in groups matching "Hair"
+    /// // Search options in variables matching "Hair"
     /// let results = workspace.search("@Hair/blonde");
     ///
-    /// // Search options across all groups (same as plain text)
+    /// // Search options across all variables (same as plain text)
     /// let results = workspace.search("@/blue");
     /// ```
     pub fn search(&self, query: &str) -> SearchResult {
@@ -237,61 +237,61 @@ impl Workspace {
 
         // Check if query starts with @
         if let Some(rest) = query.strip_prefix('@') {
-            // Check for / to determine if searching options within a group
+            // Check for / to determine if searching options within a variable
             if let Some(slash_pos) = rest.find('/') {
-                let group_part = &rest[..slash_pos];
+                let variable_part = &rest[..slash_pos];
                 let option_part = &rest[slash_pos + 1..];
 
-                if group_part.is_empty() {
+                if variable_part.is_empty() {
                     // @/option - search all options (same as plain text)
                     SearchResult::Options(self.search_options(option_part, None))
                 } else {
-                    // @group/option - search options in groups matching group_part
-                    // First find matching groups, then search their options
-                    SearchResult::Options(self.search_options_in_matching_groups(group_part, option_part))
+                    // @variable/option - search options in variables matching variable_part
+                    // First find matching variables, then search their options
+                    SearchResult::Options(self.search_options_in_matching_variables(variable_part, option_part))
                 }
             } else {
-                // @group - search groups by name
-                SearchResult::Groups(self.search_groups(rest))
+                // @variable - search variables by name
+                SearchResult::Variables(self.search_variables(rest))
             }
         } else {
-            // No @ prefix - search options across all groups
+            // No @ prefix - search options across all variables
             SearchResult::Options(self.search_options(query, None))
         }
     }
 
-    /// Search for options within groups that match a fuzzy group filter.
+    /// Search for options within variables that match a fuzzy variable filter.
     ///
-    /// This is used for the `@group/option` syntax where we first fuzzy-match
-    /// group names, then search for options within those matched groups.
-    pub fn search_options_in_matching_groups(
+    /// This is used for the `@variable/option` syntax where we first fuzzy-match
+    /// variable names, then search for options within those matched variables.
+    pub fn search_options_in_matching_variables(
         &self,
-        group_query: &str,
+        variable_query: &str,
         option_query: &str,
     ) -> Vec<OptionSearchResult> {
-        let group_matcher = SkimMatcherV2::default().ignore_case();
+        let variable_matcher = SkimMatcherV2::default().ignore_case();
         let option_matcher = SkimMatcherV2::default().ignore_case();
-        let group_query = group_query.trim();
+        let variable_query = variable_query.trim();
         let option_query = option_query.trim();
 
         let mut results = Vec::new();
 
         for library in self.libraries() {
-            for group in &library.groups {
-                let group_name = &group.name;
+            for variable in &library.variables {
+                let variable_name = &variable.name;
 
-                // First check if the group name matches the group query
-                let group_matches = group_query.is_empty()
-                    || group_matcher.fuzzy_match(group_name, group_query).is_some();
+                // First check if the variable name matches the variable query
+                let variable_matches = variable_query.is_empty()
+                    || variable_matcher.fuzzy_match(variable_name, variable_query).is_some();
 
-                if !group_matches {
+                if !variable_matches {
                     continue;
                 }
 
-                // Now search options within this matching group
+                // Now search options within this matching variable
                 let mut matches = Vec::new();
 
-                for option in &group.options {
+                for option in &variable.options {
                     if option_query.is_empty() {
                         matches.push(OptionMatch {
                             text: option.clone(),
@@ -313,14 +313,14 @@ impl Workspace {
                     results.push(OptionSearchResult {
                         library_id: library.id.clone(),
                         library_name: library.name.clone(),
-                        group_name: group_name.to_string(),
+                        variable_name: variable_name.to_string(),
                         matches,
                     });
                 }
             }
         }
 
-        // Sort result groups by their best match score
+        // Sort result variables by their best match score
         results.sort_by(|a, b| {
             let a_best = a.matches.first().map(|m| m.score).unwrap_or(0);
             let b_best = b.matches.first().map(|m| m.score).unwrap_or(0);

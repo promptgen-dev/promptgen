@@ -48,19 +48,19 @@ pub enum EditorMode {
     /// Normal template editing mode
     #[default]
     Template,
-    /// Editing an existing group
-    GroupEditor { group_name: String },
-    /// Creating a new group
-    NewGroup,
+    /// Editing an existing variable
+    VariableEditor { variable_name: String },
+    /// Creating a new variable
+    NewVariable,
 }
 
 /// Active confirmation dialog
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfirmDialog {
-    /// Confirm discarding unsaved group editor changes
-    DiscardGroupChanges,
-    /// Confirm deleting a group
-    DeleteGroup { group_name: String },
+    /// Confirm discarding unsaved variable editor changes
+    DiscardVariableChanges,
+    /// Confirm deleting a variable
+    DeleteVariable { variable_name: String },
 }
 
 /// Persisted application configuration
@@ -99,12 +99,12 @@ pub struct AppState {
     pub search_query: String,
     pub editor_focus: EditorFocus,
 
-    // Group Editor State
+    // Variable Editor State
     pub editor_mode: EditorMode,
-    pub group_editor_name: String,
-    pub group_editor_content: String,
-    pub group_editor_original_name: Option<String>,
-    pub group_editor_dirty: bool,
+    pub variable_editor_name: String,
+    pub variable_editor_content: String,
+    pub variable_editor_original_name: Option<String>,
+    pub variable_editor_dirty: bool,
     pub confirm_dialog: Option<ConfirmDialog>,
 }
 
@@ -129,10 +129,10 @@ impl Default for AppState {
             search_query: String::new(),
             editor_focus: EditorFocus::default(),
             editor_mode: EditorMode::default(),
-            group_editor_name: String::new(),
-            group_editor_content: String::new(),
-            group_editor_original_name: None,
-            group_editor_dirty: false,
+            variable_editor_name: String::new(),
+            variable_editor_content: String::new(),
+            variable_editor_original_name: None,
+            variable_editor_dirty: false,
             confirm_dialog: None,
         }
     }
@@ -309,7 +309,7 @@ impl AppState {
         matches!(self.editor_focus, EditorFocus::MainEditor)
     }
 
-    /// Get expanded options for a pick slot, resolving group references
+    /// Get expanded options for a pick slot, resolving variable references
     pub fn get_pick_options(&self, slot_label: &str) -> Vec<String> {
         let definitions = self.get_slot_definitions();
         if let Some(def) = definitions.iter().find(|d| d.label == slot_label)
@@ -317,19 +317,19 @@ impl AppState {
                 let mut options = Vec::new();
                 for source in sources {
                     match source {
-                        PickSource::GroupRef(lib_ref) => {
-                            // Resolve group reference
+                        PickSource::VariableRef(lib_ref) => {
+                            // Resolve variable reference
                             let matches = if let Some(lib_name) = &lib_ref.library {
                                 self.workspace
-                                    .find_group_in_library(lib_name, &lib_ref.group)
+                                    .find_variable_in_library(lib_name, &lib_ref.variable)
                                     .into_iter()
                                     .collect::<Vec<_>>()
                             } else {
-                                self.workspace.find_groups(&lib_ref.group)
+                                self.workspace.find_variables(&lib_ref.variable)
                             };
-                            // Add all options from matched groups
-                            for (_lib, group) in matches {
-                                options.extend(group.options.iter().cloned());
+                            // Add all options from matched variables
+                            for (_lib, variable) in matches {
+                                options.extend(variable.options.iter().cloned());
                             }
                         }
                         PickSource::Literal { value, .. } => {
@@ -412,26 +412,26 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    // ==================== Group Editor Methods ====================
+    // ==================== Variable Editor Methods ====================
 
-    /// Enter group editor mode for an existing group
-    pub fn enter_group_editor(&mut self, group_name: &str) {
-        // Find the group in the current library and extract data
-        let group_data = self.selected_library().and_then(|library| {
+    /// Enter variable editor mode for an existing variable
+    pub fn enter_variable_editor(&mut self, variable_name: &str) {
+        // Find the variable in the current library and extract data
+        let variable_data = self.selected_library().and_then(|library| {
             library
-                .groups
+                .variables
                 .iter()
-                .find(|g| g.name == group_name)
-                .map(|group| (group.name.clone(), group.options.clone()))
+                .find(|g| g.name == variable_name)
+                .map(|variable| (variable.name.clone(), variable.options.clone()))
         });
 
-        if let Some((name, options)) = group_data {
-            self.group_editor_name = name.clone();
-            self.group_editor_content = Self::options_to_text(&options);
-            self.group_editor_original_name = Some(name);
-            self.group_editor_dirty = false;
-            self.editor_mode = EditorMode::GroupEditor {
-                group_name: group_name.to_string(),
+        if let Some((name, options)) = variable_data {
+            self.variable_editor_name = name.clone();
+            self.variable_editor_content = Self::options_to_text(&options);
+            self.variable_editor_original_name = Some(name);
+            self.variable_editor_dirty = false;
+            self.editor_mode = EditorMode::VariableEditor {
+                variable_name: variable_name.to_string(),
             };
             // Switch sidebar to variables view
             self.sidebar_view_mode = SidebarViewMode::Variables;
@@ -439,47 +439,47 @@ impl AppState {
         }
     }
 
-    /// Enter group editor mode for creating a new group
-    pub fn enter_new_group_editor(&mut self) {
-        self.group_editor_name = String::new();
-        self.group_editor_content = String::new();
-        self.group_editor_original_name = None;
-        self.group_editor_dirty = false;
-        self.editor_mode = EditorMode::NewGroup;
+    /// Enter variable editor mode for creating a new variable
+    pub fn enter_new_variable_editor(&mut self) {
+        self.variable_editor_name = String::new();
+        self.variable_editor_content = String::new();
+        self.variable_editor_original_name = None;
+        self.variable_editor_dirty = false;
+        self.editor_mode = EditorMode::NewVariable;
         // Switch sidebar to variables view
         self.sidebar_view_mode = SidebarViewMode::Variables;
         self.sidebar_mode = SidebarMode::Normal;
     }
 
-    /// Exit group editor mode and return to template editor
+    /// Exit variable editor mode and return to template editor
     /// Returns false if there are unsaved changes (caller should show confirmation)
-    pub fn try_exit_group_editor(&mut self) -> bool {
-        if self.group_editor_dirty {
-            self.confirm_dialog = Some(ConfirmDialog::DiscardGroupChanges);
+    pub fn try_exit_variable_editor(&mut self) -> bool {
+        if self.variable_editor_dirty {
+            self.confirm_dialog = Some(ConfirmDialog::DiscardVariableChanges);
             return false;
         }
-        self.exit_group_editor_force();
+        self.exit_variable_editor_force();
         true
     }
 
-    /// Force exit group editor mode (discards any unsaved changes)
-    pub fn exit_group_editor_force(&mut self) {
+    /// Force exit variable editor mode (discards any unsaved changes)
+    pub fn exit_variable_editor_force(&mut self) {
         self.editor_mode = EditorMode::Template;
-        self.group_editor_name.clear();
-        self.group_editor_content.clear();
-        self.group_editor_original_name = None;
-        self.group_editor_dirty = false;
+        self.variable_editor_name.clear();
+        self.variable_editor_content.clear();
+        self.variable_editor_original_name = None;
+        self.variable_editor_dirty = false;
         self.confirm_dialog = None;
     }
 
-    /// Check if the group editor has unsaved changes
-    pub fn is_group_editor_dirty(&self) -> bool {
-        self.group_editor_dirty
+    /// Check if the variable editor has unsaved changes
+    pub fn is_variable_editor_dirty(&self) -> bool {
+        self.variable_editor_dirty
     }
 
-    /// Mark the group editor as having changes
-    pub fn mark_group_editor_dirty(&mut self) {
-        self.group_editor_dirty = true;
+    /// Mark the variable editor as having changes
+    pub fn mark_variable_editor_dirty(&mut self) {
+        self.variable_editor_dirty = true;
     }
 
     /// Parse options text into a Vec of options.
@@ -563,35 +563,35 @@ impl AppState {
     }
 
     /// Get the current options count from the editor content
-    pub fn get_group_editor_option_count(&self) -> usize {
-        Self::parse_options(&self.group_editor_content).len()
+    pub fn get_variable_editor_option_count(&self) -> usize {
+        Self::parse_options(&self.variable_editor_content).len()
     }
 
-    /// Validate group name (returns error message if invalid)
-    pub fn validate_group_name(&self) -> Option<String> {
-        let name = self.group_editor_name.trim();
+    /// Validate variable name (returns error message if invalid)
+    pub fn validate_variable_name(&self) -> Option<String> {
+        let name = self.variable_editor_name.trim();
 
         if name.is_empty() {
-            return Some("Group name cannot be empty".to_string());
+            return Some("Variable name cannot be empty".to_string());
         }
 
         // Check for duplicate names (excluding the original name if editing)
         if let Some(library) = self.selected_library() {
-            let is_duplicate = library.groups.iter().any(|g| {
-                g.name == name && Some(&g.name) != self.group_editor_original_name.as_ref()
+            let is_duplicate = library.variables.iter().any(|g| {
+                g.name == name && Some(&g.name) != self.variable_editor_original_name.as_ref()
             });
             if is_duplicate {
-                return Some(format!("A group named \"{}\" already exists", name));
+                return Some(format!("A variable named \"{}\" already exists", name));
             }
         }
 
         None
     }
 
-    /// Request to delete a group (shows confirmation dialog)
-    pub fn request_delete_group(&mut self, group_name: &str) {
-        self.confirm_dialog = Some(ConfirmDialog::DeleteGroup {
-            group_name: group_name.to_string(),
+    /// Request to delete a variable (shows confirmation dialog)
+    pub fn request_delete_variable(&mut self, variable_name: &str) {
+        self.confirm_dialog = Some(ConfirmDialog::DeleteVariable {
+            variable_name: variable_name.to_string(),
         });
     }
 

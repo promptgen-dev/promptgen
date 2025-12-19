@@ -14,7 +14,7 @@ use std::collections::HashSet;
 #[test]
 fn same_seed_produces_same_result() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde hair
@@ -32,7 +32,7 @@ groups:
 #[test]
 fn different_seeds_produce_different_results_eventually() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Color
     options:
       - red
@@ -70,7 +70,7 @@ fn inline_options_are_deterministic() {
 #[test]
 fn complex_template_is_deterministic() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde hair
@@ -91,7 +91,7 @@ groups:
 #[test]
 fn same_options_produce_different_results_in_single_prompt() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Color
     options:
       - red
@@ -99,7 +99,7 @@ groups:
       - blue
 "#);
 
-    // With multiple references to the same group, we should potentially get different choices
+    // With multiple references to the same variable, we should potentially get different choices
     let mut found_different = false;
     for seed in 0..100 {
         let result = eval(&lib, "@Color and @Color", Some(seed));
@@ -112,14 +112,14 @@ groups:
 
     assert!(
         found_different,
-        "Multiple references to same group should sometimes produce different choices"
+        "Multiple references to same variable should sometimes produce different choices"
     );
 }
 
 #[test]
 fn nested_grammar_is_deterministic() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Size
     options:
       - big

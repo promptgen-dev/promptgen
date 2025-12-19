@@ -17,7 +17,7 @@ use common::{empty_lib, eval, eval_with_slots, lib};
 #[test]
 fn simple_library_ref_renders() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde hair
@@ -39,7 +39,7 @@ groups:
 #[test]
 fn quoted_library_ref_renders() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair Color
     options:
       - blonde
@@ -59,7 +59,7 @@ groups:
 #[test]
 fn library_ref_with_surrounding_text() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde hair
@@ -72,7 +72,7 @@ groups:
 #[test]
 fn multiple_library_refs_render() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde hair
@@ -166,7 +166,7 @@ fn multiple_slots_render() {
 #[test]
 fn slot_with_grammar_in_value() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Color
     options:
       - red
@@ -200,9 +200,9 @@ fn comment_not_included_in_output() {
 // ============================================================================
 
 #[test]
-fn nested_library_ref_in_group_option() {
+fn nested_library_ref_in_variable_option() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Color
     options:
       - red
@@ -223,9 +223,9 @@ groups:
 }
 
 #[test]
-fn nested_inline_options_in_group() {
+fn nested_inline_options_in_variable() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Size
     options:
       - "{big|small} thing"
@@ -245,7 +245,7 @@ groups:
 fn nested_inline_options_direct() {
     // Test {a|b|{c|d}} - direct nested inline options in template
     let lib = lib(r#"
-groups:
+variables:
   - name: Placeholder
     options:
       - placeholder
@@ -265,7 +265,7 @@ groups:
 fn deeply_nested_inline_options() {
     // Test {a|{b|{c|d}}} - deeply nested inline options
     let lib = lib(r#"
-groups:
+variables:
   - name: Placeholder
     options:
       - placeholder
@@ -285,7 +285,7 @@ groups:
 fn nested_inline_options_with_surrounding_text() {
     // Test prefix {a|{nested|choice}} suffix
     let lib = lib(r#"
-groups:
+variables:
   - name: Placeholder
     options:
       - placeholder
@@ -312,7 +312,7 @@ groups:
 #[test]
 fn complex_template_with_all_features() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde hair

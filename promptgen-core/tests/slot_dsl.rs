@@ -2,7 +2,7 @@
 //!
 //! Tests the new slot syntax:
 //! - Textarea slots: `{{ label }}`
-//! - Pick slots: `{{ label: pick(@Group, "literal") }}`
+//! - Pick slots: `{{ label: pick(@Variable, "literal") }}`
 //! - Operators: `| one` and `| many(max=N, sep=",")`
 //! - Duplicate label detection
 
@@ -155,7 +155,7 @@ fn pick_slot_renders_with_multiple_values() {
 #[test]
 fn pick_slot_value_can_contain_grammar() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Color
     options:
       - red
@@ -520,7 +520,7 @@ fn pick_slot_with_inline_options() {
 #[test]
 fn pick_slot_with_library_ref() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde hair
@@ -546,7 +546,7 @@ groups:
 #[test]
 fn pick_slot_with_library_ref_and_value() {
     let lib = lib(r#"
-groups:
+variables:
   - name: Hair
     options:
       - blonde hair

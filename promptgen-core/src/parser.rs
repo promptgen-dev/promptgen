@@ -41,14 +41,14 @@ fn to_range(span: SimpleSpan<usize>) -> Span {
 /// Parse a library reference string (the part after @ or inside quotes).
 ///
 /// Examples:
-/// - `"Hair"` -> LibraryRef { library: None, group: "Hair" }
-/// - `"Eye Color"` -> LibraryRef { library: None, group: "Eye Color" }
-/// - `"MyLib:Hair"` -> LibraryRef { library: Some("MyLib"), group: "Hair" }
+/// - `"Hair"` -> LibraryRef { library: None, variable: "Hair" }
+/// - `"Eye Color"` -> LibraryRef { library: None, variable: "Eye Color" }
+/// - `"MyLib:Hair"` -> LibraryRef { library: Some("MyLib"), variable: "Hair" }
 fn parse_library_ref_string(s: &str) -> LibraryRef {
     if let Some(colon_pos) = s.find(':') {
         let library = s[..colon_pos].to_string();
-        let group = s[colon_pos + 1..].to_string();
-        LibraryRef::qualified(library, group)
+        let variable = s[colon_pos + 1..].to_string();
+        LibraryRef::qualified(library, variable)
     } else {
         LibraryRef::new(s)
     }
@@ -229,11 +229,11 @@ fn pick_sources_parser<'src>(
         .collect::<Vec<_>>()
 }
 
-/// Parse a single pick source: @GroupRef or literal
+/// Parse a single pick source: @VariableRef or literal
 fn pick_source_parser<'src>(
 ) -> impl Parser<'src, &'src str, (PickSource, Span), extra::Err<Simple<'src, char>>> + Clone {
-    // Group reference: @Name or @"Name"
-    let group_ref = pick_group_ref_parser();
+    // Variable reference: @Name or @"Name"
+    let variable_ref = pick_variable_ref_parser();
 
     // Quoted literal: "text"
     let quoted_literal = just('"')
@@ -265,7 +265,7 @@ fn pick_source_parser<'src>(
             )
         });
 
-    choice((group_ref, quoted_literal, bare_literal)).padded()
+    choice((variable_ref, quoted_literal, bare_literal)).padded()
 }
 
 /// Parse quoted string content with escape sequences
@@ -285,14 +285,14 @@ fn quoted_string_content_parser<'src>(
         .collect::<String>()
 }
 
-/// Parse @GroupRef inside pick()
-fn pick_group_ref_parser<'src>(
+/// Parse @VariableRef inside pick()
+fn pick_variable_ref_parser<'src>(
 ) -> impl Parser<'src, &'src str, (PickSource, Span), extra::Err<Simple<'src, char>>> + Clone {
     // @"quoted name" or @identifier
     let quoted_ref = just("@\"")
         .ignore_then(none_of("\"").repeated().collect::<String>())
         .then_ignore(just('"'))
-        .map(|name| PickSource::GroupRef(parse_library_ref_string(&name)));
+        .map(|name| PickSource::VariableRef(parse_library_ref_string(&name)));
 
     let simple_ref = just('@')
         .ignore_then(
@@ -306,7 +306,7 @@ fn pick_group_ref_parser<'src>(
                 )
                 .map(|(first, rest)| format!("{}{}", first, rest)),
         )
-        .map(|name| PickSource::GroupRef(LibraryRef::new(name)));
+        .map(|name| PickSource::VariableRef(LibraryRef::new(name)));
 
     quoted_ref
         .or(simple_ref)
@@ -593,7 +593,7 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn parses_pick_slot_with_group_ref() {
+    fn parses_pick_slot_with_variable_ref() {
         let src = "{{ Eyes: pick(@Eyes) }}";
         let tmpl = parse_template(src).expect("should parse");
 
@@ -606,10 +606,10 @@ mod tests {
                     SlotKind::Pick(pick) => {
                         assert_eq!(pick.sources.len(), 1);
                         match &pick.sources[0].0 {
-                            PickSource::GroupRef(lib_ref) => {
-                                assert_eq!(lib_ref.group, "Eyes");
+                            PickSource::VariableRef(lib_ref) => {
+                                assert_eq!(lib_ref.variable, "Eyes");
                             }
-                            other => panic!("expected GroupRef, got {:?}", other),
+                            other => panic!("expected VariableRef, got {:?}", other),
                         }
                     }
                     other => panic!("expected Pick, got {:?}", other),
@@ -632,7 +632,7 @@ mod tests {
                 match &slot.kind.0 {
                     SlotKind::Pick(pick) => {
                         assert_eq!(pick.sources.len(), 3);
-                        assert!(matches!(&pick.sources[0].0, PickSource::GroupRef(_)));
+                        assert!(matches!(&pick.sources[0].0, PickSource::VariableRef(_)));
                         assert!(matches!(&pick.sources[1].0, PickSource::Literal { value, quoted: false } if value == "windswept"));
                         assert!(matches!(&pick.sources[2].0, PickSource::Literal { value, quoted: true } if value == "option, comma"));
                     }
@@ -862,7 +862,7 @@ mod tests {
         match node {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, None);
-                assert_eq!(lib_ref.group, "Hair");
+                assert_eq!(lib_ref.variable, "Hair");
             }
             other => panic!("expected LibraryRef, got {:?}", other),
         }
@@ -878,7 +878,7 @@ mod tests {
         match node {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, None);
-                assert_eq!(lib_ref.group, "Hair_Color");
+                assert_eq!(lib_ref.variable, "Hair_Color");
             }
             other => panic!("expected LibraryRef, got {:?}", other),
         }
@@ -894,7 +894,7 @@ mod tests {
         match node {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, None);
-                assert_eq!(lib_ref.group, "hair-color");
+                assert_eq!(lib_ref.variable, "hair-color");
             }
             other => panic!("expected LibraryRef, got {:?}", other),
         }
@@ -910,7 +910,7 @@ mod tests {
         match node {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, None);
-                assert_eq!(lib_ref.group, "Eye Color");
+                assert_eq!(lib_ref.variable, "Eye Color");
             }
             other => panic!("expected LibraryRef, got {:?}", other),
         }
@@ -926,7 +926,7 @@ mod tests {
         match node {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, Some("MyLib".to_string()));
-                assert_eq!(lib_ref.group, "Hair");
+                assert_eq!(lib_ref.variable, "Hair");
             }
             other => panic!("expected LibraryRef, got {:?}", other),
         }
@@ -942,7 +942,7 @@ mod tests {
         match node {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, Some("My Library".to_string()));
-                assert_eq!(lib_ref.group, "Eye Color");
+                assert_eq!(lib_ref.variable, "Eye Color");
             }
             other => panic!("expected LibraryRef, got {:?}", other),
         }

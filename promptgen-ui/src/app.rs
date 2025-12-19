@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::components::{EditorPanel, GroupEditorPanel, PreviewPanel, SidebarPanel, SlotPanel};
+use crate::components::{EditorPanel, VariableEditorPanel, PreviewPanel, SidebarPanel, SlotPanel};
 use crate::state::{AppState, EditorMode};
 use crate::theme;
 
@@ -190,9 +190,9 @@ impl eframe::App for PromptGenApp {
                                 SlotPanel::show(ui, &mut self.state);
                             }
                         }
-                        EditorMode::GroupEditor { .. } | EditorMode::NewGroup => {
-                            // Group editor section
-                            GroupEditorPanel::show(ui, &mut self.state);
+                        EditorMode::VariableEditor { .. } | EditorMode::NewVariable => {
+                            // Variable editor section
+                            VariableEditorPanel::show(ui, &mut self.state);
                         }
                     }
                 });

@@ -1,4 +1,4 @@
-//! Group editor component for editing variable groups.
+//! Variable editor component for editing variable variables.
 
 use egui::{Color32, RichText, Vec2};
 
@@ -8,11 +8,11 @@ use crate::highlighting::highlight_template;
 use crate::state::{AppState, ConfirmDialog};
 use crate::theme::syntax;
 
-/// Group editor panel for editing variable group names and options.
-pub struct GroupEditorPanel;
+/// Variable editor panel for editing variable variable names and options.
+pub struct VariableEditorPanel;
 
-impl GroupEditorPanel {
-    /// Render the group editor panel.
+impl VariableEditorPanel {
+    /// Render the variable editor panel.
     /// Returns true if the editor should be closed (user confirmed exit).
     pub fn show(ui: &mut egui::Ui, state: &mut AppState) -> bool {
         let mut should_close = false;
@@ -24,33 +24,33 @@ impl GroupEditorPanel {
                 .button(format!("{} Back to Editor", ICON_ARROW_BACK))
                 .clicked()
             {
-                if !state.try_exit_group_editor() {
+                if !state.try_exit_variable_editor() {
                     // Will show confirmation dialog
                 }
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Save button
-                let can_save = state.validate_group_name().is_none()
-                    && !state.group_editor_content.trim().is_empty();
+                let can_save = state.validate_variable_name().is_none()
+                    && !state.variable_editor_content.trim().is_empty();
 
                 let save_button = ui.add_enabled(can_save, egui::Button::new("Save"));
                 if save_button.clicked() {
-                    if Self::save_group(state) {
+                    if Self::save_variable(state) {
                         should_close = true;
                     }
                 }
 
-                // Group name display
-                let group_display_name = if state.group_editor_name.is_empty() {
-                    "New Group".to_string()
+                // Variable name display
+                let variable_display_name = if state.variable_editor_name.is_empty() {
+                    "New Variable".to_string()
                 } else {
-                    format!("@{}", state.group_editor_name)
+                    format!("@{}", state.variable_editor_name)
                 };
-                ui.heading(group_display_name);
+                ui.heading(variable_display_name);
 
                 // Dirty indicator
-                if state.group_editor_dirty {
+                if state.variable_editor_dirty {
                     ui.label(RichText::new("•").color(Color32::from_rgb(249, 226, 175))); // Yellow dot
                 }
             });
@@ -58,21 +58,21 @@ impl GroupEditorPanel {
 
         ui.separator();
 
-        // Group name input
+        // Variable name input
         ui.horizontal(|ui| {
-            ui.label("Group Name:");
+            ui.label("Variable Name:");
             let name_response = ui.add(
-                egui::TextEdit::singleline(&mut state.group_editor_name)
-                    .hint_text("Enter group name...")
+                egui::TextEdit::singleline(&mut state.variable_editor_name)
+                    .hint_text("Enter variable name...")
                     .desired_width(300.0),
             );
             if name_response.changed() {
-                state.mark_group_editor_dirty();
+                state.mark_variable_editor_dirty();
             }
         });
 
         // Show name validation error
-        if let Some(error) = state.validate_group_name() {
+        if let Some(error) = state.validate_variable_name() {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("error:").color(syntax::ERROR));
                 ui.label(error);
@@ -85,7 +85,7 @@ impl GroupEditorPanel {
         ui.horizontal(|ui| {
             ui.label("Options (separate with ---):");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let count = state.get_group_editor_option_count();
+                let count = state.get_variable_editor_option_count();
                 ui.label(
                     RichText::new(format!(
                         "{} option{}",
@@ -106,16 +106,16 @@ impl GroupEditorPanel {
 
         ui.add_space(16.0);
 
-        // Delete button (only for existing groups)
-        if let Some(original_name) = state.group_editor_original_name.clone() {
+        // Delete button (only for existing variables)
+        if let Some(original_name) = state.variable_editor_original_name.clone() {
             ui.separator();
             ui.add_space(8.0);
 
             if ui
-                .button(RichText::new("Delete Group").color(syntax::ERROR))
+                .button(RichText::new("Delete Variable").color(syntax::ERROR))
                 .clicked()
             {
-                state.request_delete_group(&original_name);
+                state.request_delete_variable(&original_name);
             }
         }
 
@@ -138,8 +138,8 @@ impl GroupEditorPanel {
                 ui.set_width(ui.available_width());
 
                 // Calculate option numbers for each line
-                let option_numbers = Self::calculate_option_numbers(&state.group_editor_content);
-                let line_count = state.group_editor_content.lines().count().max(5);
+                let option_numbers = Self::calculate_option_numbers(&state.variable_editor_content);
+                let line_count = state.variable_editor_content.lines().count().max(5);
 
                 ui.horizontal(|ui| {
                     // Option numbers column
@@ -178,7 +178,7 @@ impl GroupEditorPanel {
                         };
 
                     let response = ui.add(
-                        egui::TextEdit::multiline(&mut state.group_editor_content)
+                        egui::TextEdit::multiline(&mut state.variable_editor_content)
                             .font(egui::TextStyle::Monospace)
                             .desired_width(f32::INFINITY)
                             .desired_rows(line_count)
@@ -186,7 +186,7 @@ impl GroupEditorPanel {
                     );
 
                     if response.changed() {
-                        state.mark_group_editor_dirty();
+                        state.mark_variable_editor_dirty();
                     }
                 });
             });
@@ -295,7 +295,7 @@ impl GroupEditorPanel {
 
     /// Show parse errors for individual options
     fn show_option_errors(ui: &mut egui::Ui, state: &AppState) {
-        let options = AppState::parse_options(&state.group_editor_content);
+        let options = AppState::parse_options(&state.variable_editor_content);
 
         let mut errors = Vec::new();
         for (idx, option) in options.iter().enumerate() {
@@ -326,12 +326,12 @@ impl GroupEditorPanel {
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ui.ctx(), |ui| match dialog {
-                    ConfirmDialog::DiscardGroupChanges => {
+                    ConfirmDialog::DiscardVariableChanges => {
                         ui.label("You have unsaved changes. Discard them?");
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
                             if ui.button("Discard").clicked() {
-                                state.exit_group_editor_force();
+                                state.exit_variable_editor_force();
                                 *should_close = true;
                             }
                             if ui.button("Cancel").clicked() {
@@ -339,10 +339,10 @@ impl GroupEditorPanel {
                             }
                         });
                     }
-                    ConfirmDialog::DeleteGroup { group_name } => {
+                    ConfirmDialog::DeleteVariable { variable_name } => {
                         ui.label(format!(
                             "Delete @{}? This cannot be undone.",
-                            group_name
+                            variable_name
                         ));
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
@@ -350,7 +350,7 @@ impl GroupEditorPanel {
                                 .button(RichText::new("Delete").color(syntax::ERROR))
                                 .clicked()
                             {
-                                Self::delete_group(state, &group_name);
+                                Self::delete_variable(state, &variable_name);
                                 *should_close = true;
                             }
                             if ui.button("Cancel").clicked() {
@@ -362,10 +362,10 @@ impl GroupEditorPanel {
         }
     }
 
-    /// Save the current group to the library
-    fn save_group(state: &mut AppState) -> bool {
-        let name = state.group_editor_name.trim().to_string();
-        let options = AppState::parse_options(&state.group_editor_content);
+    /// Save the current variable to the library
+    fn save_variable(state: &mut AppState) -> bool {
+        let name = state.variable_editor_name.trim().to_string();
+        let options = AppState::parse_options(&state.variable_editor_content);
 
         if name.is_empty() || options.is_empty() {
             return false;
@@ -379,15 +379,15 @@ impl GroupEditorPanel {
 
         // Find and update the library
         if let Some(library) = state.libraries.iter_mut().find(|lib| lib.id == library_id) {
-            if let Some(original_name) = &state.group_editor_original_name {
-                // Editing existing group - find and update it
-                if let Some(group) = library.groups.iter_mut().find(|g| g.name == *original_name) {
-                    group.name = name;
-                    group.options = options;
+            if let Some(original_name) = &state.variable_editor_original_name {
+                // Editing existing variable - find and update it
+                if let Some(variable) = library.variables.iter_mut().find(|g| g.name == *original_name) {
+                    variable.name = name;
+                    variable.options = options;
                 }
             } else {
-                // Creating new group
-                library.groups.push(promptgen_core::PromptGroup::new(name, options));
+                // Creating new variable
+                library.variables.push(promptgen_core::PromptVariable::new(name, options));
             }
         }
 
@@ -408,21 +408,21 @@ impl GroupEditorPanel {
         state.rebuild_workspace();
 
         // Clear editor state
-        state.exit_group_editor_force();
+        state.exit_variable_editor_force();
 
         true
     }
 
-    /// Delete a group from the library
-    fn delete_group(state: &mut AppState, group_name: &str) {
+    /// Delete a variable from the library
+    fn delete_variable(state: &mut AppState, variable_name: &str) {
         let library_id = match &state.selected_library_id {
             Some(id) => id.clone(),
             None => return,
         };
 
-        // Find and remove the group
+        // Find and remove the variable
         if let Some(library) = state.libraries.iter_mut().find(|lib| lib.id == library_id) {
-            library.groups.retain(|g| g.name != group_name);
+            library.variables.retain(|g| g.name != variable_name);
         }
 
         // Save to disk
@@ -441,6 +441,6 @@ impl GroupEditorPanel {
         state.rebuild_workspace();
 
         // Clear editor state
-        state.exit_group_editor_force();
+        state.exit_variable_editor_force();
     }
 }

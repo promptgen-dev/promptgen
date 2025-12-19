@@ -2,7 +2,7 @@ id: example
 name: example
 description: Example Prompts
 
-groups:
+variables:
   - tags: [Hair, appearance]
     options:
       - blonde hair

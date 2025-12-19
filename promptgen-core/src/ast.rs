@@ -9,34 +9,34 @@ pub struct Template {
 /// A value paired with its source location.
 pub type Spanned<T> = (T, Span);
 
-/// A reference to a library group.
+/// A reference to a library variable.
 ///
 /// Examples:
-/// - `@Hair` -> library: None, group: "Hair"
-/// - `@"Eye Color"` -> library: None, group: "Eye Color"
-/// - `@"MyLib:Hair"` -> library: Some("MyLib"), group: "Hair"
+/// - `@Hair` -> library: None, variable: "Hair"
+/// - `@"Eye Color"` -> library: None, variable: "Eye Color"
+/// - `@"MyLib:Hair"` -> library: Some("MyLib"), variable: "Hair"
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryRef {
     /// Optional library name qualifier. None means search all libraries.
     pub library: Option<String>,
-    /// The group name to reference.
-    pub group: String,
+    /// The variable name to reference.
+    pub variable: String,
 }
 
 impl LibraryRef {
     /// Create a simple library reference (no library qualifier).
-    pub fn new(group: impl Into<String>) -> Self {
+    pub fn new(variable: impl Into<String>) -> Self {
         Self {
             library: None,
-            group: group.into(),
+            variable: variable.into(),
         }
     }
 
     /// Create a qualified library reference.
-    pub fn qualified(library: impl Into<String>, group: impl Into<String>) -> Self {
+    pub fn qualified(library: impl Into<String>, variable: impl Into<String>) -> Self {
         Self {
             library: Some(library.into()),
-            group: group.into(),
+            variable: variable.into(),
         }
     }
 }
@@ -125,8 +125,8 @@ impl PickSlot {
 /// A source for a pick expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PickSource {
-    /// `@GroupName` or `@"Group Name"` - reference to a library group.
-    GroupRef(LibraryRef),
+    /// `@VariableName` or `@"Variable Name"` - reference to a library variable.
+    VariableRef(LibraryRef),
     /// A literal string option.
     Literal {
         /// The literal value.
@@ -277,7 +277,7 @@ pub enum Node {
     /// `{a|b|c}` – inline options, pick one randomly.
     InlineOptions(Vec<OptionItem>),
 
-    /// `@Name` or `@"Name"` or `@"Lib:Name"` – reference to a library group.
+    /// `@Name` or `@"Name"` or `@"Lib:Name"` – reference to a library variable.
     LibraryRef(LibraryRef),
 
     /// `{{ label }}` or `{{ label: pick(...) }}` – slot block.

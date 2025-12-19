@@ -24,16 +24,16 @@ pub use io::{
 };
 
 pub use library::{
-    EngineHint, Library, PromptGroup, PromptTemplate, TemplateSlot, TemplateSlotKind, new_id,
+    EngineHint, Library, PromptVariable, PromptTemplate, TemplateSlot, TemplateSlotKind, new_id,
 };
 pub use parser::{ParseError, parse_template};
 pub use span::Span;
 
 // Workspace exports
 pub use workspace::{
-    CompletionItem, CompletionKind, DiagnosticError, DiagnosticWarning, ErrorKind, GroupInfo,
+    CompletionItem, CompletionKind, DiagnosticError, DiagnosticWarning, ErrorKind, VariableInfo,
     ParseResult, ReferenceInfo, WarningKind, Workspace, WorkspaceBuilder,
 };
 
 // Search exports
-pub use search::{GroupSearchResult, OptionMatch, OptionSearchResult, SearchResult};
+pub use search::{VariableSearchResult, OptionMatch, OptionSearchResult, SearchResult};

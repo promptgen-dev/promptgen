@@ -223,12 +223,12 @@ impl SidebarPanel {
         }
     }
 
-    /// Render the variable (group) list with expandable options.
+    /// Render the variable (variable) list with expandable options.
     ///
     /// Supports advanced search syntax:
-    /// - `blue` - search all options across all groups
-    /// - `@Ey` - search group names only, show all options for matches
-    /// - `@Ey/bl` - search groups matching "Ey" that have options matching "bl"
+    /// - `blue` - search all options across all variables
+    /// - `@Ey` - search variable names only, show all options for matches
+    /// - `@Ey/bl` - search variables matching "Ey" that have options matching "bl"
     /// - `@/bl` - search all options (same as plain search)
     fn render_variable_list(ui: &mut egui::Ui, state: &mut AppState) {
         if state.selected_library().is_none() {
@@ -239,7 +239,7 @@ impl SidebarPanel {
         let search_query = state.search_query.trim();
 
         if search_query.is_empty() {
-            // No search - show all groups from selected library
+            // No search - show all variables from selected library
             Self::render_all_variables(ui, state);
         } else {
             // Use workspace search with advanced syntax
@@ -254,27 +254,27 @@ impl SidebarPanel {
             return;
         };
 
-        if library.groups.is_empty() {
+        if library.variables.is_empty() {
             ui.label("No variables in this library");
             // Still show add button
             ui.add_space(8.0);
-            if ui.button("+ New Group").clicked() {
-                state.enter_new_group_editor();
+            if ui.button("+ New Variable").clicked() {
+                state.enter_new_variable_editor();
             }
             return;
         }
 
-        // Collect group data to avoid borrow issues
-        let groups: Vec<_> = library
-            .groups
+        // Collect variable data to avoid borrow issues
+        let variables: Vec<_> = library
+            .variables
             .iter()
             .map(|g| (g.name.clone(), g.options.clone()))
             .collect();
 
-        // Track which group to edit (to avoid borrow issues)
-        let mut group_to_edit: Option<String> = None;
+        // Track which variable to edit (to avoid borrow issues)
+        let mut variable_to_edit: Option<String> = None;
 
-        for (name, options) in groups {
+        for (name, options) in variables {
             let header_text = format!("@{} ({})", name, options.len());
             let id = ui.make_persistent_id(&name);
 
@@ -298,13 +298,13 @@ impl SidebarPanel {
                     collapsing_state.toggle(ui);
                 }
 
-                // Group name label
+                // Variable name label
                 ui.label(&header_text);
 
                 // Edit button aligned right
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button(ICON_EDIT).on_hover_text("Edit group").clicked() {
-                        group_to_edit = Some(name.clone());
+                    if ui.small_button(ICON_EDIT).on_hover_text("Edit variable").clicked() {
+                        variable_to_edit = Some(name.clone());
                     }
                 });
             });
@@ -318,14 +318,14 @@ impl SidebarPanel {
         }
 
         // Handle edit action after the loop
-        if let Some(name) = group_to_edit {
-            state.enter_group_editor(&name);
+        if let Some(name) = variable_to_edit {
+            state.enter_variable_editor(&name);
         }
 
-        // Add new group button at the bottom
+        // Add new variable button at the bottom
         ui.add_space(8.0);
-        if ui.button("+ New Group").clicked() {
-            state.enter_new_group_editor();
+        if ui.button("+ New Variable").clicked() {
+            state.enter_new_variable_editor();
         }
     }
 
@@ -383,16 +383,16 @@ impl SidebarPanel {
         let default_color = ui.visuals().text_color();
 
         match result {
-            SearchResult::Groups(groups) => {
-                if groups.is_empty() {
+            SearchResult::Variables(variables) => {
+                if variables.is_empty() {
                     ui.label("No matching variables");
                     return;
                 }
 
-                for group in groups {
+                for variable in variables {
                     // Create highlighted header with match indices
                     let prefix = "@";
-                    let suffix = format!(" ({})", group.options.len());
+                    let suffix = format!(" ({})", variable.options.len());
 
                     let header_job = {
                         use egui::FontId;
@@ -411,10 +411,10 @@ impl SidebarPanel {
                             },
                         );
 
-                        // Add highlighted group name
+                        // Add highlighted variable name
                         let name_job = Self::highlighted_text(
-                            &group.group_name,
-                            &group.match_indices,
+                            &variable.variable_name,
+                            &variable.match_indices,
                             default_color,
                         );
                         for section in name_job.sections {
@@ -443,7 +443,7 @@ impl SidebarPanel {
                     egui::CollapsingHeader::new(header_job)
                         .default_open(true)
                         .show(ui, |ui| {
-                            for option in &group.options {
+                            for option in &variable.options {
                                 ui.label(format!("  • {}", option));
                             }
                         });
@@ -459,7 +459,7 @@ impl SidebarPanel {
                     let match_count = result.matches.len();
                     let header_text = format!(
                         "@{} ({} match{})",
-                        result.group_name,
+                        result.variable_name,
                         match_count,
                         if match_count == 1 { "" } else { "es" }
                     );

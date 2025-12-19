@@ -1,6 +1,6 @@
 //! Library I/O module for loading and saving libraries to disk.
 //!
-//! This module provides YAML-based serialization for libraries, groups, and templates.
+//! This module provides YAML-based serialization for libraries, variables, and templates.
 //! Templates are stored as source text and re-parsed on load.
 
 use std::fs;
@@ -9,7 +9,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::{LibraryRef, Node, OptionItem};
-use crate::library::{EngineHint, Library, PromptGroup, PromptTemplate, new_id};
+use crate::library::{EngineHint, Library, PromptVariable, PromptTemplate, new_id};
 use crate::parser::parse_template;
 
 /// Error type for I/O operations.
@@ -24,19 +24,19 @@ pub enum IoError {
     #[error("failed to parse template '{name}': {message}")]
     TemplateParse { name: String, message: String },
 
-    #[error("duplicate group name: '{0}'")]
-    DuplicateGroupName(String),
+    #[error("duplicate variable name: '{0}'")]
+    DuplicateVariableName(String),
 }
 
 // ============================================================================
 // Data Transfer Objects (DTOs) for YAML serialization
 // ============================================================================
 
-/// DTO for PromptGroup.
-/// Groups are identified by their unique name.
+/// DTO for PromptVariable.
+/// Variables are identified by their unique name.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct GroupDto {
-    /// Unique name for this group.
+pub struct VariableDto {
+    /// Unique name for this variable.
     pub name: String,
     /// Options as strings (may contain nested grammar).
     #[serde(default)]
@@ -66,7 +66,7 @@ pub struct PackDto {
     #[serde(default)]
     pub description: String,
     #[serde(default)]
-    pub groups: Vec<GroupDto>,
+    pub variables: Vec<VariableDto>,
     #[serde(default)]
     pub templates: Vec<TemplateDto>,
 }
@@ -75,9 +75,9 @@ pub struct PackDto {
 // Conversion: DTO -> Domain types
 // ============================================================================
 
-impl From<GroupDto> for PromptGroup {
-    fn from(dto: GroupDto) -> Self {
-        PromptGroup {
+impl From<VariableDto> for PromptVariable {
+    fn from(dto: VariableDto) -> Self {
+        PromptVariable {
             name: dto.name,
             options: dto.options,
         }
@@ -106,11 +106,11 @@ impl TemplateDto {
 // Conversion: Domain types -> DTO
 // ============================================================================
 
-impl From<&PromptGroup> for GroupDto {
-    fn from(group: &PromptGroup) -> Self {
-        GroupDto {
-            name: group.name.clone(),
-            options: group.options.clone(),
+impl From<&PromptVariable> for VariableDto {
+    fn from(variable: &PromptVariable) -> Self {
+        VariableDto {
+            name: variable.name.clone(),
+            options: variable.options.clone(),
         }
     }
 }
@@ -133,7 +133,7 @@ impl From<&Library> for PackDto {
             id: library.id.clone(),
             name: library.name.clone(),
             description: library.description.clone(),
-            groups: library.groups.iter().map(Into::into).collect(),
+            variables: library.variables.iter().map(Into::into).collect(),
             templates: library.templates.iter().map(Into::into).collect(),
         }
     }
@@ -186,8 +186,8 @@ fn library_ref_to_source(lib_ref: &LibraryRef, output: &mut String) {
     output.push('@');
 
     let needs_quotes = lib_ref.library.is_some()
-        || lib_ref.group.contains(' ')
-        || lib_ref.group.contains(':');
+        || lib_ref.variable.contains(' ')
+        || lib_ref.variable.contains(':');
 
     if needs_quotes {
         output.push('"');
@@ -195,10 +195,10 @@ fn library_ref_to_source(lib_ref: &LibraryRef, output: &mut String) {
             output.push_str(lib);
             output.push(':');
         }
-        output.push_str(&lib_ref.group);
+        output.push_str(&lib_ref.variable);
         output.push('"');
     } else {
-        output.push_str(&lib_ref.group);
+        output.push_str(&lib_ref.variable);
     }
 }
 
@@ -245,7 +245,7 @@ fn slot_block_to_source(slot_block: &crate::ast::SlotBlock, output: &mut String)
                     output.push_str(", ");
                 }
                 match source {
-                    PickSource::GroupRef(lib_ref) => {
+                    PickSource::VariableRef(lib_ref) => {
                         library_ref_to_source(lib_ref, output);
                     }
                     PickSource::Literal { value, quoted } => {
@@ -302,14 +302,14 @@ fn slot_block_to_source(slot_block: &crate::ast::SlotBlock, output: &mut String)
 
 /// Load a library from a YAML file.
 ///
-/// The file should contain the complete library: metadata, groups, and templates.
+/// The file should contain the complete library: metadata, variables, and templates.
 pub fn load_library(path: &Path) -> Result<Library, IoError> {
     load_pack(path)
 }
 
 /// Save a library to a YAML file.
 ///
-/// Writes the complete library (metadata, groups, templates) to a single file.
+/// Writes the complete library (metadata, variables, templates) to a single file.
 pub fn save_library(library: &Library, path: &Path) -> Result<(), IoError> {
     save_pack(library, path)
 }
@@ -332,7 +332,7 @@ pub fn load_pack(path: &Path) -> Result<Library, IoError> {
         id: pack.id,
         name: pack.name,
         description: pack.description,
-        groups: pack.groups.into_iter().map(Into::into).collect(),
+        variables: pack.variables.into_iter().map(Into::into).collect(),
         templates,
     })
 }
@@ -349,11 +349,11 @@ pub fn save_pack(library: &Library, path: &Path) -> Result<(), IoError> {
 pub fn parse_pack(yaml: &str) -> Result<Library, IoError> {
     let pack: PackDto = serde_yaml_ng::from_str(yaml)?;
 
-    // Check for duplicate group names
+    // Check for duplicate variable names
     let mut seen_names = std::collections::HashSet::new();
-    for group in &pack.groups {
-        if !seen_names.insert(&group.name) {
-            return Err(IoError::DuplicateGroupName(group.name.clone()));
+    for variable in &pack.variables {
+        if !seen_names.insert(&variable.name) {
+            return Err(IoError::DuplicateVariableName(variable.name.clone()));
         }
     }
 
@@ -366,7 +366,7 @@ pub fn parse_pack(yaml: &str) -> Result<Library, IoError> {
         id: pack.id,
         name: pack.name,
         description: pack.description,
-        groups: pack.groups.into_iter().map(Into::into).collect(),
+        variables: pack.variables.into_iter().map(Into::into).collect(),
         templates,
     })
 }
@@ -386,7 +386,7 @@ mod tests {
 id: test-lib-id
 name: Test Library
 description: A test library
-groups:
+variables:
   - name: Hair
     options:
       - blonde hair
@@ -412,9 +412,9 @@ templates:
         assert_eq!(loaded.id, lib.id);
         assert_eq!(loaded.name, lib.name);
         assert_eq!(loaded.description, lib.description);
-        assert_eq!(loaded.groups.len(), 1);
-        assert_eq!(loaded.groups[0].name, "Hair");
-        assert_eq!(loaded.groups[0].options.len(), 2);
+        assert_eq!(loaded.variables.len(), 1);
+        assert_eq!(loaded.variables[0].name, "Hair");
+        assert_eq!(loaded.variables[0].options.len(), 2);
         assert_eq!(loaded.templates.len(), 1);
         assert_eq!(loaded.templates[0].name, "Character");
     }
@@ -430,7 +430,7 @@ templates:
 
         assert_eq!(loaded.id, lib.id);
         assert_eq!(loaded.name, lib.name);
-        assert_eq!(loaded.groups.len(), 1);
+        assert_eq!(loaded.variables.len(), 1);
         assert_eq!(loaded.templates.len(), 1);
     }
 
@@ -451,7 +451,7 @@ templates:
     fn test_ids_auto_generated_when_missing() {
         let yaml = r#"
 name: Minimal Library
-groups:
+variables:
   - name: Colors
     options:
       - red
@@ -466,8 +466,8 @@ templates:
         // Library and Template IDs should be auto-generated
         assert!(!lib.id.is_empty());
         assert!(!lib.templates[0].id.is_empty());
-        assert_eq!(lib.groups[0].name, "Colors");
-        assert_eq!(lib.groups[0].options[0], "red");
+        assert_eq!(lib.variables[0].name, "Colors");
+        assert_eq!(lib.variables[0].options[0], "red");
     }
 
     #[test]
@@ -520,10 +520,10 @@ templates:
     }
 
     #[test]
-    fn test_duplicate_group_name_error() {
+    fn test_duplicate_variable_name_error() {
         let yaml = r#"
 name: Test Library
-groups:
+variables:
   - name: Color
     options:
       - red
@@ -533,6 +533,6 @@ groups:
 "#;
 
         let result = parse_pack(yaml);
-        assert!(matches!(result, Err(IoError::DuplicateGroupName(name)) if name == "Color"));
+        assert!(matches!(result, Err(IoError::DuplicateVariableName(name)) if name == "Color"));
     }
 }

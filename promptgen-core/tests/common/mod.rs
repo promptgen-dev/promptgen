@@ -11,22 +11,22 @@ use promptgen_core::{
 // Inline Library Helpers
 // ============================================================================
 
-/// Create an empty test library with no groups or templates.
+/// Create an empty test library with no variables or templates.
 ///
 /// Useful for tests that don't need library features.
 pub fn empty_lib() -> Library {
-    lib("groups: []")
+    lib("variables: []")
 }
 
 /// Create a small test library from inline YAML.
 ///
-/// The YAML should contain just groups and optionally templates.
+/// The YAML should contain just variables and optionally templates.
 /// The library name and id are auto-generated.
 ///
 /// # Example
 /// ```ignore
 /// let lib = lib(r#"
-/// groups:
+/// variables:
 ///   - name: Color
 ///     options:
 ///       - red

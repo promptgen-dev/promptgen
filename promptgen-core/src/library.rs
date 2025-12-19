@@ -1,6 +1,6 @@
 //! Library data structures for PromptGen.
 //!
-//! A Library contains reusable prompt groups and templates that can be
+//! A Library contains reusable prompt variables and templates that can be
 //! evaluated to produce final prompts.
 
 #[cfg(feature = "serde")]
@@ -23,13 +23,13 @@ pub enum EngineHint {
     StableDiffusion,
 }
 
-/// A library is a container for prompt groups and templates.
+/// A library is a container for prompt variables and templates.
 #[derive(Debug, Clone)]
 pub struct Library {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub groups: Vec<PromptGroup>,
+    pub variables: Vec<PromptVariable>,
     pub templates: Vec<PromptTemplate>,
 }
 
@@ -40,7 +40,7 @@ impl Library {
             id: new_id(),
             name: name.into(),
             description: String::new(),
-            groups: Vec::new(),
+            variables: Vec::new(),
             templates: Vec::new(),
         }
     }
@@ -51,14 +51,14 @@ impl Library {
             id: id.into(),
             name: name.into(),
             description: String::new(),
-            groups: Vec::new(),
+            variables: Vec::new(),
             templates: Vec::new(),
         }
     }
 
-    /// Find a group by name.
-    pub fn find_group(&self, name: &str) -> Option<&PromptGroup> {
-        self.groups.iter().find(|g| g.name == name)
+    /// Find a variable by name.
+    pub fn find_variable(&self, name: &str) -> Option<&PromptVariable> {
+        self.variables.iter().find(|g| g.name == name)
     }
 
     /// Find a template by name.
@@ -67,14 +67,14 @@ impl Library {
     }
 }
 
-/// A prompt group is a collection of related prompt options.
-/// Groups are identified by their unique name within a library.
+/// A prompt variable is a collection of related prompt options.
+/// Variables are identified by their unique name within a library.
 ///
-/// For example, a group named "Hair" can be referenced as `@Hair` in templates.
-/// Group names with spaces require quoted syntax: `@"Eye Color"`.
+/// For example, a variable named "Hair" can be referenced as `@Hair` in templates.
+/// Variable names with spaces require quoted syntax: `@"Eye Color"`.
 #[derive(Debug, Clone)]
-pub struct PromptGroup {
-    /// Unique name for this group within the library.
+pub struct PromptVariable {
+    /// Unique name for this variable within the library.
     /// Examples: "Hair", "Eye Color", "My Character"
     pub name: String,
     /// Options stored as strings, parsed lazily at render time.
@@ -82,8 +82,8 @@ pub struct PromptGroup {
     pub options: Vec<String>,
 }
 
-impl PromptGroup {
-    /// Create a new group with the given name and options.
+impl PromptVariable {
+    /// Create a new variable with the given name and options.
     pub fn new(name: impl Into<String>, options: Vec<String>) -> Self {
         Self {
             name: name.into(),
@@ -91,7 +91,7 @@ impl PromptGroup {
         }
     }
 
-    /// Create a new group with string options.
+    /// Create a new variable with string options.
     pub fn with_options(name: impl Into<String>, options: Vec<impl Into<String>>) -> Self {
         Self {
             name: name.into(),
@@ -155,8 +155,8 @@ impl PromptTemplate {
     }
 
     /// Extract all library references from this template.
-    /// Useful for validation (checking all referenced groups exist).
-    pub fn referenced_groups(&self) -> Vec<crate::ast::LibraryRef> {
+    /// Useful for validation (checking all referenced variables exist).
+    pub fn referenced_variables(&self) -> Vec<crate::ast::LibraryRef> {
         let mut refs = Vec::new();
 
         for (node, _span) in &self.ast.nodes {
@@ -196,31 +196,31 @@ mod tests {
         let lib = Library::new("My Library");
         assert_eq!(lib.name, "My Library");
         assert!(lib.description.is_empty());
-        assert!(lib.groups.is_empty());
+        assert!(lib.variables.is_empty());
         assert!(lib.templates.is_empty());
         assert!(!lib.id.is_empty());
     }
 
     #[test]
-    fn test_library_find_group() {
+    fn test_library_find_variable() {
         let mut lib = Library::new("Test");
-        lib.groups.push(PromptGroup::new("Hair", vec![]));
-        lib.groups.push(PromptGroup::new("Eyes", vec![]));
+        lib.variables.push(PromptVariable::new("Hair", vec![]));
+        lib.variables.push(PromptVariable::new("Eyes", vec![]));
 
-        assert!(lib.find_group("Hair").is_some());
-        assert!(lib.find_group("Eyes").is_some());
-        assert!(lib.find_group("Nose").is_none());
+        assert!(lib.find_variable("Hair").is_some());
+        assert!(lib.find_variable("Eyes").is_some());
+        assert!(lib.find_variable("Nose").is_none());
     }
 
     #[test]
-    fn test_group_with_options() {
-        let group = PromptGroup::with_options(
+    fn test_variable_with_options() {
+        let variable = PromptVariable::with_options(
             "Hair",
             vec!["blonde hair", "red hair", "black hair"],
         );
-        assert_eq!(group.name, "Hair");
-        assert_eq!(group.options.len(), 3);
-        assert_eq!(group.options[0], "blonde hair");
+        assert_eq!(variable.name, "Hair");
+        assert_eq!(variable.options.len(), 3);
+        assert_eq!(variable.options[0], "blonde hair");
     }
 
     #[test]
@@ -237,26 +237,26 @@ mod tests {
     }
 
     #[test]
-    fn test_template_referenced_groups() {
+    fn test_template_referenced_variables() {
         let ast = parse_template(r#"@Hair and @"Eye Color""#).unwrap();
         let template = PromptTemplate::new("test", ast);
 
-        let refs = template.referenced_groups();
+        let refs = template.referenced_variables();
         assert_eq!(refs.len(), 2);
-        assert_eq!(refs[0].group, "Hair");
+        assert_eq!(refs[0].variable, "Hair");
         assert_eq!(refs[0].library, None);
-        assert_eq!(refs[1].group, "Eye Color");
+        assert_eq!(refs[1].variable, "Eye Color");
         assert_eq!(refs[1].library, None);
     }
 
     #[test]
-    fn test_template_referenced_groups_qualified() {
+    fn test_template_referenced_variables_qualified() {
         let ast = parse_template(r#"@"MyLib:Hair""#).unwrap();
         let template = PromptTemplate::new("test", ast);
 
-        let refs = template.referenced_groups();
+        let refs = template.referenced_variables();
         assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].group, "Hair");
+        assert_eq!(refs[0].variable, "Hair");
         assert_eq!(refs[0].library, Some("MyLib".to_string()));
     }
 }
