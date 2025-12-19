@@ -25,6 +25,9 @@ pub struct PromptGenApp {
 impl PromptGenApp {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Initialize material icons font
+        egui_material_icons::initialize(&cc.egui_ctx);
+
         // Apply custom font sizes
         theme::apply_font_sizes(&cc.egui_ctx);
 

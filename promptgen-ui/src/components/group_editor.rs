@@ -2,6 +2,8 @@
 
 use egui::{Color32, RichText, Vec2};
 
+use egui_material_icons::icons::ICON_ARROW_BACK;
+
 use crate::highlighting::highlight_template;
 use crate::state::{AppState, ConfirmDialog};
 use crate::theme::syntax;
@@ -18,7 +20,10 @@ impl GroupEditorPanel {
         // Header bar
         ui.horizontal(|ui| {
             // Back button
-            if ui.button("← Back to Editor").clicked() {
+            if ui
+                .button(format!("{} Back to Editor", ICON_ARROW_BACK))
+                .clicked()
+            {
                 if !state.try_exit_group_editor() {
                     // Will show confirmation dialog
                 }

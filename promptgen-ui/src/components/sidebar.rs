@@ -4,6 +4,10 @@ use std::path::PathBuf;
 
 use promptgen_core::Cardinality;
 
+use egui_material_icons::icons::{
+    ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_EDIT, ICON_EXPAND_MORE, ICON_FOLDER, ICON_SEARCH,
+};
+
 use crate::state::{AppState, SidebarMode, SidebarViewMode};
 
 /// Sidebar panel for navigating libraries, templates, and variables.
@@ -20,7 +24,7 @@ impl SidebarPanel {
         // Workspace header with folder picker
         if let Some(path) = workspace_path {
             ui.horizontal(|ui| {
-                ui.label("📁");
+                ui.label(ICON_FOLDER);
                 let folder_name = path
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
@@ -120,13 +124,13 @@ impl SidebarPanel {
 
             // Search input
             ui.horizontal(|ui| {
-                ui.label("🔍");
+                ui.label(ICON_SEARCH);
                 ui.add(
                     egui::TextEdit::singleline(&mut state.search_query)
                         .hint_text("Search...")
                         .desired_width(ui.available_width() - 24.0),
                 );
-                if !state.search_query.is_empty() && ui.small_button("✕").clicked() {
+                if !state.search_query.is_empty() && ui.small_button(ICON_CLOSE).clicked() {
                     state.search_query.clear();
                 }
             });
@@ -286,9 +290,9 @@ impl SidebarPanel {
             ui.horizontal(|ui| {
                 // Toggle icon (replicates CollapsingHeader behavior)
                 let icon = if collapsing_state.is_open() {
-                    "⏷"
+                    ICON_EXPAND_MORE
                 } else {
-                    "⏵"
+                    ICON_CHEVRON_RIGHT
                 };
                 if ui.small_button(icon).clicked() {
                     collapsing_state.toggle(ui);
@@ -299,7 +303,7 @@ impl SidebarPanel {
 
                 // Edit button aligned right
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("✎").on_hover_text("Edit group").clicked() {
+                    if ui.small_button(ICON_EDIT).on_hover_text("Edit group").clicked() {
                         group_to_edit = Some(name.clone());
                     }
                 });
@@ -515,7 +519,7 @@ impl SidebarPanel {
         ui.horizontal(|ui| {
             ui.heading(&slot_label);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("x").on_hover_text("Close picker").clicked() {
+                if ui.button(ICON_CLOSE).on_hover_text("Close picker").clicked() {
                     state.unfocus_slot();
                 }
             });
