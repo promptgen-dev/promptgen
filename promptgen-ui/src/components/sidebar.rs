@@ -223,7 +223,12 @@ impl SidebarPanel {
         }
     }
 
-    /// Render the variable (variable) list with expandable options.
+    /// Render the variable list with expandable options.
+    ///
+    /// Uses a unified rendering path that:
+    /// - Filters variables based on search query
+    /// - Highlights matched characters
+    /// - Maintains edit buttons and collapse controls in all cases
     ///
     /// Supports advanced search syntax:
     /// - `blue` - search all options across all variables
@@ -231,32 +236,13 @@ impl SidebarPanel {
     /// - `@Ey/bl` - search variables matching "Ey" that have options matching "bl"
     /// - `@/bl` - search all options (same as plain search)
     fn render_variable_list(ui: &mut egui::Ui, state: &mut AppState) {
-        if state.selected_library().is_none() {
-            ui.label("No library selected");
-            return;
-        }
-
-        let search_query = state.search_query.trim();
-
-        if search_query.is_empty() {
-            // No search - show all variables from selected library
-            Self::render_all_variables(ui, state);
-        } else {
-            // Use workspace search with advanced syntax
-            let search_result = state.workspace.search(search_query);
-            Self::render_search_results(ui, search_result);
-        }
-    }
-
-    /// Render all variables from the selected library (no search filter).
-    fn render_all_variables(ui: &mut egui::Ui, state: &mut AppState) {
         let Some(library) = state.selected_library() else {
+            ui.label("No library selected");
             return;
         };
 
         if library.variables.is_empty() {
             ui.label("No variables in this library");
-            // Still show add button
             ui.add_space(8.0);
             if ui.button("+ New Variable").clicked() {
                 state.enter_new_variable_editor();
@@ -264,31 +250,105 @@ impl SidebarPanel {
             return;
         }
 
-        // Collect variable data to avoid borrow issues
-        let variables: Vec<_> = library
-            .variables
-            .iter()
-            .map(|g| (g.name.clone(), g.options.clone()))
-            .collect();
+        let search_query = state.search_query.trim();
+        let is_searching = !search_query.is_empty();
+
+        // Get search results for highlighting if we have a search query
+        let search_result = if is_searching {
+            Some(state.workspace.search(search_query))
+        } else {
+            None
+        };
+
+        // Build the display data: for each variable, determine if it should be shown
+        // and what highlighting to apply
+        #[derive(Clone)]
+        struct VariableDisplay {
+            name: String,
+            options: Vec<String>,
+            /// Match indices for the variable name (for @-prefix searches)
+            name_match_indices: Vec<usize>,
+            /// For each option, the match indices (for option searches)
+            option_matches: Vec<(String, Vec<usize>)>,
+            /// Whether this is an option-based search result (affects display)
+            is_option_search: bool,
+        }
+
+        let variables_display: Vec<VariableDisplay> = match &search_result {
+            None => {
+                // No search - show all variables
+                library
+                    .variables
+                    .iter()
+                    .map(|v| VariableDisplay {
+                        name: v.name.clone(),
+                        options: v.options.clone(),
+                        name_match_indices: vec![],
+                        option_matches: vec![],
+                        is_option_search: false,
+                    })
+                    .collect()
+            }
+            Some(promptgen_core::SearchResult::Variables(var_results)) => {
+                // Variable name search - show matched variables with their full options
+                var_results
+                    .iter()
+                    .map(|vr| VariableDisplay {
+                        name: vr.variable_name.clone(),
+                        options: vr.options.clone(),
+                        name_match_indices: vr.match_indices.clone(),
+                        option_matches: vec![],
+                        is_option_search: false,
+                    })
+                    .collect()
+            }
+            Some(promptgen_core::SearchResult::Options(opt_results)) => {
+                // Option search - show variables with matching options only
+                opt_results
+                    .iter()
+                    .map(|or| VariableDisplay {
+                        name: or.variable_name.clone(),
+                        options: or.matches.iter().map(|m| m.text.clone()).collect(),
+                        name_match_indices: vec![],
+                        option_matches: or
+                            .matches
+                            .iter()
+                            .map(|m| (m.text.clone(), m.match_indices.clone()))
+                            .collect(),
+                        is_option_search: true,
+                    })
+                    .collect()
+            }
+        };
+
+        if variables_display.is_empty() && is_searching {
+            ui.label("No matching variables");
+            ui.add_space(8.0);
+            if ui.button("+ New Variable").clicked() {
+                state.enter_new_variable_editor();
+            }
+            return;
+        }
+
+        let default_color = ui.visuals().text_color();
 
         // Track which variable to edit (to avoid borrow issues)
         let mut variable_to_edit: Option<String> = None;
 
-        for (name, options) in variables {
-            let header_text = format!("@{} ({})", name, options.len());
-            let id = ui.make_persistent_id(&name);
+        for var_display in &variables_display {
+            let id = ui.make_persistent_id(&var_display.name);
 
             // Use CollapsingState for custom header layout
             let mut collapsing_state =
                 egui::collapsing_header::CollapsingState::load_with_default_open(
                     ui.ctx(),
                     id,
-                    false,
+                    is_searching, // Auto-expand when searching
                 );
 
             // Header row: collapse toggle + label + edit button
             ui.horizontal(|ui| {
-                // Toggle icon (replicates CollapsingHeader behavior)
+                // Toggle icon
                 let icon = if collapsing_state.is_open() {
                     ICON_EXPAND_MORE
                 } else {
@@ -298,21 +358,42 @@ impl SidebarPanel {
                     collapsing_state.toggle(ui);
                 }
 
-                // Variable name label
-                ui.label(&header_text);
+                // Variable name label with optional highlighting
+                let header_job = Self::build_variable_header_job(
+                    &var_display.name,
+                    var_display.options.len(),
+                    &var_display.name_match_indices,
+                    var_display.is_option_search,
+                    default_color,
+                );
+                ui.label(header_job);
 
                 // Edit button aligned right
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button(ICON_EDIT).on_hover_text("Edit variable").clicked() {
-                        variable_to_edit = Some(name.clone());
+                    if ui
+                        .small_button(ICON_EDIT)
+                        .on_hover_text("Edit variable")
+                        .clicked()
+                    {
+                        variable_to_edit = Some(var_display.name.clone());
                     }
                 });
             });
 
             // Body content (only shown when expanded)
             collapsing_state.show_body_unindented(ui, |ui| {
-                for option in &options {
-                    ui.label(format!("    • {}", option));
+                if var_display.is_option_search && !var_display.option_matches.is_empty() {
+                    // Show options with highlighting
+                    for (option_text, match_indices) in &var_display.option_matches {
+                        let option_job =
+                            Self::build_option_job(option_text, match_indices, default_color);
+                        ui.label(option_job);
+                    }
+                } else {
+                    // Show plain options
+                    for option in &var_display.options {
+                        ui.label(format!("    • {}", option));
+                    }
                 }
             });
         }
@@ -327,6 +408,108 @@ impl SidebarPanel {
         if ui.button("+ New Variable").clicked() {
             state.enter_new_variable_editor();
         }
+    }
+
+    /// Build a LayoutJob for a variable header with optional highlighting.
+    fn build_variable_header_job(
+        name: &str,
+        option_count: usize,
+        match_indices: &[usize],
+        is_option_search: bool,
+        default_color: egui::Color32,
+    ) -> egui::text::LayoutJob {
+        use egui::FontId;
+        use egui::text::{LayoutJob, TextFormat};
+
+        let mut job = LayoutJob::default();
+
+        // Add "@" prefix
+        job.append(
+            "@",
+            0.0,
+            TextFormat {
+                font_id: FontId::default(),
+                color: default_color,
+                ..Default::default()
+            },
+        );
+
+        // Add variable name with highlighting if applicable
+        if !match_indices.is_empty() {
+            let name_job = Self::highlighted_text(name, match_indices, default_color);
+            for section in name_job.sections {
+                job.append(
+                    &name_job.text[section.byte_range.clone()],
+                    0.0,
+                    section.format,
+                );
+            }
+        } else {
+            job.append(
+                name,
+                0.0,
+                TextFormat {
+                    font_id: FontId::default(),
+                    color: default_color,
+                    ..Default::default()
+                },
+            );
+        }
+
+        // Add count suffix - for option search, show match count instead of total
+        let suffix = if is_option_search {
+            let match_word = if option_count == 1 { "match" } else { "matches" };
+            format!(" ({} {})", option_count, match_word)
+        } else {
+            format!(" ({})", option_count)
+        };
+
+        job.append(
+            &suffix,
+            0.0,
+            TextFormat {
+                font_id: FontId::default(),
+                color: default_color,
+                ..Default::default()
+            },
+        );
+
+        job
+    }
+
+    /// Build a LayoutJob for an option with highlighting.
+    fn build_option_job(
+        option_text: &str,
+        match_indices: &[usize],
+        default_color: egui::Color32,
+    ) -> egui::text::LayoutJob {
+        use egui::FontId;
+        use egui::text::{LayoutJob, TextFormat};
+
+        let mut job = LayoutJob::default();
+
+        // Add bullet prefix
+        job.append(
+            "    • ",
+            0.0,
+            TextFormat {
+                font_id: FontId::default(),
+                color: default_color,
+                ..Default::default()
+            },
+        );
+
+        // Add highlighted option text
+        let text_job = Self::highlighted_text(option_text, match_indices, default_color);
+        for section in text_job.sections {
+            job.append(
+                &text_job.text[section.byte_range.clone()],
+                0.0,
+                section.format,
+            );
+        }
+
+        job
     }
 
     /// Create a LayoutJob that highlights matched characters in green.
@@ -374,143 +557,6 @@ impl SidebarPanel {
         }
 
         job
-    }
-
-    /// Render search results using the workspace search.
-    fn render_search_results(ui: &mut egui::Ui, result: promptgen_core::SearchResult) {
-        use promptgen_core::SearchResult;
-
-        let default_color = ui.visuals().text_color();
-
-        match result {
-            SearchResult::Variables(variables) => {
-                if variables.is_empty() {
-                    ui.label("No matching variables");
-                    return;
-                }
-
-                for variable in variables {
-                    // Create highlighted header with match indices
-                    let prefix = "@";
-                    let suffix = format!(" ({})", variable.options.len());
-
-                    let header_job = {
-                        use egui::FontId;
-                        use egui::text::{LayoutJob, TextFormat};
-
-                        let mut job = LayoutJob::default();
-
-                        // Add prefix "@"
-                        job.append(
-                            prefix,
-                            0.0,
-                            TextFormat {
-                                font_id: FontId::default(),
-                                color: default_color,
-                                ..Default::default()
-                            },
-                        );
-
-                        // Add highlighted variable name
-                        let name_job = Self::highlighted_text(
-                            &variable.variable_name,
-                            &variable.match_indices,
-                            default_color,
-                        );
-                        for section in name_job.sections {
-                            job.append(
-                                &name_job.text[section.byte_range.clone()],
-                                0.0,
-                                section.format,
-                            );
-                        }
-
-                        // Add suffix with count
-                        job.append(
-                            &suffix,
-                            0.0,
-                            TextFormat {
-                                font_id: FontId::default(),
-                                color: default_color,
-                                ..Default::default()
-                            },
-                        );
-
-                        job
-                    };
-
-                    // Auto-expand when searching
-                    egui::CollapsingHeader::new(header_job)
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            for option in &variable.options {
-                                ui.label(format!("  • {}", option));
-                            }
-                        });
-                }
-            }
-            SearchResult::Options(option_results) => {
-                if option_results.is_empty() {
-                    ui.label("No matching options");
-                    return;
-                }
-
-                for result in option_results {
-                    let match_count = result.matches.len();
-                    let header_text = format!(
-                        "@{} ({} match{})",
-                        result.variable_name,
-                        match_count,
-                        if match_count == 1 { "" } else { "es" }
-                    );
-
-                    // Auto-expand when searching options
-                    egui::CollapsingHeader::new(&header_text)
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            for opt_match in &result.matches {
-                                // Create highlighted option text
-                                let bullet = "  • ";
-                                let option_job = {
-                                    use egui::FontId;
-                                    use egui::text::{LayoutJob, TextFormat};
-
-                                    let mut job = LayoutJob::default();
-
-                                    // Add bullet prefix
-                                    job.append(
-                                        bullet,
-                                        0.0,
-                                        TextFormat {
-                                            font_id: FontId::default(),
-                                            color: default_color,
-                                            ..Default::default()
-                                        },
-                                    );
-
-                                    // Add highlighted option text
-                                    let text_job = Self::highlighted_text(
-                                        &opt_match.text,
-                                        &opt_match.match_indices,
-                                        default_color,
-                                    );
-                                    for section in text_job.sections {
-                                        job.append(
-                                            &text_job.text[section.byte_range.clone()],
-                                            0.0,
-                                            section.format,
-                                        );
-                                    }
-
-                                    job
-                                };
-
-                                ui.label(option_job);
-                            }
-                        });
-                }
-            }
-        }
     }
 
     /// Render the slot picker overlay for selecting options for a pick slot.
