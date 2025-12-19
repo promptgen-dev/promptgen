@@ -6,7 +6,10 @@ use crate::components::autocomplete::{
 };
 use crate::components::focusable_frame::FocusableFrame;
 use crate::components::template_editor::{TemplateEditor, TemplateEditorConfig};
-use crate::state::AppState;
+use crate::state::{AppState, AutocompleteMode};
+
+/// The editor ID for the main template editor
+const MAIN_EDITOR_ID: &str = "main_editor";
 
 /// Editor panel for editing prompt templates.
 pub struct EditorPanel;
@@ -18,10 +21,10 @@ impl EditorPanel {
         ui.separator();
 
         // Take pending cursor position (will be cleared after use)
-        let cursor_position = state.pending_cursor_position.take();
+        let cursor_position = state.take_pending_cursor_position(MAIN_EDITOR_ID);
 
         let config = TemplateEditorConfig {
-            id: "main_editor".to_string(),
+            id: MAIN_EDITOR_ID.to_string(),
             min_lines: 5,
             hint_text: Some(
                 "Enter your prompt template here...\n\n\
@@ -39,16 +42,17 @@ impl EditorPanel {
         // IMPORTANT: Handle autocomplete keyboard BEFORE the text editor processes input
         // This prevents Enter/Tab/Arrow keys from being handled by the text editor
         let mut autocomplete_selection: Option<String> = None;
-        if state.autocomplete.active {
-            let completions = get_completions(&state.workspace, state);
+        if state.is_autocomplete_active(MAIN_EDITOR_ID) {
+            let completions = get_completions(&state.workspace, state, MAIN_EDITOR_ID);
             if !completions.is_empty() {
-                autocomplete_selection = handle_autocomplete_keyboard(ui, state, &completions);
+                autocomplete_selection =
+                    handle_autocomplete_keyboard(ui, state, MAIN_EDITOR_ID, &completions);
             }
         }
 
         // If we got a selection from keyboard, apply it before rendering
         if let Some(completion_text) = autocomplete_selection {
-            Self::apply_completion(state, &completion_text);
+            Self::apply_completion(state, MAIN_EDITOR_ID, &completion_text);
         }
 
         let frame_response = FocusableFrame::new(is_focused).show(ui, |ui| {
@@ -68,20 +72,22 @@ impl EditorPanel {
         let cursor_pos = result.cursor_position.unwrap_or(state.editor_content.len());
 
         // Handle autocomplete activation/update based on cursor position
-        if !state.autocomplete.active {
+        if !state.is_autocomplete_active(MAIN_EDITOR_ID) {
             // Check if we're in an autocomplete context (either just typed @ or cursor is after @)
             if let Some(trigger_pos) = check_autocomplete_trigger(&state.editor_content, cursor_pos)
                 .or_else(|| find_autocomplete_context(&state.editor_content, cursor_pos))
             {
-                state.activate_autocomplete(trigger_pos);
+                state.activate_autocomplete(MAIN_EDITOR_ID, trigger_pos);
+                // Deactivate autocomplete in other editors
+                state.deactivate_autocomplete_except(MAIN_EDITOR_ID);
                 // Update the query immediately
                 let content_clone = state.editor_content.clone();
-                state.update_autocomplete_query(&content_clone, cursor_pos);
+                state.update_autocomplete_query(MAIN_EDITOR_ID, &content_clone, cursor_pos);
             }
         } else {
             // Autocomplete is active, update the query with actual cursor position
             let content_clone = state.editor_content.clone();
-            state.update_autocomplete_query(&content_clone, cursor_pos);
+            state.update_autocomplete_query(MAIN_EDITOR_ID, &content_clone, cursor_pos);
         }
 
         // Track focus - either from TextEdit gaining focus or clicking anywhere in frame
@@ -90,23 +96,23 @@ impl EditorPanel {
         }
 
         // Deactivate autocomplete if editor loses focus
-        if !result.response.has_focus() && state.autocomplete.active {
-            state.deactivate_autocomplete();
+        if !result.response.has_focus() && state.is_autocomplete_active(MAIN_EDITOR_ID) {
+            state.deactivate_autocomplete(MAIN_EDITOR_ID);
         }
 
         // Show autocomplete popup if active (visual only, keyboard already handled above)
-        if state.autocomplete.active {
-            let completions = get_completions(&state.workspace, state);
+        if state.is_autocomplete_active(MAIN_EDITOR_ID) {
+            let completions = get_completions(&state.workspace, state, MAIN_EDITOR_ID);
 
             if completions.is_empty() {
                 // No completions, deactivate
-                state.deactivate_autocomplete();
+                state.deactivate_autocomplete(MAIN_EDITOR_ID);
             } else {
                 // Show popup and handle mouse clicks
                 if let Some(completion_text) =
-                    AutocompletePopup::show(ui, state, &result.response, &completions)
+                    AutocompletePopup::show(ui, state, MAIN_EDITOR_ID, &result.response, &completions)
                 {
-                    Self::apply_completion(state, &completion_text);
+                    Self::apply_completion(state, MAIN_EDITOR_ID, &completion_text);
                 }
             }
         }
@@ -116,17 +122,19 @@ impl EditorPanel {
     }
 
     /// Apply a completion to the editor content
-    fn apply_completion(state: &mut AppState, completion_text: &str) {
-        use crate::state::AutocompleteMode;
+    fn apply_completion(state: &mut AppState, editor_id: &str, completion_text: &str) {
+        let Some(autocomplete) = state.get_autocomplete(editor_id) else {
+            return;
+        };
 
         // Replace from trigger position to end of the autocomplete query
-        let trigger_pos = state.autocomplete.trigger_position;
-        let query_len = state.autocomplete.query.len();
+        let trigger_pos = autocomplete.trigger_position;
+        let query_len = autocomplete.query.len();
 
         // Calculate where the @query ends based on mode:
         // - Variables mode: @{query} -> trigger_pos + 1 + query_len
         // - Options mode: @{variable_name}/{query} -> trigger_pos + 1 + var_len + 1 + query_len
-        let query_end = match &state.autocomplete.mode {
+        let query_end = match &autocomplete.mode {
             Some(AutocompleteMode::Options { variable_name }) => {
                 // @variable_name/query
                 trigger_pos + 1 + variable_name.len() + 1 + query_len
@@ -149,10 +157,10 @@ impl EditorPanel {
 
         // Set cursor position to end of inserted text
         let new_cursor_pos = trigger_pos + completion_text.len();
-        state.pending_cursor_position = Some(new_cursor_pos);
+        state.set_pending_cursor_position(editor_id, new_cursor_pos);
 
         // Deactivate autocomplete now that we've used the state
-        state.deactivate_autocomplete();
+        state.deactivate_autocomplete(editor_id);
 
         // Update parse result after insertion
         state.parse_result = Some(state.workspace.parse_template(&state.editor_content));

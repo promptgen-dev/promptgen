@@ -133,11 +133,11 @@ pub struct AppState {
     pub variable_editor_dirty: bool,
     pub confirm_dialog: Option<ConfirmDialog>,
 
-    // Autocomplete State
-    pub autocomplete: AutocompleteState,
+    // Autocomplete State (per-editor, keyed by editor ID)
+    pub autocomplete_states: HashMap<String, AutocompleteState>,
 
-    // Pending cursor position (set after autocomplete, applied on next render)
-    pub pending_cursor_position: Option<usize>,
+    // Pending cursor positions (per-editor, keyed by editor ID)
+    pub pending_cursor_positions: HashMap<String, usize>,
 }
 
 impl Default for AppState {
@@ -166,8 +166,8 @@ impl Default for AppState {
             variable_editor_original_name: None,
             variable_editor_dirty: false,
             confirm_dialog: None,
-            autocomplete: AutocompleteState::default(),
-            pending_cursor_position: None,
+            autocomplete_states: HashMap::new(),
+            pending_cursor_positions: HashMap::new(),
         }
     }
 }
@@ -634,39 +634,81 @@ impl AppState {
         self.confirm_dialog = None;
     }
 
-    // ==================== Autocomplete Methods ====================
+    // ==================== Autocomplete Methods (per-editor) ====================
 
-    /// Activate autocomplete with the given trigger position
-    pub fn activate_autocomplete(&mut self, trigger_position: usize) {
-        self.autocomplete.active = true;
-        self.autocomplete.trigger_position = trigger_position;
-        self.autocomplete.query.clear();
-        self.autocomplete.mode = Some(AutocompleteMode::Variables);
-        self.autocomplete.selected_index = 0;
+    /// Get the autocomplete state for a specific editor
+    pub fn get_autocomplete(&self, editor_id: &str) -> Option<&AutocompleteState> {
+        self.autocomplete_states.get(editor_id)
     }
 
-    /// Deactivate autocomplete
-    pub fn deactivate_autocomplete(&mut self) {
-        self.autocomplete.active = false;
-        self.autocomplete.query.clear();
-        self.autocomplete.mode = None;
-        self.autocomplete.selected_index = 0;
-        self.autocomplete.trigger_position = 0;
-        self.autocomplete.editor_response_id = None;
+    /// Get mutable autocomplete state for a specific editor, creating if needed
+    pub fn get_autocomplete_mut(&mut self, editor_id: &str) -> &mut AutocompleteState {
+        self.autocomplete_states
+            .entry(editor_id.to_string())
+            .or_default()
     }
 
-    /// Update autocomplete query based on cursor position and text content
-    /// Returns the extracted query after the @, or None if cursor is not in autocomplete context
-    pub fn update_autocomplete_query(&mut self, content: &str, cursor_pos: usize) {
-        if !self.autocomplete.active {
+    /// Check if autocomplete is active for a specific editor
+    pub fn is_autocomplete_active(&self, editor_id: &str) -> bool {
+        self.autocomplete_states
+            .get(editor_id)
+            .is_some_and(|s| s.active)
+    }
+
+    /// Activate autocomplete with the given trigger position for a specific editor
+    pub fn activate_autocomplete(&mut self, editor_id: &str, trigger_position: usize) {
+        let state = self.get_autocomplete_mut(editor_id);
+        state.active = true;
+        state.trigger_position = trigger_position;
+        state.query.clear();
+        state.mode = Some(AutocompleteMode::Variables);
+        state.selected_index = 0;
+    }
+
+    /// Deactivate autocomplete for a specific editor
+    pub fn deactivate_autocomplete(&mut self, editor_id: &str) {
+        if let Some(state) = self.autocomplete_states.get_mut(editor_id) {
+            state.active = false;
+            state.query.clear();
+            state.mode = None;
+            state.selected_index = 0;
+            state.trigger_position = 0;
+            state.editor_response_id = None;
+        }
+    }
+
+    /// Deactivate autocomplete for all editors except the specified one
+    pub fn deactivate_autocomplete_except(&mut self, editor_id: &str) {
+        for (id, state) in &mut self.autocomplete_states {
+            if id != editor_id {
+                state.active = false;
+                state.query.clear();
+                state.mode = None;
+                state.selected_index = 0;
+                state.trigger_position = 0;
+                state.editor_response_id = None;
+            }
+        }
+    }
+
+    /// Update autocomplete query based on cursor position and text content for a specific editor
+    pub fn update_autocomplete_query(&mut self, editor_id: &str, content: &str, cursor_pos: usize) {
+        let Some(state) = self.autocomplete_states.get_mut(editor_id) else {
+            return;
+        };
+        if !state.active {
             return;
         }
 
         // Extract text from trigger position to cursor
-        let trigger = self.autocomplete.trigger_position;
+        let trigger = state.trigger_position;
         if cursor_pos <= trigger || cursor_pos > content.len() {
             // Cursor moved before the @, deactivate
-            self.deactivate_autocomplete();
+            state.active = false;
+            state.query.clear();
+            state.mode = None;
+            state.selected_index = 0;
+            state.trigger_position = 0;
             return;
         }
 
@@ -675,7 +717,11 @@ impl AppState {
 
         // Check if query contains whitespace or invalid chars (cancel autocomplete)
         if query_text.contains(char::is_whitespace) {
-            self.deactivate_autocomplete();
+            state.active = false;
+            state.query.clear();
+            state.mode = None;
+            state.selected_index = 0;
+            state.trigger_position = 0;
             return;
         }
 
@@ -687,77 +733,62 @@ impl AppState {
 
             // Only reset selection if the query actually changed
             let new_query = option_part.to_string();
-            let query_changed = self.autocomplete.query != new_query;
+            let query_changed = state.query != new_query;
 
-            self.autocomplete.mode = Some(AutocompleteMode::Options {
+            state.mode = Some(AutocompleteMode::Options {
                 variable_name: variable_part.to_string(),
             });
-            self.autocomplete.query = new_query;
+            state.query = new_query;
 
             if query_changed {
-                self.autocomplete.selected_index = 0;
+                state.selected_index = 0;
             }
         } else {
             // @Variable syntax - stay in variables mode
             let new_query = query_text.to_string();
-            let query_changed = self.autocomplete.query != new_query;
+            let query_changed = state.query != new_query;
 
-            self.autocomplete.mode = Some(AutocompleteMode::Variables);
-            self.autocomplete.query = new_query;
+            state.mode = Some(AutocompleteMode::Variables);
+            state.query = new_query;
 
             if query_changed {
-                self.autocomplete.selected_index = 0;
+                state.selected_index = 0;
             }
         }
     }
 
-    /// Move autocomplete selection up
-    pub fn autocomplete_move_up(&mut self, total_items: usize) {
+    /// Move autocomplete selection up for a specific editor
+    pub fn autocomplete_move_up(&mut self, editor_id: &str, total_items: usize) {
         if total_items == 0 {
             return;
         }
-        if self.autocomplete.selected_index == 0 {
-            self.autocomplete.selected_index = total_items - 1;
-        } else {
-            self.autocomplete.selected_index -= 1;
+        if let Some(state) = self.autocomplete_states.get_mut(editor_id) {
+            if state.selected_index == 0 {
+                state.selected_index = total_items - 1;
+            } else {
+                state.selected_index -= 1;
+            }
         }
     }
 
-    /// Move autocomplete selection down
-    pub fn autocomplete_move_down(&mut self, total_items: usize) {
+    /// Move autocomplete selection down for a specific editor
+    pub fn autocomplete_move_down(&mut self, editor_id: &str, total_items: usize) {
         if total_items == 0 {
             return;
         }
-        self.autocomplete.selected_index = (self.autocomplete.selected_index + 1) % total_items;
-    }
-
-    /// Get the text to insert when a completion is selected
-    /// For variables: inserts @VariableName
-    /// For options: inserts the option text
-    pub fn get_completion_insert_text(&self, selected_text: &str) -> String {
-        match &self.autocomplete.mode {
-            Some(AutocompleteMode::Variables) => {
-                // Check if variable name needs quotes
-                let needs_quotes =
-                    selected_text.contains(' ') || selected_text.contains(':');
-                if needs_quotes {
-                    format!("@\"{}\"", selected_text)
-                } else {
-                    format!("@{}", selected_text)
-                }
-            }
-            Some(AutocompleteMode::Options { .. }) => {
-                // For options, just insert the option text itself
-                selected_text.to_string()
-            }
-            None => selected_text.to_string(),
+        if let Some(state) = self.autocomplete_states.get_mut(editor_id) {
+            state.selected_index = (state.selected_index + 1) % total_items;
         }
     }
 
-    /// Get the byte range in the editor content that should be replaced with the completion
-    /// Returns (start, end) byte positions
-    pub fn get_completion_replace_range(&self) -> (usize, usize) {
-        // Replace from @ trigger position to current position (will be determined by cursor)
-        (self.autocomplete.trigger_position, self.autocomplete.trigger_position)
+    /// Set pending cursor position for a specific editor
+    pub fn set_pending_cursor_position(&mut self, editor_id: &str, position: usize) {
+        self.pending_cursor_positions
+            .insert(editor_id.to_string(), position);
+    }
+
+    /// Take pending cursor position for a specific editor (returns and clears it)
+    pub fn take_pending_cursor_position(&mut self, editor_id: &str) -> Option<usize> {
+        self.pending_cursor_positions.remove(editor_id)
     }
 }

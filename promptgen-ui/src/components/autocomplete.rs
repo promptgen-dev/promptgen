@@ -56,11 +56,14 @@ impl CompletionItem {
     }
 }
 
-/// Get completions based on current autocomplete state
-pub fn get_completions(workspace: &Workspace, state: &AppState) -> Vec<CompletionItem> {
-    let query = &state.autocomplete.query;
+/// Get completions based on current autocomplete state for a specific editor
+pub fn get_completions(workspace: &Workspace, state: &AppState, editor_id: &str) -> Vec<CompletionItem> {
+    let Some(autocomplete) = state.get_autocomplete(editor_id) else {
+        return Vec::new();
+    };
+    let query = &autocomplete.query;
 
-    match &state.autocomplete.mode {
+    match &autocomplete.mode {
         Some(AutocompleteMode::Variables) => {
             // Search for variable names
             let results = workspace.search_variables(query);
@@ -112,31 +115,42 @@ impl AutocompletePopup {
     pub fn show(
         ui: &mut egui::Ui,
         state: &mut AppState,
+        editor_id: &str,
         editor_response: &egui::Response,
         completions: &[CompletionItem],
     ) -> Option<String> {
-        if !state.autocomplete.active || completions.is_empty() {
+        if !state.is_autocomplete_active(editor_id) || completions.is_empty() {
             return None;
         }
 
+        let selected_index = state
+            .get_autocomplete(editor_id)
+            .map(|s| s.selected_index)
+            .unwrap_or(0);
+
         let mut selected_completion: Option<String> = None;
+        let editor_id_owned = editor_id.to_string();
 
         // NOTE: Keyboard handling is done in handle_autocomplete_keyboard() which must be
         // called BEFORE the TextEdit widget. This function only handles mouse clicks.
 
-        // Show popup below the editor
-        let popup_id = ui.make_persistent_id("autocomplete_popup");
+        // Show popup below the editor (unique ID per editor)
+        let popup_id = ui.make_persistent_id(format!("autocomplete_popup_{}", editor_id));
+
+        // IMPORTANT: Open the popup BEFORE calling popup_below_widget, otherwise
+        // popup_below_widget will check if it's open and skip rendering since it wasn't open yet.
+        ui.memory_mut(|mem| mem.open_popup(popup_id));
 
         egui::popup_below_widget(ui, popup_id, editor_response, egui::PopupCloseBehavior::CloseOnClick, |ui| {
             ui.set_min_width(300.0);
 
-            let scroll_id = ui.make_persistent_id("autocomplete_scroll");
+            let scroll_id = ui.make_persistent_id(format!("autocomplete_scroll_{}", editor_id_owned));
             egui::ScrollArea::vertical()
                 .id_salt(scroll_id)
                 .max_height(250.0)
                 .show(ui, |ui| {
                     for (idx, item) in completions.iter().enumerate() {
-                        let is_selected = idx == state.autocomplete.selected_index;
+                        let is_selected = idx == selected_index;
 
                         // Build the label with highlighted characters
                         let label = match item {
@@ -225,10 +239,9 @@ impl AutocompletePopup {
 
                         let response = ui.selectable_label(is_selected, label);
 
-                        // Handle click
+                        // Handle click - we'll return the completion text, caller handles deactivation
                         if response.clicked() {
                             selected_completion = Some(item.insert_text());
-                            state.deactivate_autocomplete();
                         }
 
                         // Scroll to selected item
@@ -238,9 +251,6 @@ impl AutocompletePopup {
                     }
                 });
         });
-
-        // Keep the popup open
-        ui.memory_mut(|mem| mem.open_popup(popup_id));
 
         selected_completion
     }
@@ -252,9 +262,10 @@ impl AutocompletePopup {
 pub fn handle_autocomplete_keyboard(
     ui: &mut egui::Ui,
     state: &mut AppState,
+    editor_id: &str,
     completions: &[CompletionItem],
 ) -> Option<String> {
-    if !state.autocomplete.active || completions.is_empty() {
+    if !state.is_autocomplete_active(editor_id) || completions.is_empty() {
         return None;
     }
 
@@ -269,24 +280,28 @@ pub fn handle_autocomplete_keyboard(
     });
 
     if escape {
-        state.deactivate_autocomplete();
+        state.deactivate_autocomplete(editor_id);
         return None;
     }
 
     if up {
-        state.autocomplete_move_up(completions.len());
+        state.autocomplete_move_up(editor_id, completions.len());
     }
     if down {
-        state.autocomplete_move_down(completions.len());
+        state.autocomplete_move_down(editor_id, completions.len());
     }
     if enter || tab {
-        if let Some(item) = completions.get(state.autocomplete.selected_index) {
+        let selected_index = state
+            .get_autocomplete(editor_id)
+            .map(|s| s.selected_index)
+            .unwrap_or(0);
+        if let Some(item) = completions.get(selected_index) {
             let text = item.insert_text();
             // Don't deactivate here - apply_completion needs the autocomplete state
             // to calculate the correct replacement range
             return Some(text);
         }
-        state.deactivate_autocomplete();
+        state.deactivate_autocomplete(editor_id);
     }
 
     None

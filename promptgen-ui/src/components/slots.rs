@@ -4,9 +4,13 @@ use egui::{Align, Id, Label, Layout, UiBuilder, Vec2};
 use egui_dnd::dnd;
 use promptgen_core::{Cardinality, Node, ParseResult, SlotDefKind};
 
+use crate::components::autocomplete::{
+    check_autocomplete_trigger, find_autocomplete_context, get_completions,
+    handle_autocomplete_keyboard, AutocompletePopup,
+};
 use crate::components::focusable_frame::FocusableFrame;
 use crate::components::template_editor::{TemplateEditor, TemplateEditorConfig};
-use crate::state::AppState;
+use crate::state::{AppState, AutocompleteMode};
 use crate::theme::syntax;
 
 /// Measure text size in the UI (based on hello_egui_utils::measure_text)
@@ -74,6 +78,25 @@ impl SlotPanel {
     /// Render a textarea slot.
     fn show_textarea_slot(ui: &mut egui::Ui, state: &mut AppState, label: &str, is_focused: bool) {
         let label_owned = label.to_string();
+        let editor_id = format!("slot_editor_{}", label_owned);
+
+        // Take pending cursor position (will be cleared after use)
+        let cursor_position = state.take_pending_cursor_position(&editor_id);
+
+        // IMPORTANT: Handle autocomplete keyboard BEFORE the text editor processes input
+        let mut autocomplete_selection: Option<String> = None;
+        if state.is_autocomplete_active(&editor_id) {
+            let completions = get_completions(&state.workspace, state, &editor_id);
+            if !completions.is_empty() {
+                autocomplete_selection =
+                    handle_autocomplete_keyboard(ui, state, &editor_id, &completions);
+            }
+        }
+
+        // If we got a selection from keyboard, apply it before rendering
+        if let Some(completion_text) = autocomplete_selection.clone() {
+            Self::apply_slot_completion(state, &label_owned, &editor_id, &completion_text);
+        }
 
         let frame_response = FocusableFrame::new(is_focused).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -88,19 +111,58 @@ impl SlotPanel {
             });
 
             let config = TemplateEditorConfig {
-                id: format!("slot_editor_{}", label_owned),
+                id: editor_id.clone(),
                 min_lines: 3,
                 hint_text: Some("Enter text...".to_string()),
                 show_line_numbers: true,
-                cursor_position: None,
+                cursor_position,
             };
 
             let mut value = state.get_textarea_value(&label_owned);
             let result = TemplateEditor::show(ui, &mut value, &state.workspace, &config);
 
             if result.response.changed() {
-                state.set_textarea_value(&label_owned, value);
+                state.set_textarea_value(&label_owned, value.clone());
                 state.request_render();
+            }
+
+            // Get cursor position from the editor
+            let cursor_pos = result.cursor_position.unwrap_or(value.len());
+
+            // Handle autocomplete activation/update based on cursor position
+            if !state.is_autocomplete_active(&editor_id) {
+                if let Some(trigger_pos) = check_autocomplete_trigger(&value, cursor_pos)
+                    .or_else(|| find_autocomplete_context(&value, cursor_pos))
+                {
+                    state.activate_autocomplete(&editor_id, trigger_pos);
+                    // Deactivate autocomplete in other editors
+                    state.deactivate_autocomplete_except(&editor_id);
+                    // Update the query immediately
+                    state.update_autocomplete_query(&editor_id, &value, cursor_pos);
+                }
+            } else {
+                // Autocomplete is active, update the query with actual cursor position
+                state.update_autocomplete_query(&editor_id, &value, cursor_pos);
+            }
+
+            // Deactivate autocomplete if editor loses focus
+            if !result.response.has_focus() && state.is_autocomplete_active(&editor_id) {
+                state.deactivate_autocomplete(&editor_id);
+            }
+
+            // Show autocomplete popup if active
+            if state.is_autocomplete_active(&editor_id) {
+                let completions = get_completions(&state.workspace, state, &editor_id);
+
+                if completions.is_empty() {
+                    state.deactivate_autocomplete(&editor_id);
+                } else if let Some(completion_text) =
+                    AutocompletePopup::show(ui, state, &editor_id, &result.response, &completions)
+                {
+                    // Store for after frame_response - can't mutate state here
+                    // We'll handle this after the frame
+                    Self::apply_slot_completion(state, &label_owned, &editor_id, &completion_text);
+                }
             }
 
             // Show parse errors below the editor
@@ -127,6 +189,53 @@ impl SlotPanel {
         if (result.response.has_focus() || frame_response.clicked) && !is_focused {
             state.focus_textarea_slot(label);
         }
+    }
+
+    /// Apply a completion to a slot's textarea content
+    fn apply_slot_completion(
+        state: &mut AppState,
+        slot_label: &str,
+        editor_id: &str,
+        completion_text: &str,
+    ) {
+        let Some(autocomplete) = state.get_autocomplete(editor_id) else {
+            return;
+        };
+
+        let trigger_pos = autocomplete.trigger_position;
+        let query_len = autocomplete.query.len();
+
+        let query_end = match &autocomplete.mode {
+            Some(AutocompleteMode::Options { variable_name }) => {
+                trigger_pos + 1 + variable_name.len() + 1 + query_len
+            }
+            _ => trigger_pos + 1 + query_len,
+        };
+
+        // Get the current slot value
+        let current_value = state.get_textarea_value(slot_label);
+
+        // Build the new content
+        let before = current_value[..trigger_pos].to_string();
+        let after = if query_end <= current_value.len() {
+            current_value[query_end..].to_string()
+        } else {
+            String::new()
+        };
+
+        let new_value = format!("{}{}{}", before, completion_text, after);
+
+        // Update the slot value
+        state.set_textarea_value(slot_label, new_value);
+
+        // Set cursor position to end of inserted text
+        let new_cursor_pos = trigger_pos + completion_text.len();
+        state.set_pending_cursor_position(editor_id, new_cursor_pos);
+
+        // Deactivate autocomplete
+        state.deactivate_autocomplete(editor_id);
+
+        state.request_render();
     }
 
     /// Render a pick slot.
