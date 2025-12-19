@@ -382,19 +382,38 @@ impl SidebarPanel {
 
             // Body content (only shown when expanded)
             collapsing_state.show_body_unindented(ui, |ui| {
-                if var_display.is_option_search && !var_display.option_matches.is_empty() {
-                    // Show options with highlighting
-                    for (option_text, match_indices) in &var_display.option_matches {
-                        let option_job =
-                            Self::build_option_job(option_text, match_indices, default_color);
-                        ui.label(option_job);
+                // Use justified layout to make buttons fill full width (like slot picker)
+                ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                    if var_display.is_option_search && !var_display.option_matches.is_empty() {
+                        // Show options with highlighting as clickable buttons
+                        for (option_text, match_indices) in &var_display.option_matches {
+                            let option_job =
+                                Self::build_option_button_job(option_text, match_indices, default_color);
+                            let response = ui.add(
+                                egui::Button::new(option_job)
+                                    .fill(egui::Color32::TRANSPARENT)
+                                    .wrap(),
+                            );
+                            if response.clicked() {
+                                ui.ctx().copy_text(option_text.clone());
+                            }
+                            response.on_hover_text("Click to copy");
+                        }
+                    } else {
+                        // Show plain options as clickable buttons
+                        for option in &var_display.options {
+                            let response = ui.add(
+                                egui::Button::new(format!("• {}", option))
+                                    .fill(egui::Color32::TRANSPARENT)
+                                    .wrap(),
+                            );
+                            if response.clicked() {
+                                ui.ctx().copy_text(option.clone());
+                            }
+                            response.on_hover_text("Click to copy");
+                        }
                     }
-                } else {
-                    // Show plain options
-                    for option in &var_display.options {
-                        ui.label(format!("    • {}", option));
-                    }
-                }
+                });
             });
         }
 
@@ -477,8 +496,8 @@ impl SidebarPanel {
         job
     }
 
-    /// Build a LayoutJob for an option with highlighting.
-    fn build_option_job(
+    /// Build a LayoutJob for an option button with highlighting.
+    fn build_option_button_job(
         option_text: &str,
         match_indices: &[usize],
         default_color: egui::Color32,
@@ -490,7 +509,7 @@ impl SidebarPanel {
 
         // Add bullet prefix
         job.append(
-            "    • ",
+            "• ",
             0.0,
             TextFormat {
                 font_id: FontId::default(),
@@ -626,7 +645,7 @@ impl SidebarPanel {
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                     for option in &options {
                         let is_selected = selected_values.contains(option);
-                        let display_text = option.clone();
+                        let display_text = format!("• {}", option);
 
                         // Full-width selectable button - transparent when not selected, highlight when selected
                         let fill = if is_selected {
