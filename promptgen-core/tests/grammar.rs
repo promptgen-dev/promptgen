@@ -1,4 +1,4 @@
-//! Grammar and syntax tests for the template language.
+//! Grammar and syntax tests for the prompt language.
 //!
 //! Tests the new grammar syntax:
 //! - Library refs: `@Name` or `@"Name with spaces"` or `@"Lib:Name"`
@@ -243,7 +243,7 @@ variables:
 
 #[test]
 fn nested_inline_options_direct() {
-    // Test {a|b|{c|d}} - direct nested inline options in template
+    // Test {a|b|{c|d}} - direct nested inline options in prompt
     let lib = lib(r#"
 variables:
   - name: Placeholder
@@ -310,7 +310,7 @@ variables:
 // ============================================================================
 
 #[test]
-fn complex_template_with_all_features() {
+fn complex_prompt_with_all_features() {
     let lib = lib(r#"
 variables:
   - name: Hair
@@ -339,7 +339,7 @@ variables:
 // ============================================================================
 
 #[test]
-fn empty_template_renders_empty() {
+fn empty_prompt_renders_empty() {
     let lib = empty_lib();
     let result = eval(&lib, "", None);
 

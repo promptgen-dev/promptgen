@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::components::{EditorPanel, VariableEditorPanel, PreviewPanel, SidebarPanel, SlotPanel};
+use crate::components::{EditorPanel, PreviewPanel, SidebarPanel, SlotPanel, VariableEditorPanel};
 use crate::state::{AppState, EditorMode};
 use crate::theme;
 
@@ -11,8 +11,8 @@ use crate::storage::{NativeStorage, StorageBackend};
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct PromptGenApp {
-    /// Persisted workspace path
-    workspace_path: Option<PathBuf>,
+    /// Persisted library file path
+    library_file_path: Option<PathBuf>,
 
     #[serde(skip)]
     state: AppState,
@@ -38,69 +38,48 @@ impl PromptGenApp {
             Self::default()
         };
 
-        // If we have a saved workspace path, try to load it
+        // If we have a saved library path, try to load it
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(path) = &app.workspace_path {
-            app.storage.set_workspace_path(path.clone());
-            app.load_libraries();
+        if let Some(path) = &app.library_file_path {
+            app.storage.set_library_path(path.clone());
+            app.load_library();
         }
 
         app
     }
 
-    /// Open a folder picker dialog and load the selected workspace
+    /// Open a file picker dialog and load the selected library
     #[cfg(not(target_arch = "wasm32"))]
-    fn open_workspace_dialog(&mut self) {
+    fn open_library_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .set_title("Select Workspace Folder")
-            .pick_folder()
+            .set_title("Open Library File")
+            .add_filter("YAML files", &["yaml", "yml"])
+            .pick_file()
         {
-            self.set_workspace_path(path);
+            self.set_library_path(path);
         }
     }
 
-    /// Set the workspace path and load libraries
+    /// Set the library path and load it
     #[cfg(not(target_arch = "wasm32"))]
-    fn set_workspace_path(&mut self, path: PathBuf) {
-        self.workspace_path = Some(path.clone());
-        self.storage.set_workspace_path(path);
-        self.load_libraries();
+    fn set_library_path(&mut self, path: PathBuf) {
+        self.library_file_path = Some(path.clone());
+        self.storage.set_library_path(path);
+        self.load_library();
     }
 
-    /// Load all libraries from the current workspace
+    /// Load the library from the current file path
     #[cfg(not(target_arch = "wasm32"))]
-    fn load_libraries(&mut self) {
-        // First get library summaries to get paths
-        match self.storage.list_libraries() {
-            Ok(summaries) => {
-                // Store paths
-                self.state.library_paths.clear();
-                for summary in &summaries {
-                    self.state
-                        .library_paths
-                        .insert(summary.id.clone(), summary.path.clone());
-                }
+    fn load_library(&mut self) {
+        match self.storage.load_library() {
+            Ok((library, path)) => {
+                self.state.library = library;
+                self.state.library_path = Some(path);
             }
             Err(e) => {
-                log::error!("Failed to list libraries: {}", e);
-            }
-        }
-
-        // Then load all libraries
-        match self.storage.load_all_libraries() {
-            Ok(libraries) => {
-                self.state.libraries = libraries;
-                self.state.rebuild_workspace();
-
-                // Auto-select first library if none selected
-                if self.state.selected_library_id.is_none() && !self.state.libraries.is_empty() {
-                    self.state.selected_library_id = Some(self.state.libraries[0].id.clone());
-                }
-            }
-            Err(e) => {
-                log::error!("Failed to load libraries: {}", e);
-                self.state.libraries.clear();
-                self.state.rebuild_workspace();
+                log::error!("Failed to load library: {}", e);
+                self.state.library = promptgen_core::Library::default();
+                self.state.library_path = None;
             }
         }
     }
@@ -123,9 +102,9 @@ impl eframe::App for PromptGenApp {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     ui.menu_button("File", |ui| {
-                        if ui.button("Open Workspace...").clicked() {
+                        if ui.button("Open Library...").clicked() {
                             ui.close();
-                            self.open_workspace_dialog();
+                            self.open_library_dialog();
                         }
                         ui.separator();
                         if ui.button("Quit").clicked() {
@@ -145,11 +124,11 @@ impl eframe::App for PromptGenApp {
             .default_width(250.0)
             .width_range(180.0..=400.0)
             .show(ctx, |ui| {
-                let open_dialog = SidebarPanel::show(ui, &mut self.state, &self.workspace_path);
+                let open_dialog = SidebarPanel::show(ui, &mut self.state, &self.library_file_path);
 
                 #[cfg(not(target_arch = "wasm32"))]
                 if open_dialog {
-                    self.open_workspace_dialog();
+                    self.open_library_dialog();
                 }
 
                 #[cfg(target_arch = "wasm32")]
@@ -178,8 +157,8 @@ impl eframe::App for PromptGenApp {
                 .show(ui, |ui| {
                     // Choose which editor to show based on editor mode
                     match &self.state.editor_mode {
-                        EditorMode::Template => {
-                            // Template editor section
+                        EditorMode::Prompt => {
+                            // Prompt editor section
                             EditorPanel::show(ui, &mut self.state);
 
                             // Slots section (only show if there are slots)

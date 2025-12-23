@@ -1,4 +1,4 @@
-//! Slot panel component for editing template slots.
+//! Slot panel component for editing prompt slots.
 
 use egui::{Align, Id, Label, Layout, UiBuilder, Vec2};
 use egui_dnd::dnd;
@@ -8,7 +8,7 @@ use crate::components::autocomplete::{
     apply_completion, get_completions, handle_autocomplete_keyboard,
 };
 use crate::components::focusable_frame::FocusableFrame;
-use crate::components::template_editor::{TemplateEditor, TemplateEditorConfig};
+use crate::components::prompt_editor::{PromptEditor, PromptEditorConfig};
 use crate::state::AppState;
 use crate::theme::syntax;
 
@@ -25,7 +25,7 @@ fn measure_text(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) -> Vec2 {
     res.2.rect.size() + Vec2::new(0.1, 0.0)
 }
 
-/// Slot panel for editing template slot values.
+/// Slot panel for editing prompt slot values.
 pub struct SlotPanel;
 
 /// Check if a ParseResult contains any slot blocks (which are invalid in slot values).
@@ -48,7 +48,7 @@ impl SlotPanel {
 
         if definitions.is_empty() {
             ui.label(
-                egui::RichText::new("No slots in template")
+                egui::RichText::new("No slots in prompt")
                     .italics()
                     .color(egui::Color32::from_rgb(108, 112, 134)),
             );
@@ -63,7 +63,7 @@ impl SlotPanel {
             if matches!(def.kind, SlotDefKind::Textarea) {
                 let editor_id = format!("slot_editor_{}", def.label);
                 if state.is_autocomplete_active(&editor_id) {
-                    let completions = get_completions(&state.workspace, state, &editor_id);
+                    let completions = get_completions(&state.library, state, &editor_id);
                     if !completions.is_empty()
                         && let Some(completion_text) =
                             handle_autocomplete_keyboard(ui, state, &editor_id, &completions)
@@ -130,7 +130,7 @@ impl SlotPanel {
                 );
             });
 
-            let config = TemplateEditorConfig {
+            let config = PromptEditorConfig {
                 id: editor_id.clone(),
                 min_lines: 3,
                 hint_text: Some("Enter text...".to_string()),
@@ -139,7 +139,7 @@ impl SlotPanel {
 
             let original_value = state.get_textarea_value(&label_owned);
             let mut value = original_value.clone();
-            let result = TemplateEditor::show(ui, &mut value, state, &config);
+            let result = PromptEditor::show(ui, &mut value, state, &config);
 
             // Update if changed by user typing OR by autocomplete completion
             if value != original_value {
@@ -148,7 +148,7 @@ impl SlotPanel {
             }
 
             // Show parse errors below the editor
-            TemplateEditor::show_errors(ui, &result.parse_result);
+            PromptEditor::show_errors(ui, &result.parse_result);
 
             // Check for slot blocks in the parsed AST (slots cannot reference other slots)
             if let Some(nested_label) = find_slot_block_in_parse_result(&result.parse_result) {
@@ -306,55 +306,44 @@ impl SlotPanel {
 
                                     // Use the value string as a stable ID (combined with slot label for uniqueness)
                                     let item_id = Id::new((&label_owned, value));
-                                    item_iter.next(
-                                        ui,
-                                        item_id,
-                                        idx,
-                                        true,
-                                        |ui, item_handle| {
-                                            item_handle.ui_sized(
-                                                ui,
-                                                chip_size,
-                                                |ui, handle, _state| {
-                                                    // Chip with X button - entire chip is drag handle
-                                                    handle.ui_sized(ui, chip_size, |ui| {
-                                                        egui::Frame::NONE
-                                                            .inner_margin(egui::Margin {
-                                                                left: chip_padding as i8,
-                                                                right: chip_padding as i8,
-                                                                top: chip_vertical_padding as i8,
-                                                                bottom: chip_vertical_padding as i8,
-                                                            })
-                                                            .corner_radius(12.0)
-                                                            .fill(egui::Color32::from_rgb(
-                                                                69, 71, 90,
-                                                            )) // Catppuccin surface2
-                                                            .show(ui, |ui| {
-                                                                ui.horizontal(|ui| {
-                                                                    ui.spacing_mut().item_spacing.x =
-                                                                        chip_spacing;
-                                                                    // Truncate long labels, show single-line version
-                                                                    let label_response = ui.add(
-                                                                        Label::new(&display_value).truncate(),
-                                                                    );
-                                                                    // Show full original text on hover
-                                                                    label_response.on_hover_text(value);
-                                                                    if ui
-                                                                        .small_button("x")
-                                                                        .on_hover_text("Remove")
-                                                                        .clicked()
-                                                                    {
-                                                                        *to_remove.borrow_mut() =
-                                                                            Some(value.clone());
-                                                                        chip_removed.set(true);
-                                                                    }
-                                                                });
-                                                            });
+                                    item_iter.next(ui, item_id, idx, true, |ui, item_handle| {
+                                        item_handle.ui_sized(ui, chip_size, |ui, handle, _state| {
+                                            // Chip with X button - entire chip is drag handle
+                                            handle.ui_sized(ui, chip_size, |ui| {
+                                                egui::Frame::NONE
+                                                    .inner_margin(egui::Margin {
+                                                        left: chip_padding as i8,
+                                                        right: chip_padding as i8,
+                                                        top: chip_vertical_padding as i8,
+                                                        bottom: chip_vertical_padding as i8,
+                                                    })
+                                                    .corner_radius(12.0)
+                                                    .fill(egui::Color32::from_rgb(69, 71, 90)) // Catppuccin surface2
+                                                    .show(ui, |ui| {
+                                                        ui.horizontal(|ui| {
+                                                            ui.spacing_mut().item_spacing.x =
+                                                                chip_spacing;
+                                                            // Truncate long labels, show single-line version
+                                                            let label_response = ui.add(
+                                                                Label::new(&display_value)
+                                                                    .truncate(),
+                                                            );
+                                                            // Show full original text on hover
+                                                            label_response.on_hover_text(value);
+                                                            if ui
+                                                                .small_button("x")
+                                                                .on_hover_text("Remove")
+                                                                .clicked()
+                                                            {
+                                                                *to_remove.borrow_mut() =
+                                                                    Some(value.clone());
+                                                                chip_removed.set(true);
+                                                            }
+                                                        });
                                                     });
-                                                },
-                                            )
-                                        },
-                                    );
+                                            });
+                                        })
+                                    });
                                 });
                             });
                         });

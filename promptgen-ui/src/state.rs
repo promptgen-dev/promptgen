@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use promptgen_core::{
     Cardinality, EvalContext, Library, ParseResult, PickSource, RenderError, SlotDefKind,
-    SlotDefinition, Workspace, render,
+    SlotDefinition, render,
 };
 use serde::{Deserialize, Serialize};
 
@@ -10,14 +10,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SidebarViewMode {
     #[default]
-    Templates,
+    Prompts,
     Variables,
 }
 
 /// Sidebar mode - normal navigation vs slot picker overlay
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SidebarMode {
-    /// Normal mode showing templates/variables
+    /// Normal mode showing prompts/variables
     #[default]
     Normal,
     /// Slot picker overlay showing options for a pick slot
@@ -33,7 +33,7 @@ pub enum EditorFocus {
     /// No editor focused
     #[default]
     None,
-    /// Main template editor is focused
+    /// Main prompt editor is focused
     MainEditor,
     /// A textarea slot is focused
     TextareaSlot { label: String },
@@ -44,9 +44,9 @@ pub enum EditorFocus {
 /// What the central editor panel is currently showing
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum EditorMode {
-    /// Normal template editing mode
+    /// Normal prompt editing mode
     #[default]
-    Template,
+    Prompt,
     /// Editing an existing variable
     VariableEditor { variable_name: String },
     /// Creating a new variable
@@ -90,15 +90,13 @@ pub struct AutocompleteState {
 
 /// Main application state (not serialized - rebuilt on startup)
 pub struct AppState {
-    // Workspace
-    pub workspace: Workspace,
-    pub libraries: Vec<Library>,
-    pub library_paths: HashMap<String, std::path::PathBuf>, // library_id -> file_path
-    pub selected_library_id: Option<String>,
+    // Library
+    pub library: Library,
+    pub library_path: Option<std::path::PathBuf>,
 
     // Editor
     pub editor_content: String,
-    pub selected_template_id: Option<String>,
+    pub selected_prompt_id: Option<String>,
     pub parse_result: Option<ParseResult>,
 
     // Preview
@@ -133,12 +131,10 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            workspace: Workspace::new(),
-            libraries: Vec::new(),
-            library_paths: HashMap::new(),
-            selected_library_id: None,
+            library: Library::default(),
+            library_path: None,
             editor_content: String::new(),
-            selected_template_id: None,
+            selected_prompt_id: None,
             parse_result: None,
             preview_output: String::new(),
             preview_seed: None,
@@ -163,30 +159,14 @@ impl Default for AppState {
 }
 
 impl AppState {
-    /// Get the currently selected library, if any
-    pub fn selected_library(&self) -> Option<&Library> {
-        self.selected_library_id
-            .as_ref()
-            .and_then(|id| self.libraries.iter().find(|lib| lib.id == *id))
-    }
-
-    /// Rebuild the workspace from loaded libraries
-    pub fn rebuild_workspace(&mut self) {
-        let mut workspace = Workspace::new();
-        for lib in &self.libraries {
-            workspace = workspace.with_library(lib.clone());
-        }
-        self.workspace = workspace;
-    }
-
     /// Update parse result when editor content changes
     pub fn update_parse_result(&mut self) {
-        self.parse_result = Some(self.workspace.parse_template(&self.editor_content));
+        self.parse_result = Some(self.library.parse_prompt(&self.editor_content));
         // Update slot values map - add new slots, keep existing values
         if let Some(result) = &self.parse_result
             && let Some(ast) = &result.ast
         {
-            let current_slots = self.workspace.get_slots(ast);
+            let current_slots = self.library.get_slots(ast);
             // Remove slots that no longer exist
             self.slot_values
                 .retain(|name, _| current_slots.contains(name));
@@ -205,8 +185,8 @@ impl AppState {
         }
     }
 
-    /// Render the current template with the given seed
-    pub fn render_template(&mut self) -> Result<(), RenderError> {
+    /// Render the current prompt with the given seed
+    pub fn render_prompt(&mut self) -> Result<(), RenderError> {
         if let Some(result) = &self.parse_result
             && let Some(ast) = &result.ast
         {
@@ -219,7 +199,7 @@ impl AppState {
                     .unwrap_or(42)
             });
 
-            let mut ctx = EvalContext::with_seed(&self.workspace, seed);
+            let mut ctx = EvalContext::with_seed(&self.library, seed);
 
             // Set slot overrides (multi-value)
             for (name, values) in &self.slot_values {
@@ -266,17 +246,17 @@ impl AppState {
             if self.auto_randomize_seed {
                 self.randomize_seed();
             }
-            let _ = self.render_template();
+            let _ = self.render_prompt();
             self.preview_dirty = false;
         }
     }
 
-    /// Get slot definitions from the current template
+    /// Get slot definitions from the current prompt
     pub fn get_slot_definitions(&self) -> Vec<SlotDefinition> {
         if let Some(result) = &self.parse_result
             && let Some(ast) = &result.ast
         {
-            return self.workspace.get_slot_definitions(ast);
+            return self.library.get_slot_definitions(ast);
         }
         Vec::new()
     }
@@ -334,17 +314,8 @@ impl AppState {
             for source in sources {
                 match source {
                     PickSource::VariableRef(lib_ref) => {
-                        // Resolve variable reference
-                        let matches = if let Some(lib_name) = &lib_ref.library {
-                            self.workspace
-                                .find_variable_in_library(lib_name, &lib_ref.variable)
-                                .into_iter()
-                                .collect::<Vec<_>>()
-                        } else {
-                            self.workspace.find_variables(&lib_ref.variable)
-                        };
-                        // Add all options from matched variables
-                        for (_lib, variable) in matches {
+                        // Resolve variable reference (library field is ignored in single-library mode)
+                        if let Some(variable) = self.library.find_variable(&lib_ref.variable) {
                             options.extend(variable.options.iter().cloned());
                         }
                     }
@@ -432,14 +403,13 @@ impl AppState {
 
     /// Enter variable editor mode for an existing variable
     pub fn enter_variable_editor(&mut self, variable_name: &str) {
-        // Find the variable in the current library and extract data
-        let variable_data = self.selected_library().and_then(|library| {
-            library
-                .variables
-                .iter()
-                .find(|g| g.name == variable_name)
-                .map(|variable| (variable.name.clone(), variable.options.clone()))
-        });
+        // Find the variable in the library and extract data
+        let variable_data = self
+            .library
+            .variables
+            .iter()
+            .find(|g| g.name == variable_name)
+            .map(|variable| (variable.name.clone(), variable.options.clone()));
 
         if let Some((name, options)) = variable_data {
             self.variable_editor_name = name.clone();
@@ -467,7 +437,7 @@ impl AppState {
         self.sidebar_mode = SidebarMode::Normal;
     }
 
-    /// Exit variable editor mode and return to template editor
+    /// Exit variable editor mode and return to prompt editor
     /// Returns false if there are unsaved changes (caller should show confirmation)
     pub fn try_exit_variable_editor(&mut self) -> bool {
         if self.variable_editor_dirty {
@@ -480,7 +450,7 @@ impl AppState {
 
     /// Force exit variable editor mode (discards any unsaved changes)
     pub fn exit_variable_editor_force(&mut self) {
-        self.editor_mode = EditorMode::Template;
+        self.editor_mode = EditorMode::Prompt;
         self.variable_editor_name.clear();
         self.variable_editor_content.clear();
         self.variable_editor_original_name = None;
@@ -587,13 +557,11 @@ impl AppState {
         }
 
         // Check for duplicate names (excluding the original name if editing)
-        if let Some(library) = self.selected_library() {
-            let is_duplicate = library.variables.iter().any(|g| {
-                g.name == name && Some(&g.name) != self.variable_editor_original_name.as_ref()
-            });
-            if is_duplicate {
-                return Some(format!("A variable named \"{}\" already exists", name));
-            }
+        let is_duplicate = self.library.variables.iter().any(|g| {
+            g.name == name && Some(&g.name) != self.variable_editor_original_name.as_ref()
+        });
+        if is_duplicate {
+            return Some(format!("A variable named \"{}\" already exists", name));
         }
 
         None

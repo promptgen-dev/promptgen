@@ -27,20 +27,20 @@ cargo run -p promptgen-cli -- <command> [options]
 Create a new library file in the current directory.
 
 ```bash
-# Creates my-library.yml with example variables and templates
+# Creates my-library.yml with example variables and prompts
 promptgen create my-library
 ```
 
-### `promptgen list <variables|templates> -l <path>`
+### `promptgen list <variables|prompts> -l <path>`
 
-List variables or templates in a library.
+List variables or prompts in a library.
 
 ```bash
 # List all variables
 promptgen list variables -l example.yml
 
-# List all templates
-promptgen list templates -l example.yml
+# List all prompts
+promptgen list prompts -l example.yml
 
 # Output as JSON (for scripting/editor integration)
 promptgen list variables -l example.yml -f json
@@ -48,13 +48,13 @@ promptgen list variables -l example.yml -f json
 
 ### `promptgen parse -l <path> [-t <name> | -i <source>]`
 
-Validate and inspect a template's structure.
+Validate and inspect a prompt's structure.
 
 ```bash
-# Parse a template from the library
+# Parse a prompt from the library
 promptgen parse -l example.yml -t "Character"
 
-# Parse an inline template string
+# Parse an inline prompt string
 promptgen parse -l example.yml -i '{Hair} with {{ EyeColor }} eyes'
 
 # Output as JSON
@@ -63,13 +63,13 @@ promptgen parse -l example.yml -i '{Hair}' -f json
 
 ### `promptgen render -l <path> [-t <name> | -i <source>] [options]`
 
-Render a template to a final prompt string.
+Render a prompt to a final prompt string.
 
 ```bash
-# Render a named template
+# Render a named prompt
 promptgen render -l example.yml -t "Character"
 
-# Render an inline template
+# Render an inline prompt
 promptgen render -l example.yml -i '{Hair}, {Eyes}'
 
 # Use a specific seed for reproducible output
@@ -87,13 +87,13 @@ promptgen render -l example.yml -t "Character" -f json
 
 Common options available across commands:
 
-| Short | Long         | Description                          |
-| ----- | ------------ | ------------------------------------ |
-| `-l`  | `--lib`      | Path to the library file             |
-| `-t`  | `--template` | Template name                        |
-| `-i`  | `--inline`   | Inline template source               |
-| `-s`  | `--seed`     | Random seed for deterministic output |
-| `-f`  | `--format`   | Output format (`text` or `json`)     |
+| Short | Long       | Description                          |
+| ----- | ---------- | ------------------------------------ |
+| `-l`  | `--lib`    | Path to the library file             |
+| `-t`  | `--prompt` | prompt name                          |
+| `-i`  | `--inline` | Inline prompt source                 |
+| `-s`  | `--seed`   | Random seed for deterministic output |
+| `-f`  | `--format` | Output format (`text` or `json`)     |
 
 ## Output Formats
 
@@ -128,13 +128,13 @@ variables:
       - blue eyes
       - green eyes
 
-templates:
+prompts:
   - name: Character
     description: A basic character description
     source: "{Hair}, {Eyes}"
 ```
 
-## Template Syntax
+## prompt Syntax
 
 - `{Tag}` - Select randomly from variables with this tag
 - `{Tag1 + Tag2}` - Select from variables with Tag1 OR Tag2
@@ -154,7 +154,7 @@ cargo test
 
 # Test with the included example library
 cargo run -p promptgen-cli -- list variables -l promptgen-cli/example.yml
-cargo run -p promptgen-cli -- list templates -l promptgen-cli/example.yml
+cargo run -p promptgen-cli -- list prompts -l promptgen-cli/example.yml
 cargo run -p promptgen-cli -- parse -l promptgen-cli/example.yml -t "Character"
 cargo run -p promptgen-cli -- render -l promptgen-cli/example.yml -t "Character" -s 42
 ```

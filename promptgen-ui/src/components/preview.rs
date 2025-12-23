@@ -1,8 +1,8 @@
-//! Preview panel component for showing template validation and output.
+//! Preview panel component for showing prompt validation and output.
 
 use crate::state::AppState;
 
-/// Preview panel for showing template validation status and rendered output.
+/// Preview panel for showing prompt validation status and rendered output.
 pub struct PreviewPanel;
 
 impl PreviewPanel {
@@ -67,7 +67,7 @@ impl PreviewPanel {
                 if state.auto_randomize_seed {
                     state.randomize_seed();
                 }
-                if let Err(e) = state.render_template() {
+                if let Err(e) = state.render_prompt() {
                     state.preview_output = format!("Error: {}", e);
                 }
             }

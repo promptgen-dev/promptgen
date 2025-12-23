@@ -1,13 +1,13 @@
-//! Editor panel component for template editing.
+//! Editor panel component for prompt editing.
 
 use crate::components::focusable_frame::FocusableFrame;
-use crate::components::template_editor::{TemplateEditor, TemplateEditorConfig};
+use crate::components::prompt_editor::{PromptEditor, PromptEditorConfig};
 use crate::state::AppState;
 
-/// The editor ID for the main template editor
+/// The editor ID for the main prompt editor
 const MAIN_EDITOR_ID: &str = "main_editor";
 
-/// Editor panel for editing prompt templates.
+/// Editor panel for editing prompt prompts.
 pub struct EditorPanel;
 
 impl EditorPanel {
@@ -16,11 +16,11 @@ impl EditorPanel {
         ui.heading("Editor");
         ui.separator();
 
-        let config = TemplateEditorConfig {
+        let config = PromptEditorConfig {
             id: MAIN_EDITOR_ID.to_string(),
             min_lines: 5,
             hint_text: Some(
-                "Enter your prompt template here...\n\n\
+                "Enter your prompt prompt here...\n\n\
                  Use @VariableName to reference variables.\n\
                  Use {option1|option2|option3} for inline choices.\n\
                  Use {{ slot_name }} for user-filled slots."
@@ -35,7 +35,7 @@ impl EditorPanel {
         let mut content = state.editor_content.clone();
 
         let frame_response = FocusableFrame::new(is_focused).show(ui, |ui| {
-            TemplateEditor::show(ui, &mut content, state, &config)
+            PromptEditor::show(ui, &mut content, state, &config)
         });
 
         let result = frame_response.inner;
@@ -58,6 +58,6 @@ impl EditorPanel {
         }
 
         // Error display below editor
-        TemplateEditor::show_errors(ui, &result.parse_result);
+        PromptEditor::show_errors(ui, &result.parse_result);
     }
 }

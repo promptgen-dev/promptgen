@@ -1,20 +1,29 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use promptgen_core::{load_library, save_library as core_save_library};
 
-use super::{LibrarySummary, StorageBackend, StorageError};
+use super::{StorageBackend, StorageError};
 
 /// Native filesystem storage backend for desktop
 pub struct NativeStorage {
-    workspace_path: Option<PathBuf>,
+    /// Path to the currently loaded library file
+    library_path: Option<PathBuf>,
 }
 
 impl NativeStorage {
     pub fn new() -> Self {
-        Self {
-            workspace_path: None,
-        }
+        Self { library_path: None }
+    }
+
+    /// Set the library file path
+    pub fn set_library_path(&mut self, path: PathBuf) {
+        self.library_path = Some(path);
+    }
+
+    /// Get the current library file path
+    #[allow(dead_code)]
+    pub fn library_path(&self) -> Option<&Path> {
+        self.library_path.as_deref()
     }
 }
 
@@ -25,93 +34,29 @@ impl Default for NativeStorage {
 }
 
 impl StorageBackend for NativeStorage {
-    fn list_libraries(&self) -> Result<Vec<LibrarySummary>, StorageError> {
-        let workspace = self
-            .workspace_path
+    fn load_library(&self) -> Result<(promptgen_core::Library, PathBuf), StorageError> {
+        let path = self
+            .library_path
             .as_ref()
-            .ok_or(StorageError::NoWorkspace)?;
+            .ok_or(StorageError::NotFound)?;
 
-        let mut summaries = Vec::new();
-
-        // Walk the workspace looking for .yaml files that are valid libraries
-        if workspace.is_dir() {
-            for entry in fs::read_dir(workspace)? {
-                let entry = entry?;
-                let path = entry.path();
-
-                // Check for .yaml or .yml files
-                if path.is_file()
-                    && let Some(ext) = path.extension()
-                    && (ext == "yaml" || ext == "yml")
-                {
-                    // Try to load the library to get its info
-                    if let Ok(lib) = load_library(&path) {
-                        summaries.push(LibrarySummary {
-                            id: lib.id.clone(),
-                            name: lib.name.clone(),
-                            path,
-                        });
-                    }
-                }
-            }
-        }
-
-        Ok(summaries)
+        let library = load_library(path).map_err(|e| StorageError::Parse(e.to_string()))?;
+        Ok((library, path.clone()))
     }
 
-    fn load_library(&self, id: &str) -> Result<promptgen_core::Library, StorageError> {
-        let summaries = self.list_libraries()?;
-
-        summaries
-            .into_iter()
-            .find(|s| s.id == id)
-            .ok_or_else(|| StorageError::NotFound(id.to_string()))
-            .and_then(|summary| {
-                load_library(&summary.path).map_err(|e| StorageError::Parse(e.to_string()))
-            })
-    }
-
-    fn load_all_libraries(&self) -> Result<Vec<promptgen_core::Library>, StorageError> {
-        let summaries = self.list_libraries()?;
-
-        summaries
-            .into_iter()
-            .map(|summary| {
-                load_library(&summary.path).map_err(|e| StorageError::Parse(e.to_string()))
-            })
-            .collect()
-    }
-
-    fn save_library(&self, library: &promptgen_core::Library) -> Result<(), StorageError> {
-        let workspace = self
-            .workspace_path
-            .as_ref()
-            .ok_or(StorageError::NoWorkspace)?;
-
-        // Save as {library_name}.yaml in the workspace
-        let lib_path = workspace.join(format!("{}.yaml", library.name));
-
-        core_save_library(library, &lib_path).map_err(|e| StorageError::Parse(e.to_string()))
-    }
-
-    fn delete_library(&self, id: &str) -> Result<(), StorageError> {
-        let summaries = self.list_libraries()?;
-
-        let summary = summaries
-            .into_iter()
-            .find(|s| s.id == id)
-            .ok_or_else(|| StorageError::NotFound(id.to_string()))?;
-
-        // Delete the file (not directory, since we're using pack format)
-        fs::remove_file(&summary.path)?;
-        Ok(())
+    fn save_library(
+        &self,
+        library: &promptgen_core::Library,
+        path: &Path,
+    ) -> Result<(), StorageError> {
+        core_save_library(library, path).map_err(|e| StorageError::Parse(e.to_string()))
     }
 
     fn workspace_path(&self) -> Option<&Path> {
-        self.workspace_path.as_deref()
+        self.library_path.as_deref()
     }
 
     fn set_workspace_path(&mut self, path: PathBuf) {
-        self.workspace_path = Some(path);
+        self.library_path = Some(path);
     }
 }

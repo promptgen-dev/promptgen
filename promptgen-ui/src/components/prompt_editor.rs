@@ -6,14 +6,14 @@ use crate::components::autocomplete::{
     AutocompletePopup, apply_completion, check_autocomplete_trigger, find_autocomplete_context,
     get_completions, handle_autocomplete_keyboard,
 };
-use crate::highlighting::highlight_template;
+use crate::highlighting::highlight_prompt;
 use crate::state::AppState;
 use crate::theme::syntax;
 use promptgen_core::ParseResult;
 
 /// Configuration for the template editor widget
 #[derive(Clone)]
-pub struct TemplateEditorConfig {
+pub struct PromptEditorConfig {
     /// Unique identifier for this editor instance (required for multiple editors)
     pub id: String,
     /// Minimum number of lines to display (main editor: 5, slots: 3)
@@ -24,7 +24,7 @@ pub struct TemplateEditorConfig {
     pub show_line_numbers: bool,
 }
 
-impl Default for TemplateEditorConfig {
+impl Default for PromptEditorConfig {
     fn default() -> Self {
         Self {
             id: "template_editor".to_string(),
@@ -36,7 +36,7 @@ impl Default for TemplateEditorConfig {
 }
 
 /// Response from the template editor widget
-pub struct TemplateEditorResponse {
+pub struct PromptEditorResponse {
     /// The egui Response for the text edit widget
     pub response: egui::Response,
     /// Parse result for the content (updated each frame)
@@ -44,9 +44,9 @@ pub struct TemplateEditorResponse {
 }
 
 /// Reusable template editor widget with syntax highlighting, line numbers, and autocomplete
-pub struct TemplateEditor;
+pub struct PromptEditor;
 
-impl TemplateEditor {
+impl PromptEditor {
     /// Show the editor widget with full autocomplete support.
     ///
     /// This is the main entry point that handles:
@@ -59,8 +59,8 @@ impl TemplateEditor {
         ui: &mut egui::Ui,
         content: &mut String,
         state: &mut AppState,
-        config: &TemplateEditorConfig,
-    ) -> TemplateEditorResponse {
+        config: &PromptEditorConfig,
+    ) -> PromptEditorResponse {
         let editor_id = &config.id;
 
         // Take pending cursor position (will be cleared after use)
@@ -70,7 +70,7 @@ impl TemplateEditor {
         // This prevents Enter/Tab/Arrow keys from being handled by the text editor
         let mut autocomplete_selection: Option<String> = None;
         if state.is_autocomplete_active(editor_id) {
-            let completions = get_completions(&state.workspace, state, editor_id);
+            let completions = get_completions(&state.library, state, editor_id);
             if !completions.is_empty() {
                 autocomplete_selection =
                     handle_autocomplete_keyboard(ui, state, editor_id, &completions);
@@ -83,7 +83,7 @@ impl TemplateEditor {
         }
 
         // Parse content for syntax highlighting
-        let parse_result = state.workspace.parse_template(content);
+        let parse_result = state.library.parse_prompt(content);
 
         // Clone parse result for the layouter closure
         let parse_result_clone = parse_result.clone();
@@ -91,7 +91,7 @@ impl TemplateEditor {
         // Create the text editor with custom syntax highlighting
         let mut layouter = |ui: &egui::Ui, text: &dyn TextBuffer, wrap_width: f32| {
             let text_str = text.as_str();
-            let mut job = highlight_template(ui.ctx(), text_str, Some(&parse_result_clone));
+            let mut job = highlight_prompt(ui.ctx(), text_str, Some(&parse_result_clone));
             job.wrap.max_width = wrap_width;
             ui.ctx().fonts_mut(|f| f.layout_job(job))
         };
@@ -190,7 +190,7 @@ impl TemplateEditor {
 
         // Show autocomplete popup if active (visual only, keyboard already handled above)
         if state.is_autocomplete_active(editor_id) {
-            let completions = get_completions(&state.workspace, state, editor_id);
+            let completions = get_completions(&state.library, state, editor_id);
 
             if completions.is_empty() {
                 // No completions, deactivate
@@ -205,7 +205,7 @@ impl TemplateEditor {
             }
         }
 
-        TemplateEditorResponse {
+        PromptEditorResponse {
             response,
             parse_result,
         }

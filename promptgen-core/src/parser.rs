@@ -4,8 +4,8 @@ use chumsky::prelude::*;
 use chumsky::{error::Simple, extra, span::SimpleSpan};
 
 use crate::ast::{
-    LibraryRef, ManySpec, Node, OptionItem, PickOperator, PickSlot, PickSource, SlotBlock,
-    SlotKind, Template,
+    LibraryRef, ManySpec, Node, OptionItem, PickOperator, PickSlot, PickSource, Prompt, SlotBlock,
+    SlotKind,
 };
 use crate::span::Span;
 
@@ -25,7 +25,9 @@ pub enum ParseError<'a> {
     #[error("parse error(s): {0:?}")]
     Chumsky(Vec<Simple<'a, char>>),
 
-    #[error("duplicate slot label '{label}' at position {duplicate_span:?}; first defined at {first_span:?}")]
+    #[error(
+        "duplicate slot label '{label}' at position {duplicate_span:?}; first defined at {first_span:?}"
+    )]
     DuplicateLabel {
         label: String,
         first_span: Span,
@@ -54,31 +56,31 @@ fn parse_library_ref_string(s: &str) -> LibraryRef {
     }
 }
 
-pub fn parse_template(src: &str) -> Result<Template, ParseError<'_>> {
-    let result = template_parser().parse(src);
+pub fn parse_prompt(src: &str) -> Result<Prompt, ParseError<'_>> {
+    let result = prompt_parser().parse(src);
 
     match result.into_result() {
-        Ok(tmpl) => {
+        Ok(prompt) => {
             // Validate for duplicate labels
-            if let Some(dup) = find_duplicate_labels(&tmpl) {
+            if let Some(dup) = find_duplicate_labels(&prompt) {
                 return Err(ParseError::DuplicateLabel {
                     label: dup.label,
                     first_span: dup.first_span,
                     duplicate_span: dup.duplicate_span,
                 });
             }
-            Ok(tmpl)
+            Ok(prompt)
         }
         Err(errs) => Err(ParseError::Chumsky(errs)),
     }
 }
 
-/// Find the first duplicate slot label in a template.
+/// Find the first duplicate slot label in a prompt.
 /// Returns information about the duplicate if found.
-fn find_duplicate_labels(template: &Template) -> Option<DuplicateLabelInfo> {
+fn find_duplicate_labels(prompt: &Prompt) -> Option<DuplicateLabelInfo> {
     let mut seen: HashMap<&str, Span> = HashMap::new();
 
-    for (node, _span) in &template.nodes {
+    for (node, _span) in &prompt.nodes {
         if let Node::SlotBlock(slot_block) = node {
             let label = &slot_block.label.0;
             let label_span = slot_block.label.1.clone();
@@ -97,17 +99,16 @@ fn find_duplicate_labels(template: &Template) -> Option<DuplicateLabelInfo> {
     None
 }
 
-fn template_parser<'src>() -> impl Parser<'src, &'src str, Template, extra::Err<Simple<'src, char>>>
-{
+fn prompt_parser<'src>() -> impl Parser<'src, &'src str, Prompt, extra::Err<Simple<'src, char>>> {
     node_parser()
         .repeated()
         .collect::<Vec<_>>()
-        .map(|nodes| Template { nodes })
+        .map(|nodes| Prompt { nodes })
 }
 
 /// Parser for a single node. Used both at the top level and for nested parsing in options.
-fn node_parser<'src>(
-) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn node_parser<'src>()
+-> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
     // Order matters for precedence:
     // 1. {{ slot }} - must come before { to avoid confusion
     // 2. { inline options } - inline options with | separator
@@ -142,8 +143,8 @@ fn node_parser<'src>(
 /// Precedence:
 /// 1. `{{ label: pick(...) [| ops] }}` - pick slot
 /// 2. `{{ label }}` - textarea slot
-fn slot_block_parser<'src>(
-) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn slot_block_parser<'src>()
+-> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
     just("{{")
         .ignore_then(slot_block_content_parser().padded())
         .then_ignore(just("}}"))
@@ -151,15 +152,15 @@ fn slot_block_parser<'src>(
 }
 
 /// Parse the content inside {{ ... }}
-fn slot_block_content_parser<'src>(
-) -> impl Parser<'src, &'src str, SlotBlock, extra::Err<Simple<'src, char>>> + Clone {
+fn slot_block_content_parser<'src>()
+-> impl Parser<'src, &'src str, SlotBlock, extra::Err<Simple<'src, char>>> + Clone {
     // Try pick slot first (has colon), then textarea
     pick_slot_parser().or(textarea_slot_parser())
 }
 
 /// Parse `label: pick(...) [| ops]`
-fn pick_slot_parser<'src>(
-) -> impl Parser<'src, &'src str, SlotBlock, extra::Err<Simple<'src, char>>> + Clone {
+fn pick_slot_parser<'src>()
+-> impl Parser<'src, &'src str, SlotBlock, extra::Err<Simple<'src, char>>> + Clone {
     slot_label_parser()
         .then_ignore(just(':').padded())
         .then(pick_expression_parser())
@@ -170,8 +171,8 @@ fn pick_slot_parser<'src>(
 }
 
 /// Parse just a label (textarea slot)
-fn textarea_slot_parser<'src>(
-) -> impl Parser<'src, &'src str, SlotBlock, extra::Err<Simple<'src, char>>> + Clone {
+fn textarea_slot_parser<'src>()
+-> impl Parser<'src, &'src str, SlotBlock, extra::Err<Simple<'src, char>>> + Clone {
     slot_label_parser().map_with(|(label, label_span), e| {
         let span = to_range(e.span());
         SlotBlock {
@@ -182,8 +183,8 @@ fn textarea_slot_parser<'src>(
 }
 
 /// Parse a slot label (quoted or bare)
-fn slot_label_parser<'src>(
-) -> impl Parser<'src, &'src str, (String, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn slot_label_parser<'src>()
+-> impl Parser<'src, &'src str, (String, Span), extra::Err<Simple<'src, char>>> + Clone {
     // Quoted label: "label text"
     let quoted_label = just('"')
         .ignore_then(
@@ -208,21 +209,19 @@ fn slot_label_parser<'src>(
 }
 
 /// Parse `pick(...) [| ops]`
-fn pick_expression_parser<'src>(
-) -> impl Parser<'src, &'src str, (PickSlot, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn pick_expression_parser<'src>()
+-> impl Parser<'src, &'src str, (PickSlot, Span), extra::Err<Simple<'src, char>>> + Clone {
     just("pick")
         .ignore_then(just('(').padded())
         .ignore_then(pick_sources_parser())
         .then_ignore(just(')').padded())
         .then(pick_operators_parser())
-        .map_with(|(sources, operators), e| {
-            (PickSlot { sources, operators }, to_range(e.span()))
-        })
+        .map_with(|(sources, operators), e| (PickSlot { sources, operators }, to_range(e.span())))
 }
 
 /// Parse comma-separated pick sources
-fn pick_sources_parser<'src>(
-) -> impl Parser<'src, &'src str, Vec<(PickSource, Span)>, extra::Err<Simple<'src, char>>> + Clone {
+fn pick_sources_parser<'src>()
+-> impl Parser<'src, &'src str, Vec<(PickSource, Span)>, extra::Err<Simple<'src, char>>> + Clone {
     pick_source_parser()
         .separated_by(just(',').padded())
         .at_least(1)
@@ -230,8 +229,8 @@ fn pick_sources_parser<'src>(
 }
 
 /// Parse a single pick source: @VariableRef or literal
-fn pick_source_parser<'src>(
-) -> impl Parser<'src, &'src str, (PickSource, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn pick_source_parser<'src>()
+-> impl Parser<'src, &'src str, (PickSource, Span), extra::Err<Simple<'src, char>>> + Clone {
     // Variable reference: @Name or @"Name"
     let variable_ref = pick_variable_ref_parser();
 
@@ -269,8 +268,8 @@ fn pick_source_parser<'src>(
 }
 
 /// Parse quoted string content with escape sequences
-fn quoted_string_content_parser<'src>(
-) -> impl Parser<'src, &'src str, String, extra::Err<Simple<'src, char>>> + Clone {
+fn quoted_string_content_parser<'src>()
+-> impl Parser<'src, &'src str, String, extra::Err<Simple<'src, char>>> + Clone {
     let escape = just('\\').ignore_then(choice((
         just('"').to('"'),
         just('\\').to('\\'),
@@ -280,14 +279,12 @@ fn quoted_string_content_parser<'src>(
 
     let normal_char = none_of("\"\\");
 
-    choice((escape, normal_char))
-        .repeated()
-        .collect::<String>()
+    choice((escape, normal_char)).repeated().collect::<String>()
 }
 
 /// Parse @VariableRef inside pick()
-fn pick_variable_ref_parser<'src>(
-) -> impl Parser<'src, &'src str, (PickSource, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn pick_variable_ref_parser<'src>()
+-> impl Parser<'src, &'src str, (PickSource, Span), extra::Err<Simple<'src, char>>> + Clone {
     // @"quoted name" or @identifier
     let quoted_ref = just("@\"")
         .ignore_then(none_of("\"").repeated().collect::<String>())
@@ -314,31 +311,28 @@ fn pick_variable_ref_parser<'src>(
 }
 
 /// Parse pipe-separated operators: `| one` or `| many(...)`
-fn pick_operators_parser<'src>(
-) -> impl Parser<'src, &'src str, Vec<(PickOperator, Span)>, extra::Err<Simple<'src, char>>> + Clone
-{
-    pick_operator_parser()
-        .repeated()
-        .collect::<Vec<_>>()
+fn pick_operators_parser<'src>()
+-> impl Parser<'src, &'src str, Vec<(PickOperator, Span)>, extra::Err<Simple<'src, char>>> + Clone {
+    pick_operator_parser().repeated().collect::<Vec<_>>()
 }
 
 /// Parse a single operator: `| one` or `| many(...)`
-fn pick_operator_parser<'src>(
-) -> impl Parser<'src, &'src str, (PickOperator, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn pick_operator_parser<'src>()
+-> impl Parser<'src, &'src str, (PickOperator, Span), extra::Err<Simple<'src, char>>> + Clone {
     just('|')
         .padded()
         .ignore_then(choice((one_operator_parser(), many_operator_parser())))
 }
 
 /// Parse `one`
-fn one_operator_parser<'src>(
-) -> impl Parser<'src, &'src str, (PickOperator, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn one_operator_parser<'src>()
+-> impl Parser<'src, &'src str, (PickOperator, Span), extra::Err<Simple<'src, char>>> + Clone {
     just("one").map_with(|_, e| (PickOperator::One, to_range(e.span())))
 }
 
 /// Parse `many` or `many(max=N, sep="...")`
-fn many_operator_parser<'src>(
-) -> impl Parser<'src, &'src str, (PickOperator, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn many_operator_parser<'src>()
+-> impl Parser<'src, &'src str, (PickOperator, Span), extra::Err<Simple<'src, char>>> + Clone {
     just("many")
         .ignore_then(many_args_parser().or_not())
         .map_with(|args, e| {
@@ -348,11 +342,15 @@ fn many_operator_parser<'src>(
 }
 
 /// Parse `(max=N, sep="...")`
-fn many_args_parser<'src>(
-) -> impl Parser<'src, &'src str, ManySpec, extra::Err<Simple<'src, char>>> + Clone {
+fn many_args_parser<'src>()
+-> impl Parser<'src, &'src str, ManySpec, extra::Err<Simple<'src, char>>> + Clone {
     just('(')
         .padded()
-        .ignore_then(many_arg_parser().separated_by(just(',').padded()).collect::<Vec<_>>())
+        .ignore_then(
+            many_arg_parser()
+                .separated_by(just(',').padded())
+                .collect::<Vec<_>>(),
+        )
         .then_ignore(just(')').padded())
         .map(|args| {
             let mut spec = ManySpec::default();
@@ -374,8 +372,8 @@ fn many_args_parser<'src>(
 }
 
 /// Parse a single many arg: `key=value`
-fn many_arg_parser<'src>(
-) -> impl Parser<'src, &'src str, (String, String), extra::Err<Simple<'src, char>>> + Clone {
+fn many_arg_parser<'src>()
+-> impl Parser<'src, &'src str, (String, String), extra::Err<Simple<'src, char>>> + Clone {
     // key
     any()
         .filter(|c: &char| c.is_alphabetic() || *c == '_')
@@ -387,8 +385,8 @@ fn many_arg_parser<'src>(
 }
 
 /// Parse a many arg value: number or quoted string
-fn many_arg_value_parser<'src>(
-) -> impl Parser<'src, &'src str, String, extra::Err<Simple<'src, char>>> + Clone {
+fn many_arg_value_parser<'src>()
+-> impl Parser<'src, &'src str, String, extra::Err<Simple<'src, char>>> + Clone {
     // Quoted string
     let quoted = just('"')
         .ignore_then(quoted_string_content_parser())
@@ -437,8 +435,8 @@ fn split_at_depth_zero(s: &str, delimiter: char) -> Vec<&str> {
 
 /// Parse `{a|b|c}` - inline options
 /// Options can contain nested grammar (like @Hair or nested {x|y})
-fn inline_options_parser<'src>(
-) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn inline_options_parser<'src>()
+-> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
     just('{')
         .ignore_then(brace_balanced_content())
         .then_ignore(just('}'))
@@ -459,8 +457,8 @@ fn inline_options_parser<'src>(
 /// Parse content inside braces, respecting nested braces.
 /// Returns the content string (without outer braces).
 /// Uses Chumsky's recursive combinator to handle arbitrary nesting.
-fn brace_balanced_content<'src>(
-) -> impl Parser<'src, &'src str, String, extra::Err<Simple<'src, char>>> + Clone {
+fn brace_balanced_content<'src>()
+-> impl Parser<'src, &'src str, String, extra::Err<Simple<'src, char>>> + Clone {
     recursive(|nested| {
         choice((
             // Nested braces: '{' + inner content + '}'
@@ -478,8 +476,8 @@ fn brace_balanced_content<'src>(
 }
 
 /// Parse `@"Name"` or `@"Lib:Name"` - quoted library reference
-fn quoted_library_ref_parser<'src>(
-) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn quoted_library_ref_parser<'src>()
+-> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
     just("@\"")
         .ignore_then(none_of("\"").repeated().collect::<String>())
         .then_ignore(just('"'))
@@ -490,8 +488,8 @@ fn quoted_library_ref_parser<'src>(
 }
 
 /// Parse `@Name` - simple library reference (no spaces allowed in name)
-fn simple_library_ref_parser<'src>(
-) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn simple_library_ref_parser<'src>()
+-> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
     just('@')
         .ignore_then(
             // Identifier: starts with letter or underscore, followed by letters, digits, underscores, hyphens
@@ -512,16 +510,16 @@ fn simple_library_ref_parser<'src>(
 }
 
 /// Parse `# comment to end of line`
-fn comment_parser<'src>(
-) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn comment_parser<'src>()
+-> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
     just('#')
         .ignore_then(none_of("\n").repeated().collect::<String>())
         .map_with(|text, e| (Node::Comment(text.trim().to_string()), to_range(e.span())))
 }
 
 /// Parse plain text - everything that's not a special construct
-fn text_parser<'src>(
-) -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
+fn text_parser<'src>()
+-> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
     // Stop at special chars: {, @, #
     // Also stop at } to avoid consuming closing braces
     none_of("{@#}")
@@ -543,10 +541,10 @@ mod tests {
     #[test]
     fn parses_textarea_slot() {
         let src = "{{ scene description }}";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::SlotBlock(slot) => {
                 assert_eq!(slot.label.0, "scene description");
@@ -559,10 +557,10 @@ mod tests {
     #[test]
     fn parses_textarea_slot_with_simple_name() {
         let src = "{{ name }}";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::SlotBlock(slot) => {
                 assert_eq!(slot.label.0, "name");
@@ -575,10 +573,10 @@ mod tests {
     #[test]
     fn parses_textarea_slot_with_quoted_label() {
         let src = r#"{{ "Character Description" }}"#;
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::SlotBlock(slot) => {
                 assert_eq!(slot.label.0, "Character Description");
@@ -595,10 +593,10 @@ mod tests {
     #[test]
     fn parses_pick_slot_with_variable_ref() {
         let src = "{{ Eyes: pick(@Eyes) }}";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::SlotBlock(slot) => {
                 assert_eq!(slot.label.0, "Eyes");
@@ -622,10 +620,10 @@ mod tests {
     #[test]
     fn parses_pick_slot_with_multiple_sources() {
         let src = r#"{{ Style: pick(@Hair, windswept, "option, comma") }}"#;
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::SlotBlock(slot) => {
                 assert_eq!(slot.label.0, "Style");
@@ -633,8 +631,12 @@ mod tests {
                     SlotKind::Pick(pick) => {
                         assert_eq!(pick.sources.len(), 3);
                         assert!(matches!(&pick.sources[0].0, PickSource::VariableRef(_)));
-                        assert!(matches!(&pick.sources[1].0, PickSource::Literal { value, quoted: false } if value == "windswept"));
-                        assert!(matches!(&pick.sources[2].0, PickSource::Literal { value, quoted: true } if value == "option, comma"));
+                        assert!(
+                            matches!(&pick.sources[1].0, PickSource::Literal { value, quoted: false } if value == "windswept")
+                        );
+                        assert!(
+                            matches!(&pick.sources[2].0, PickSource::Literal { value, quoted: true } if value == "option, comma")
+                        );
                     }
                     other => panic!("expected Pick, got {:?}", other),
                 }
@@ -646,10 +648,10 @@ mod tests {
     #[test]
     fn parses_pick_slot_with_one_operator() {
         let src = "{{ Camera: pick(@Framing) | one }}";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::SlotBlock(slot) => {
                 assert_eq!(slot.label.0, "Camera");
@@ -668,10 +670,10 @@ mod tests {
     #[test]
     fn parses_pick_slot_with_many_operator() {
         let src = r#"{{ Tags: pick(@Tags) | many(max=3, sep=", ") }}"#;
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::SlotBlock(slot) => {
                 assert_eq!(slot.label.0, "Tags");
@@ -696,10 +698,10 @@ mod tests {
     #[test]
     fn parses_pick_slot_with_quoted_label() {
         let src = r#"{{ "Character Eyes": pick(@Eyes, @"Eye Color") | one }}"#;
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::SlotBlock(slot) => {
                 assert_eq!(slot.label.0, "Character Eyes");
@@ -718,14 +720,16 @@ mod tests {
     #[test]
     fn parses_pick_slot_defaults_to_many() {
         let src = "{{ label: pick(@Eyes) }}";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        let (node, _span) = &tmpl.nodes[0];
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::SlotBlock(slot) => {
                 let def = slot.to_definition().expect("should normalize");
                 match def.kind {
-                    SlotDefKind::Pick { cardinality, sep, .. } => {
+                    SlotDefKind::Pick {
+                        cardinality, sep, ..
+                    } => {
                         assert!(matches!(cardinality, Cardinality::Many { max: None }));
                         assert_eq!(sep, ", ");
                     }
@@ -743,10 +747,10 @@ mod tests {
     #[test]
     fn parses_inline_options_simple() {
         let src = "{red|blue|green}";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::InlineOptions(options) => {
                 assert_eq!(options.len(), 3);
@@ -761,10 +765,10 @@ mod tests {
     #[test]
     fn parses_inline_options_with_spaces() {
         let src = "{hot weather | cold weather}";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::InlineOptions(options) => {
                 assert_eq!(options.len(), 2);
@@ -779,10 +783,10 @@ mod tests {
     fn parses_nested_inline_options() {
         // {a|b|{c|d}} should parse as 3 options: "a", "b", "{c|d}"
         let src = "{a|b|{c|d}}";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::InlineOptions(options) => {
                 assert_eq!(options.len(), 3);
@@ -798,10 +802,10 @@ mod tests {
     fn parses_nested_inline_options_at_start() {
         // {{a|b}|c} should parse as 2 options: "{a|b}", "c"
         let src = "{{a|b}|c}";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::InlineOptions(options) => {
                 assert_eq!(options.len(), 2);
@@ -816,10 +820,10 @@ mod tests {
     fn parses_deeply_nested_inline_options() {
         // {a|{b|{c|d}}} should parse as 2 options: "a", "{b|{c|d}}"
         let src = "{a|{b|{c|d}}}";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::InlineOptions(options) => {
                 assert_eq!(options.len(), 2);
@@ -834,10 +838,10 @@ mod tests {
     fn parses_nested_inline_options_with_library_ref() {
         // {@Hair|{red|blue} hair} should parse as 2 options
         let src = "{@Hair|{red|blue} hair}";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::InlineOptions(options) => {
                 assert_eq!(options.len(), 2);
@@ -855,10 +859,10 @@ mod tests {
     #[test]
     fn parses_simple_library_ref() {
         let src = "@Hair";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, None);
@@ -871,10 +875,10 @@ mod tests {
     #[test]
     fn parses_simple_library_ref_with_underscore() {
         let src = "@Hair_Color";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, None);
@@ -887,10 +891,10 @@ mod tests {
     #[test]
     fn parses_simple_library_ref_with_hyphen() {
         let src = "@hair-color";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, None);
@@ -903,10 +907,10 @@ mod tests {
     #[test]
     fn parses_quoted_library_ref() {
         let src = r#"@"Eye Color""#;
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, None);
@@ -919,10 +923,10 @@ mod tests {
     #[test]
     fn parses_qualified_library_ref() {
         let src = r#"@"MyLib:Hair""#;
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, Some("MyLib".to_string()));
@@ -935,10 +939,10 @@ mod tests {
     #[test]
     fn parses_qualified_library_ref_with_spaces() {
         let src = r#"@"My Library:Eye Color""#;
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, Some("My Library".to_string()));
@@ -955,10 +959,10 @@ mod tests {
     #[test]
     fn parses_comment() {
         let src = "# this is a comment";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::Comment(text) => assert_eq!(text, "this is a comment"),
             other => panic!("expected Comment, got {:?}", other),
@@ -972,10 +976,10 @@ mod tests {
     #[test]
     fn parses_plain_text() {
         let src = "Plain text here";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (node, _span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
         match node {
             Node::Text(value) => assert_eq!(value, "Plain text here"),
             other => panic!("expected Text, got {:?}", other),
@@ -983,16 +987,16 @@ mod tests {
     }
 
     // =========================================================================
-    // Mixed template tests
+    // Mixed prompt tests
     // =========================================================================
 
     #[test]
-    fn parses_mixed_template() {
+    fn parses_mixed_prompt() {
         let src = "@Hair, @Eyes, with {red|blue} accents";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
         // Should have: @Hair, Text(", "), @Eyes, Text(", with "), InlineOptions, Text(" accents")
-        let node_types: Vec<&str> = tmpl
+        let node_types: Vec<&str> = prompt
             .nodes
             .iter()
             .map(|(node, _)| match node {
@@ -1010,11 +1014,11 @@ mod tests {
     }
 
     #[test]
-    fn parses_template_with_slot() {
+    fn parses_prompt_with_slot() {
         let src = "A {{ character type }} with @Hair stands in {{ scene }}.";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        let node_types: Vec<&str> = tmpl
+        let node_types: Vec<&str> = prompt
             .nodes
             .iter()
             .map(|(node, _)| match node {
@@ -1031,7 +1035,7 @@ mod tests {
         assert!(node_types.contains(&"Text"));
 
         // Count slots
-        let slot_count = tmpl
+        let slot_count = prompt
             .nodes
             .iter()
             .filter(|(node, _)| matches!(node, Node::SlotBlock(_)))
@@ -1040,17 +1044,17 @@ mod tests {
     }
 
     #[test]
-    fn parses_template_with_inline_comment() {
+    fn parses_prompt_with_inline_comment() {
         let src = "@Hair, @Eyes  # inline comment";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        let has_comment = tmpl
+        let has_comment = prompt
             .nodes
             .iter()
             .any(|(node, _)| matches!(node, Node::Comment(_)));
         assert!(has_comment);
 
-        let has_lib_ref = tmpl
+        let has_lib_ref = prompt
             .nodes
             .iter()
             .any(|(node, _)| matches!(node, Node::LibraryRef(_)));
@@ -1058,15 +1062,15 @@ mod tests {
     }
 
     #[test]
-    fn parses_complex_template() {
+    fn parses_complex_prompt() {
         let src = r#"# Random character
 @Hair, @"Eye Color"
 A {big|small} {cat|dog}
 {{ description }}
 "#;
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        let node_types: Vec<&str> = tmpl
+        let node_types: Vec<&str> = prompt
             .nodes
             .iter()
             .map(|(node, _)| match node {
@@ -1092,10 +1096,10 @@ A {big|small} {cat|dog}
     #[test]
     fn spans_are_correct_for_library_ref() {
         let src = "@Hair";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (_node, span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (_node, span) = &prompt.nodes[0];
         assert_eq!(span.start, 0);
         assert_eq!(span.end, 5);
     }
@@ -1103,10 +1107,10 @@ A {big|small} {cat|dog}
     #[test]
     fn spans_are_correct_for_inline_options() {
         let src = "{a|b}";
-        let tmpl = parse_template(src).expect("should parse");
+        let prompt = parse_prompt(src).expect("should parse");
 
-        assert_eq!(tmpl.nodes.len(), 1);
-        let (_node, span) = &tmpl.nodes[0];
+        assert_eq!(prompt.nodes.len(), 1);
+        let (_node, span) = &prompt.nodes[0];
         assert_eq!(span.start, 0);
         assert_eq!(span.end, 5);
     }
@@ -1118,7 +1122,7 @@ A {big|small} {cat|dog}
     #[test]
     fn duplicate_labels_error() {
         let src = "{{ Name }} and {{ Name }}";
-        let result = parse_template(src);
+        let result = parse_prompt(src);
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -1141,14 +1145,14 @@ A {big|small} {cat|dog}
     #[test]
     fn different_labels_ok() {
         let src = "{{ Name }} and {{ Age }}";
-        let result = parse_template(src);
+        let result = parse_prompt(src);
         assert!(result.is_ok());
     }
 
     #[test]
     fn duplicate_pick_labels_error() {
         let src = "{{ Choice: pick(@A) }} or {{ Choice: pick(@B) }}";
-        let result = parse_template(src);
+        let result = parse_prompt(src);
 
         assert!(result.is_err());
         match result.unwrap_err() {

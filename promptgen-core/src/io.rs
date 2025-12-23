@@ -1,16 +1,15 @@
 //! Library I/O module for loading and saving libraries to disk.
 //!
-//! This module provides YAML-based serialization for libraries, variables, and templates.
-//! Templates are stored as source text and re-parsed on load.
+//! This module provides YAML-based serialization for libraries, variables, and prompts.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::ast::{LibraryRef, Node, OptionItem};
-use crate::library::{EngineHint, Library, PromptVariable, PromptTemplate, new_id};
-use crate::parser::parse_template;
+use crate::library::{Library, PromptVariable, SavedPrompt, SlotValue};
 
 /// Error type for I/O operations.
 #[derive(Debug, thiserror::Error)]
@@ -21,11 +20,11 @@ pub enum IoError {
     #[error("failed to parse YAML: {0}")]
     Yaml(#[from] serde_yaml_ng::Error),
 
-    #[error("failed to parse template '{name}': {message}")]
-    TemplateParse { name: String, message: String },
-
     #[error("duplicate variable name: '{0}'")]
     DuplicateVariableName(String),
+
+    #[error("duplicate prompt name: '{0}'")]
+    DuplicatePromptName(String),
 }
 
 // ============================================================================
@@ -43,32 +42,57 @@ pub struct VariableDto {
     pub options: Vec<String>,
 }
 
-/// DTO for PromptTemplate.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TemplateDto {
-    #[serde(default = "new_id")]
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub description: String,
-    #[serde(default)]
-    pub engine_hint: EngineHint,
-    /// The template source text (will be parsed into AST on load).
-    pub source: String,
+/// DTO for a slot value - either text or picks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SlotValueDto {
+    /// Text value (textarea slot).
+    Text(String),
+    /// List of selected options (pick slot).
+    Pick(Vec<String>),
 }
 
-/// DTO for a complete library pack (single-file format).
+impl From<SlotValueDto> for SlotValue {
+    fn from(dto: SlotValueDto) -> Self {
+        match dto {
+            SlotValueDto::Text(s) => SlotValue::Text(s),
+            SlotValueDto::Pick(v) => SlotValue::Pick(v),
+        }
+    }
+}
+
+impl From<&SlotValue> for SlotValueDto {
+    fn from(val: &SlotValue) -> Self {
+        match val {
+            SlotValue::Text(s) => SlotValueDto::Text(s.clone()),
+            SlotValue::Pick(v) => SlotValueDto::Pick(v.clone()),
+        }
+    }
+}
+
+/// DTO for a saved prompt.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PackDto {
-    #[serde(default = "new_id")]
-    pub id: String,
+pub struct PromptDto {
+    /// Unique name for this prompt.
+    pub name: String,
+    /// The prompt content (prompt source).
+    pub content: String,
+    /// Slot values for reproducibility.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub slots: HashMap<String, SlotValueDto>,
+}
+
+/// DTO for a complete library (single-file format).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LibraryDto {
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
     pub variables: Vec<VariableDto>,
     #[serde(default)]
-    pub templates: Vec<TemplateDto>,
+    pub prompts: Vec<PromptDto>,
 }
 
 // ============================================================================
@@ -84,21 +108,13 @@ impl From<VariableDto> for PromptVariable {
     }
 }
 
-impl TemplateDto {
-    /// Convert to PromptTemplate, parsing the source text.
-    pub fn try_into_template(self) -> Result<PromptTemplate, IoError> {
-        let ast = parse_template(&self.source).map_err(|e| IoError::TemplateParse {
-            name: self.name.clone(),
-            message: e.to_string(),
-        })?;
-
-        Ok(PromptTemplate {
-            id: self.id,
-            name: self.name,
-            description: self.description,
-            engine_hint: self.engine_hint,
-            ast,
-        })
+impl From<PromptDto> for SavedPrompt {
+    fn from(dto: PromptDto) -> Self {
+        SavedPrompt {
+            name: dto.name,
+            content: dto.content,
+            slots: dto.slots.into_iter().map(|(k, v)| (k, v.into())).collect(),
+        }
     }
 }
 
@@ -115,35 +131,36 @@ impl From<&PromptVariable> for VariableDto {
     }
 }
 
-impl From<&PromptTemplate> for TemplateDto {
-    fn from(template: &PromptTemplate) -> Self {
-        TemplateDto {
-            id: template.id.clone(),
-            name: template.name.clone(),
-            description: template.description.clone(),
-            engine_hint: template.engine_hint.clone(),
-            source: template_to_source(&template.ast),
+impl From<&SavedPrompt> for PromptDto {
+    fn from(prompt: &SavedPrompt) -> Self {
+        PromptDto {
+            name: prompt.name.clone(),
+            content: prompt.content.clone(),
+            slots: prompt
+                .slots
+                .iter()
+                .map(|(k, v)| (k.clone(), v.into()))
+                .collect(),
         }
     }
 }
 
-impl From<&Library> for PackDto {
+impl From<&Library> for LibraryDto {
     fn from(library: &Library) -> Self {
-        PackDto {
-            id: library.id.clone(),
+        LibraryDto {
             name: library.name.clone(),
             description: library.description.clone(),
             variables: library.variables.iter().map(Into::into).collect(),
-            templates: library.templates.iter().map(Into::into).collect(),
+            prompts: library.prompts.iter().map(Into::into).collect(),
         }
     }
 }
 
-/// Reconstruct source text from a parsed template AST.
-pub fn template_to_source(template: &crate::ast::Template) -> String {
+/// Reconstruct source text from a parsed prompt AST.
+pub fn prompt_to_source(prompt: &crate::ast::Prompt) -> String {
     let mut source = String::new();
 
-    for (node, _span) in &template.nodes {
+    for (node, _span) in &prompt.nodes {
         node_to_source(node, &mut source);
     }
 
@@ -185,16 +202,12 @@ fn node_to_source(node: &Node, output: &mut String) {
 fn library_ref_to_source(lib_ref: &LibraryRef, output: &mut String) {
     output.push('@');
 
-    let needs_quotes = lib_ref.library.is_some()
-        || lib_ref.variable.contains(' ')
-        || lib_ref.variable.contains(':');
+    // In single-library mode, we never need library qualifiers
+    // but we still need quotes for names with spaces or colons
+    let needs_quotes = lib_ref.variable.contains(' ') || lib_ref.variable.contains(':');
 
     if needs_quotes {
         output.push('"');
-        if let Some(lib) = &lib_ref.library {
-            output.push_str(lib);
-            output.push(':');
-        }
         output.push_str(&lib_ref.variable);
         output.push('"');
     } else {
@@ -302,79 +315,77 @@ fn slot_block_to_source(slot_block: &crate::ast::SlotBlock, output: &mut String)
 
 /// Load a library from a YAML file.
 ///
-/// The file should contain the complete library: metadata, variables, and templates.
+/// The file should contain: name, description, variables, and prompts.
 pub fn load_library(path: &Path) -> Result<Library, IoError> {
-    load_pack(path)
+    let content = fs::read_to_string(path)?;
+    parse_library(&content)
 }
 
 /// Save a library to a YAML file.
 ///
-/// Writes the complete library (metadata, variables, templates) to a single file.
+/// Writes the complete library (metadata, variables, prompts) to a single file.
 pub fn save_library(library: &Library, path: &Path) -> Result<(), IoError> {
-    save_pack(library, path)
-}
-
-// ============================================================================
-// Pack format (single-file) I/O
-// ============================================================================
-
-/// Load a library from a pack file (single YAML file).
-pub fn load_pack(path: &Path) -> Result<Library, IoError> {
-    let content = fs::read_to_string(path)?;
-    let pack: PackDto = serde_yaml_ng::from_str(&content)?;
-
-    let mut templates = Vec::new();
-    for template_dto in pack.templates {
-        templates.push(template_dto.try_into_template()?);
-    }
-
-    Ok(Library {
-        id: pack.id,
-        name: pack.name,
-        description: pack.description,
-        variables: pack.variables.into_iter().map(Into::into).collect(),
-        templates,
-    })
-}
-
-/// Save a library as a pack file (single YAML file).
-pub fn save_pack(library: &Library, path: &Path) -> Result<(), IoError> {
-    let pack: PackDto = library.into();
-    let content = serde_yaml_ng::to_string(&pack)?;
+    let content = serialize_library(library)?;
     fs::write(path, content)?;
     Ok(())
 }
 
-/// Parse a library from a YAML string (pack format).
-pub fn parse_pack(yaml: &str) -> Result<Library, IoError> {
-    let pack: PackDto = serde_yaml_ng::from_str(yaml)?;
+/// Parse a library from a YAML string.
+pub fn parse_library(yaml: &str) -> Result<Library, IoError> {
+    let dto: LibraryDto = serde_yaml_ng::from_str(yaml)?;
 
     // Check for duplicate variable names
-    let mut seen_names = std::collections::HashSet::new();
-    for variable in &pack.variables {
-        if !seen_names.insert(&variable.name) {
+    let mut seen_vars = std::collections::HashSet::new();
+    for variable in &dto.variables {
+        if !seen_vars.insert(&variable.name) {
             return Err(IoError::DuplicateVariableName(variable.name.clone()));
         }
     }
 
-    let mut templates = Vec::new();
-    for template_dto in pack.templates {
-        templates.push(template_dto.try_into_template()?);
+    // Check for duplicate prompt names
+    let mut seen_prompts = std::collections::HashSet::new();
+    for prompt in &dto.prompts {
+        if !seen_prompts.insert(&prompt.name) {
+            return Err(IoError::DuplicatePromptName(prompt.name.clone()));
+        }
     }
 
     Ok(Library {
-        id: pack.id,
-        name: pack.name,
-        description: pack.description,
-        variables: pack.variables.into_iter().map(Into::into).collect(),
-        templates,
+        name: dto.name,
+        description: dto.description,
+        variables: dto.variables.into_iter().map(Into::into).collect(),
+        prompts: dto.prompts.into_iter().map(Into::into).collect(),
     })
 }
 
-/// Serialize a library to a YAML string (pack format).
+/// Serialize a library to a YAML string.
+pub fn serialize_library(library: &Library) -> Result<String, IoError> {
+    let dto: LibraryDto = library.into();
+    Ok(serde_yaml_ng::to_string(&dto)?)
+}
+
+// ============================================================================
+// Legacy pack format support (for backwards compatibility)
+// ============================================================================
+
+/// Load a library from a pack file (legacy format, same as load_library).
+pub fn load_pack(path: &Path) -> Result<Library, IoError> {
+    load_library(path)
+}
+
+/// Save a library as a pack file (legacy format, same as save_library).
+pub fn save_pack(library: &Library, path: &Path) -> Result<(), IoError> {
+    save_library(library, path)
+}
+
+/// Parse a library from a YAML string (legacy pack format).
+pub fn parse_pack(yaml: &str) -> Result<Library, IoError> {
+    parse_library(yaml)
+}
+
+/// Serialize a library to a YAML string (legacy pack format).
 pub fn serialize_pack(library: &Library) -> Result<String, IoError> {
-    let pack: PackDto = library.into();
-    Ok(serde_yaml_ng::to_string(&pack)?)
+    serialize_library(library)
 }
 
 #[cfg(test)]
@@ -383,7 +394,6 @@ mod tests {
     use tempfile::tempdir;
 
     const TEST_LIBRARY_YAML: &str = r#"
-id: test-lib-id
 name: Test Library
 description: A test library
 variables:
@@ -391,132 +401,96 @@ variables:
     options:
       - blonde hair
       - red hair
-templates:
-  - id: tmpl-id
-    name: Character
-    description: A character template
-    source: "@Hair with blue eyes"
+prompts:
+  - name: Character Portrait
+    content: "@Hair with blue eyes"
+    slots:
+      style:
+        - oil painting
+      background: "standing in a field"
 "#;
 
     fn make_test_library() -> Library {
-        parse_pack(TEST_LIBRARY_YAML).expect("TEST_LIBRARY_YAML should be valid")
+        parse_library(TEST_LIBRARY_YAML).expect("TEST_LIBRARY_YAML should be valid")
     }
 
     #[test]
-    fn test_pack_round_trip() {
+    fn test_library_round_trip() {
         let lib = make_test_library();
 
-        let yaml = serialize_pack(&lib).unwrap();
-        let loaded = parse_pack(&yaml).unwrap();
+        let yaml = serialize_library(&lib).unwrap();
+        let loaded = parse_library(&yaml).unwrap();
 
-        assert_eq!(loaded.id, lib.id);
         assert_eq!(loaded.name, lib.name);
         assert_eq!(loaded.description, lib.description);
         assert_eq!(loaded.variables.len(), 1);
         assert_eq!(loaded.variables[0].name, "Hair");
         assert_eq!(loaded.variables[0].options.len(), 2);
-        assert_eq!(loaded.templates.len(), 1);
-        assert_eq!(loaded.templates[0].name, "Character");
+        assert_eq!(loaded.prompts.len(), 1);
+        assert_eq!(loaded.prompts[0].name, "Character Portrait");
     }
 
     #[test]
     fn test_library_file_round_trip() {
         let lib = make_test_library();
         let dir = tempdir().unwrap();
-        let lib_path = dir.path().join("my-library.yml");
+        let lib_path = dir.path().join("library.yml");
 
         save_library(&lib, &lib_path).unwrap();
         let loaded = load_library(&lib_path).unwrap();
 
-        assert_eq!(loaded.id, lib.id);
         assert_eq!(loaded.name, lib.name);
         assert_eq!(loaded.variables.len(), 1);
-        assert_eq!(loaded.templates.len(), 1);
+        assert_eq!(loaded.prompts.len(), 1);
     }
 
     #[test]
-    fn test_pack_file_round_trip() {
-        let lib = make_test_library();
-        let dir = tempdir().unwrap();
-        let pack_path = dir.path().join("library.promptgen-pack.yml");
-
-        save_pack(&lib, &pack_path).unwrap();
-        let loaded = load_pack(&pack_path).unwrap();
-
-        assert_eq!(loaded.id, lib.id);
-        assert_eq!(loaded.name, lib.name);
-    }
-
-    #[test]
-    fn test_ids_auto_generated_when_missing() {
+    fn test_prompt_with_slots() {
         let yaml = r#"
-name: Minimal Library
+name: Test
+variables: []
+prompts:
+  - name: Portrait
+    content: "{{ style }} of {{ desc }}"
+    slots:
+      style:
+        - oil painting
+        - watercolor
+      desc: "a wise wizard"
+"#;
+
+        let lib = parse_library(yaml).unwrap();
+        assert_eq!(lib.prompts.len(), 1);
+
+        let prompt = &lib.prompts[0];
+        assert_eq!(prompt.slots.len(), 2);
+
+        // style is a pick (list)
+        assert!(matches!(prompt.slots.get("style"), Some(SlotValue::Pick(v)) if v.len() == 2));
+
+        // desc is text (string)
+        assert!(
+            matches!(prompt.slots.get("desc"), Some(SlotValue::Text(s)) if s == "a wise wizard")
+        );
+    }
+
+    #[test]
+    fn test_minimal_library() {
+        let yaml = r#"
+name: Minimal
 variables:
   - name: Colors
     options:
       - red
       - blue
-templates:
-  - name: Simple
-    source: "Pick a {red|blue}"
 "#;
 
-        let lib = parse_pack(yaml).unwrap();
+        let lib = parse_library(yaml).unwrap();
 
-        // Library and Template IDs should be auto-generated
-        assert!(!lib.id.is_empty());
-        assert!(!lib.templates[0].id.is_empty());
+        assert_eq!(lib.name, "Minimal");
+        assert!(lib.prompts.is_empty());
+        assert_eq!(lib.variables.len(), 1);
         assert_eq!(lib.variables[0].name, "Colors");
-        assert_eq!(lib.variables[0].options[0], "red");
-    }
-
-    #[test]
-    fn test_template_source_reconstruction() {
-        let source = r#"@Hair with {{ EyeColor }} and {red|blue|green}"#;
-        let ast = parse_template(source).unwrap();
-        let reconstructed = template_to_source(&ast);
-
-        // Parse the reconstructed source and verify it works
-        let reparsed = parse_template(&reconstructed).unwrap();
-        assert_eq!(reparsed.nodes.len(), ast.nodes.len());
-    }
-
-    #[test]
-    fn test_template_source_reconstruction_qualified_ref() {
-        let source = r#"@"MyLib:Hair Color" with @Eyes"#;
-        let ast = parse_template(source).unwrap();
-        let reconstructed = template_to_source(&ast);
-
-        // Verify the qualified reference is preserved
-        assert!(reconstructed.contains(r#"@"MyLib:Hair Color""#));
-        assert!(reconstructed.contains("@Eyes"));
-    }
-
-    #[test]
-    fn test_template_source_reconstruction_inline_options() {
-        let source = r#"A {big|small} {red|blue|green} car"#;
-        let ast = parse_template(source).unwrap();
-        let reconstructed = template_to_source(&ast);
-
-        assert_eq!(reconstructed, source);
-    }
-
-    #[test]
-    fn test_template_source_reconstruction_slot() {
-        let source = r#"Hello {{ Name }}, welcome!"#;
-        let ast = parse_template(source).unwrap();
-        let reconstructed = template_to_source(&ast);
-
-        assert_eq!(reconstructed, source);
-    }
-
-    #[test]
-    fn test_template_source_reconstruction_comment() {
-        let source = "# This is a comment";
-        let ast = parse_template(source).unwrap();
-        let reconstructed = template_to_source(&ast);
-
-        assert_eq!(reconstructed, source);
     }
 
     #[test]
@@ -532,7 +506,60 @@ variables:
       - blue
 "#;
 
-        let result = parse_pack(yaml);
+        let result = parse_library(yaml);
         assert!(matches!(result, Err(IoError::DuplicateVariableName(name)) if name == "Color"));
+    }
+
+    #[test]
+    fn test_duplicate_prompt_name_error() {
+        let yaml = r#"
+name: Test Library
+variables: []
+prompts:
+  - name: Portrait
+    content: "test"
+  - name: Portrait
+    content: "another"
+"#;
+
+        let result = parse_library(yaml);
+        assert!(matches!(result, Err(IoError::DuplicatePromptName(name)) if name == "Portrait"));
+    }
+
+    #[test]
+    fn test_prompt_source_reconstruction() {
+        use crate::parser::parse_prompt;
+
+        let source = r#"@Hair with {{ EyeColor }} and {red|blue|green}"#;
+        let ast = parse_prompt(source).unwrap();
+        let reconstructed = prompt_to_source(&ast);
+
+        // Parse the reconstructed source and verify it works
+        let reparsed = parse_prompt(&reconstructed).unwrap();
+        assert_eq!(reparsed.nodes.len(), ast.nodes.len());
+    }
+
+    #[test]
+    fn test_prompt_source_reconstruction_quoted_ref() {
+        use crate::parser::parse_prompt;
+
+        let source = r#"@"Hair Color" with @Eyes"#;
+        let ast = parse_prompt(source).unwrap();
+        let reconstructed = prompt_to_source(&ast);
+
+        // Verify the quoted reference is preserved
+        assert!(reconstructed.contains(r#"@"Hair Color""#));
+        assert!(reconstructed.contains("@Eyes"));
+    }
+
+    #[test]
+    fn test_prompt_source_reconstruction_slot() {
+        use crate::parser::parse_prompt;
+
+        let source = r#"Hello {{ Name }}, welcome!"#;
+        let ast = parse_prompt(source).unwrap();
+        let reconstructed = prompt_to_source(&ast);
+
+        assert_eq!(reconstructed, source);
     }
 }

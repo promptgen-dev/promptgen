@@ -1,17 +1,17 @@
-//! Tests for pre-defined templates from the library.
+//! Tests for saved prompts from the library.
 //!
-//! Tests that templates stored in libraries render correctly.
+//! Tests that prompts stored in libraries render correctly.
 
 mod common;
 
-use common::{eval_template, lib};
+use common::{eval_prompt, lib};
 
 // ============================================================================
-// Template Rendering Tests
+// Prompt Rendering Tests
 // ============================================================================
 
 #[test]
-fn basic_character_template_renders() {
+fn basic_character_prompt_renders() {
     let lib = lib(r#"
 variables:
   - name: Hair
@@ -22,12 +22,12 @@ variables:
     options:
       - blue eyes
       - green eyes
-templates:
+prompts:
   - name: Character
-    source: "@Hair, @Eyes"
+    content: "@Hair, @Eyes"
 "#);
 
-    let result = eval_template(&lib, "Character", Some(42));
+    let result = eval_prompt(&lib, "Character", Some(42));
 
     // Should produce a valid combination
     assert!(result.text.contains("hair"));
@@ -35,37 +35,37 @@ templates:
 }
 
 #[test]
-fn template_with_slots_renders() {
+fn prompt_with_slots_renders() {
     let lib = lib(r#"
 variables: []
-templates:
+prompts:
   - name: Greeting
-    source: "Hello {{ Name }}"
+    content: "Hello {{ Name }}"
 "#);
 
-    let result = eval_template(&lib, "Greeting", Some(42));
+    let result = eval_prompt(&lib, "Greeting", Some(42));
 
     // Without slot override, the slot renders to empty string per spec
     assert_eq!(result.text, "Hello ");
 }
 
 #[test]
-fn template_with_inline_options_renders() {
+fn prompt_with_inline_options_renders() {
     let lib = lib(r#"
 variables: []
-templates:
+prompts:
   - name: Mood
-    source: "Feeling {happy|sad|excited} today"
+    content: "Feeling {happy|sad|excited} today"
 "#);
 
-    let result = eval_template(&lib, "Mood", Some(42));
+    let result = eval_prompt(&lib, "Mood", Some(42));
 
     assert!(result.text.starts_with("Feeling "));
     assert!(result.text.ends_with(" today"));
 }
 
 #[test]
-fn complex_template_renders() {
+fn complex_prompt_renders() {
     let lib = lib(r#"
 variables:
   - name: Hair
@@ -78,13 +78,12 @@ variables:
     options:
       - smiling
       - serious
-templates:
+prompts:
   - name: Portrait
-    description: A portrait description
-    source: "A person with @Hair and @Eyes, @Expression, {realistic|artistic} style"
+    content: "A person with @Hair and @Eyes, @Expression, {realistic|artistic} style"
 "#);
 
-    let result = eval_template(&lib, "Portrait", Some(42));
+    let result = eval_prompt(&lib, "Portrait", Some(42));
 
     // Should contain all the expected parts
     assert!(result.text.contains("blonde hair"));
@@ -94,19 +93,19 @@ templates:
 }
 
 #[test]
-fn template_chosen_options_are_tracked() {
+fn prompt_chosen_options_are_tracked() {
     let lib = lib(r#"
 variables:
   - name: Color
     options:
       - red
       - blue
-templates:
+prompts:
   - name: Simple
-    source: "@Color"
+    content: "@Color"
 "#);
 
-    let result = eval_template(&lib, "Simple", Some(42));
+    let result = eval_prompt(&lib, "Simple", Some(42));
 
     assert_eq!(result.chosen_options.len(), 1);
     assert_eq!(result.chosen_options[0].variable_name, "Color");
@@ -114,7 +113,7 @@ templates:
 }
 
 #[test]
-fn template_with_nested_grammar_renders() {
+fn prompt_with_nested_grammar_renders() {
     let lib = lib(r#"
 variables:
   - name: Size
@@ -125,12 +124,12 @@ variables:
     options:
       - "@Size dog"
       - "@Size cat"
-templates:
+prompts:
   - name: Pet
-    source: "My pet is a @Animal"
+    content: "My pet is a @Animal"
 "#);
 
-    let result = eval_template(&lib, "Pet", Some(42));
+    let result = eval_prompt(&lib, "Pet", Some(42));
 
     // Should resolve nested grammar
     let valid_options = [

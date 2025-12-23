@@ -1,62 +1,44 @@
-//! Sidebar panel component for library/template/variable navigation.
+//! Sidebar panel component for library/prompt/variable navigation.
 
 use std::path::PathBuf;
 
 use promptgen_core::Cardinality;
 
 use egui_material_icons::icons::{
-    ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_EDIT, ICON_EXPAND_MORE, ICON_FOLDER, ICON_SEARCH,
+    ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_DESCRIPTION, ICON_EDIT, ICON_EXPAND_MORE, ICON_SEARCH,
 };
 
 use crate::state::{AppState, SidebarMode, SidebarViewMode};
 
-/// Sidebar panel for navigating libraries, templates, and variables.
+/// Sidebar panel for navigating libraries, prompts, and variables.
 pub struct SidebarPanel;
 
 impl SidebarPanel {
     /// Render the sidebar panel.
-    ///
-    /// Returns `true` if the workspace dialog should be opened.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn show(ui: &mut egui::Ui, state: &mut AppState, workspace_path: &Option<PathBuf>) -> bool {
-        let mut open_dialog = false;
-
-        // Workspace header with folder picker
-        if let Some(path) = workspace_path {
-            ui.horizontal(|ui| {
-                ui.label(ICON_FOLDER);
-                let folder_name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| path.display().to_string());
-                ui.label(&folder_name);
-                if ui.small_button("...").clicked() {
-                    open_dialog = true;
-                }
-            });
-        } else if ui.button("Select Workspace...").clicked() {
-            open_dialog = true;
-        }
-
-        ui.add_space(8.0);
-
-        Self::render_content(ui, state, workspace_path);
+    pub fn show(
+        ui: &mut egui::Ui,
+        state: &mut AppState,
+        library_file_path: &Option<PathBuf>,
+    ) -> bool {
+        Self::render_content(ui, state, library_file_path);
 
         // Footer
         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
             egui::warn_if_debug_build(ui);
         });
 
-        open_dialog
+        false // Open dialog is now only via File menu
     }
 
-    /// Render the sidebar panel (WASM version - no workspace dialog).
+    /// Render the sidebar panel (WASM version).
     #[cfg(target_arch = "wasm32")]
-    pub fn show(ui: &mut egui::Ui, state: &mut AppState, workspace_path: &Option<PathBuf>) -> bool {
-        ui.label("Web version");
-        ui.add_space(8.0);
-
-        Self::render_content(ui, state, workspace_path);
+    pub fn show(
+        ui: &mut egui::Ui,
+        state: &mut AppState,
+        library_file_path: &Option<PathBuf>,
+    ) -> bool {
+        Self::render_content(ui, state, library_file_path);
 
         // Footer
         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -67,47 +49,53 @@ impl SidebarPanel {
     }
 
     /// Render the main sidebar content (shared between native and WASM).
-    fn render_content(ui: &mut egui::Ui, state: &mut AppState, workspace_path: &Option<PathBuf>) {
+    fn render_content(
+        ui: &mut egui::Ui,
+        state: &mut AppState,
+        library_file_path: &Option<PathBuf>,
+    ) {
         // Check if we're in slot picker mode
         if let SidebarMode::SlotPicker { slot_label } = &state.sidebar_mode {
             Self::render_slot_picker(ui, state, slot_label.clone());
             return;
         }
 
-        // Library selector (ComboBox)
-        if !state.libraries.is_empty() {
-            let selected_name = state
-                .selected_library()
-                .map(|lib| lib.name.clone())
-                .unwrap_or_else(|| "Select library...".to_string());
-
+        // Check if we have a library loaded
+        if let Some(lib_path) = &state.library_path {
+            // Library header: icon + name as main heading
             ui.horizontal(|ui| {
-                ui.label("Library:");
-                egui::ComboBox::from_id_salt("library_selector")
-                    .selected_text(&selected_name)
-                    .width(ui.available_width() - 8.0)
-                    .show_ui(ui, |ui| {
-                        for lib in &state.libraries {
-                            let is_selected = state.selected_library_id.as_ref() == Some(&lib.id);
-                            if ui.selectable_label(is_selected, &lib.name).clicked() {
-                                state.selected_library_id = Some(lib.id.clone());
-                            }
-                        }
-                    });
+                ui.label(ICON_DESCRIPTION);
+                let name = if state.library.name.is_empty() {
+                    "Untitled Library"
+                } else {
+                    &state.library.name
+                };
+                ui.heading(name);
             });
+
+            // File name in smaller, lighter text below
+            let file_name = lib_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| lib_path.display().to_string());
+            ui.label(
+                egui::RichText::new(file_name)
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
 
             ui.add_space(8.0);
 
-            // View mode toggle (Templates / Variables)
+            // View mode toggle (Prompts / Variables)
             ui.horizontal(|ui| {
                 if ui
                     .selectable_label(
-                        state.sidebar_view_mode == SidebarViewMode::Templates,
-                        "Templates",
+                        state.sidebar_view_mode == SidebarViewMode::Prompts,
+                        "Prompts",
                     )
                     .clicked()
                 {
-                    state.sidebar_view_mode = SidebarViewMode::Templates;
+                    state.sidebar_view_mode = SidebarViewMode::Prompts;
                 }
                 if ui
                     .selectable_label(
@@ -126,7 +114,11 @@ impl SidebarPanel {
             ui.horizontal(|ui| {
                 if state.search_query.is_empty() {
                     ui.label(ICON_SEARCH);
-                } else if ui.small_button(ICON_CLOSE).on_hover_text("Clear search").clicked() {
+                } else if ui
+                    .small_button(ICON_CLOSE)
+                    .on_hover_text("Clear search")
+                    .clicked()
+                {
                     state.search_query.clear();
                 }
 
@@ -141,86 +133,73 @@ impl SidebarPanel {
 
             // Content list based on view mode
             Self::render_sidebar_content(ui, state);
-        } else if workspace_path.is_some() {
+        } else if library_file_path.is_some() {
             ui.add_space(16.0);
-            ui.label("No libraries found");
+            ui.label("Failed to load library");
             ui.add_space(4.0);
-            ui.label("Add .yaml library files to your workspace folder");
+            ui.label("Check the file format and try again");
         } else {
             ui.add_space(16.0);
-            ui.label("Select a workspace folder to get started");
+            ui.label("No library loaded");
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new("Use File → Open Library to get started")
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
         }
     }
 
-    /// Render the sidebar content (templates or variables list).
+    /// Render the sidebar content (prompts or variables list).
     fn render_sidebar_content(ui: &mut egui::Ui, state: &mut AppState) {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| match state.sidebar_view_mode {
-                SidebarViewMode::Templates => Self::render_template_list(ui, state),
+                SidebarViewMode::Prompts => Self::render_prompt_list(ui, state),
                 SidebarViewMode::Variables => Self::render_variable_list(ui, state),
             });
     }
 
-    /// Render the template list.
-    fn render_template_list(ui: &mut egui::Ui, state: &mut AppState) {
-        let Some(library) = state.selected_library() else {
-            ui.label("No library selected");
-            return;
-        };
-
+    /// Render the prompt list.
+    fn render_prompt_list(ui: &mut egui::Ui, state: &mut AppState) {
         let search_query = state.search_query.to_lowercase();
 
-        // Collect template info we need, releasing the borrow on state
-        let templates: Vec<_> = library
-            .templates
+        // Collect prompt info we need
+        let prompts: Vec<_> = state
+            .library
+            .prompts
             .iter()
-            .filter(|t| {
-                search_query.is_empty()
-                    || t.name.to_lowercase().contains(&search_query)
-                    || t.description.to_lowercase().contains(&search_query)
-            })
-            .map(|t| {
-                (
-                    t.id.clone(),
-                    t.name.clone(),
-                    t.description.clone(),
-                    promptgen_core::template_to_source(&t.ast),
-                )
-            })
+            .filter(|p| search_query.is_empty() || p.name.to_lowercase().contains(&search_query))
+            .map(|p| (p.name.clone(), p.content.clone()))
             .collect();
 
-        if templates.is_empty() {
+        if prompts.is_empty() {
             if search_query.is_empty() {
-                ui.label("No templates in this library");
+                ui.label("No prompts in this library");
             } else {
-                ui.label("No matching templates");
+                ui.label("No matching prompts");
             }
             return;
         }
 
-        let mut new_selected_id = state.selected_template_id.clone();
-        let mut load_template_source: Option<String> = None;
+        let mut new_selected_id = state.selected_prompt_id.clone();
+        let mut load_prompt_content: Option<String> = None;
 
-        for (id, name, description, source) in &templates {
-            let is_selected = new_selected_id.as_ref() == Some(id);
+        for (name, content) in &prompts {
+            let is_selected = new_selected_id.as_ref() == Some(name);
             let response = ui.selectable_label(is_selected, name);
 
             if response.clicked() {
-                new_selected_id = Some(id.clone());
-                load_template_source = Some(source.clone());
-            }
-
-            if !description.is_empty() {
-                response.on_hover_text(description);
+                new_selected_id = Some(name.clone());
+                load_prompt_content = Some(content.clone());
             }
         }
 
-        state.selected_template_id = new_selected_id;
+        state.selected_prompt_id = new_selected_id;
 
-        // Apply template source after the loop (outside the borrow)
-        if let Some(source) = load_template_source {
-            state.editor_content = source;
+        // Apply prompt content after the loop
+        if let Some(content) = load_prompt_content {
+            state.editor_content = content;
             state.update_parse_result();
         }
     }
@@ -238,12 +217,7 @@ impl SidebarPanel {
     /// - `@Ey/bl` - search variables matching "Ey" that have options matching "bl"
     /// - `@/bl` - search all options (same as plain search)
     fn render_variable_list(ui: &mut egui::Ui, state: &mut AppState) {
-        let Some(library) = state.selected_library() else {
-            ui.label("No library selected");
-            return;
-        };
-
-        if library.variables.is_empty() {
+        if state.library.variables.is_empty() {
             ui.label("No variables in this library");
             ui.add_space(8.0);
             if ui.button("+ New Variable").clicked() {
@@ -257,7 +231,7 @@ impl SidebarPanel {
 
         // Get search results for highlighting if we have a search query
         let search_result = if is_searching {
-            Some(state.workspace.search(search_query))
+            Some(state.library.search(search_query))
         } else {
             None
         };
@@ -279,7 +253,8 @@ impl SidebarPanel {
         let variables_display: Vec<VariableDisplay> = match &search_result {
             None => {
                 // No search - show all variables
-                library
+                state
+                    .library
                     .variables
                     .iter()
                     .map(|v| VariableDisplay {

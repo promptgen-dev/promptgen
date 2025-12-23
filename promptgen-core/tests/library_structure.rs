@@ -30,22 +30,21 @@ variables:
 }
 
 #[test]
-fn library_loads_templates() {
+fn library_loads_prompts() {
     let lib = lib(r#"
 variables:
   - name: Hair
     options:
       - blonde
-templates:
+prompts:
   - name: Character
-    description: A character template
-    source: "@Hair style"
+    content: "@Hair style"
 "#);
 
-    assert_eq!(lib.templates.len(), 1);
-    let tmpl = lib.find_template("Character");
-    assert!(tmpl.is_some());
-    assert_eq!(tmpl.unwrap().description, "A character template");
+    assert_eq!(lib.prompts.len(), 1);
+    let prompt = lib.prompts.iter().find(|p| p.name == "Character");
+    assert!(prompt.is_some());
+    assert_eq!(prompt.unwrap().content, "@Hair style");
 }
 
 #[test]
@@ -71,7 +70,7 @@ fn empty_library_loads() {
     let lib = empty_lib();
 
     assert!(lib.variables.is_empty());
-    assert!(lib.templates.is_empty());
+    assert!(lib.prompts.is_empty());
 }
 
 #[test]
@@ -90,19 +89,22 @@ variables:
 }
 
 #[test]
-fn template_extracts_library_refs() {
+fn prompt_extracts_library_refs() {
+    use promptgen_core::parse_prompt;
+
     let lib = lib(r#"
 variables:
   - name: Hair
     options:
       - blonde
-templates:
+prompts:
   - name: Test
-    source: "@Hair and @Eyes"
+    content: "@Hair and @Eyes"
 "#);
 
-    let tmpl = lib.find_template("Test").unwrap();
-    let refs = tmpl.referenced_variables();
+    let prompt = lib.prompts.iter().find(|p| p.name == "Test").unwrap();
+    let ast = parse_prompt(&prompt.content).unwrap();
+    let refs = lib.get_references(&ast);
 
     assert_eq!(refs.len(), 2);
     assert_eq!(refs[0].variable, "Hair");
@@ -110,20 +112,23 @@ templates:
 }
 
 #[test]
-fn template_extracts_slots() {
+fn prompt_extracts_slots() {
+    use promptgen_core::parse_prompt;
+
     let lib = lib(r#"
 variables: []
-templates:
+prompts:
   - name: Greeting
-    source: "Hello {{ Name }}, welcome to {{ Place }}"
+    content: "Hello {{ Name }}, welcome to {{ Place }}"
 "#);
 
-    let tmpl = lib.find_template("Greeting").unwrap();
-    let slots = tmpl.slots();
+    let prompt = lib.prompts.iter().find(|p| p.name == "Greeting").unwrap();
+    let ast = parse_prompt(&prompt.content).unwrap();
+    let slots = lib.get_slot_definitions(&ast);
 
     assert_eq!(slots.len(), 2);
-    assert!(slots.iter().any(|s| s.name == "Name"));
-    assert!(slots.iter().any(|s| s.name == "Place"));
+    assert!(slots.iter().any(|s| s.label == "Name"));
+    assert!(slots.iter().any(|s| s.label == "Place"));
 }
 
 // ============================================================================
@@ -139,8 +144,7 @@ variables:
       - value
 "#);
 
-    // The common::lib helper sets id and name to "test"
-    assert_eq!(lib.id, "test");
+    // The common::lib helper sets name to "test"
     assert_eq!(lib.name, "test");
 }
 

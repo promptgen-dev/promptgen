@@ -13,7 +13,7 @@ variables:
       - blue eyes
       - green eyes
 
-templates:
+prompts:
   - name: Character
     description: A basic character description
     source: "{Hair}, {Eyes}"

@@ -4,10 +4,7 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 use promptgen_core::{
-    EvalContext, Library, PromptTemplate, RenderError, Workspace,
-    io::parse_pack,
-    parser::parse_template,
-    render,
+    EvalContext, Library, RenderError, io::parse_library, parser::parse_prompt, render,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -25,17 +22,17 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Validate a template and show its structure
+    /// Validate a prompt and show its structure
     Parse {
         /// Path to the library file
         #[arg(short, long)]
         lib: Option<PathBuf>,
 
-        /// Name of a template in the library to parse
+        /// Name of a prompt in the library to parse
         #[arg(short, long)]
-        template: Option<String>,
+        prompt: Option<String>,
 
-        /// Inline template string to parse
+        /// Inline prompt string to parse
         #[arg(short, long)]
         inline: Option<String>,
 
@@ -46,7 +43,7 @@ enum Commands {
 
     /// List parts of the library
     List {
-        /// What to list (variables or templates)
+        /// What to list (variables or prompts)
         what: ListTarget,
 
         /// Path to the library file
@@ -58,17 +55,17 @@ enum Commands {
         format: OutputFormat,
     },
 
-    /// Render a template to a final prompt string
+    /// Render a prompt to a final prompt string
     Render {
         /// Path to the library file
         #[arg(short, long)]
         lib: PathBuf,
 
-        /// Name of the template to render
+        /// Name of the prompt to render
         #[arg(short, long)]
-        template: Option<String>,
+        prompt: Option<String>,
 
-        /// Inline template string to render
+        /// Inline prompt string to render
         #[arg(short, long)]
         inline: Option<String>,
 
@@ -95,7 +92,7 @@ enum OutputFormat {
 #[derive(Clone, ValueEnum)]
 enum ListTarget {
     Variables,
-    Templates,
+    Prompts,
 }
 
 // ============================================================================
@@ -186,15 +183,21 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), CliError> {
     match cli.command {
-        Commands::Parse { lib, template, inline, format } => {
-            cmd_parse(lib, template, inline, format)
-        }
-        Commands::List { what, lib, format } => {
-            cmd_list(what, lib, format)
-        }
-        Commands::Render { lib, template, inline, slots, seed, format } => {
-            cmd_render(lib, template, inline, slots, seed, format)
-        }
+        Commands::Parse {
+            lib,
+            prompt,
+            inline,
+            format,
+        } => cmd_parse(lib, prompt, inline, format),
+        Commands::List { what, lib, format } => cmd_list(what, lib, format),
+        Commands::Render {
+            lib,
+            prompt,
+            inline,
+            slots,
+            seed,
+            format,
+        } => cmd_render(lib, prompt, inline, slots, seed, format),
     }
 }
 
@@ -218,47 +221,55 @@ struct NodeInfo {
 
 fn cmd_parse(
     lib: Option<PathBuf>,
-    template: Option<String>,
+    prompt: Option<String>,
     inline: Option<String>,
     format: OutputFormat,
 ) -> Result<(), CliError> {
-    let ast = match (&lib, &template, &inline) {
-        (Some(lib_path), Some(template_name), None) => {
-            // Parse a template from the library
+    let ast = match (&lib, &prompt, &inline) {
+        (Some(lib_path), Some(prompt_name), None) => {
+            // Parse a saved prompt from the library
             let content = fs::read_to_string(lib_path)?;
-            let library = parse_pack(&content)?;
-            let tmpl = library.find_template(template_name).ok_or_else(|| {
-                CliError::InvalidArgs(format!("Template '{}' not found in library", template_name))
-            })?;
-            tmpl.ast.clone()
+            let library = parse_library(&content)?;
+            let prompt = library
+                .prompts
+                .iter()
+                .find(|p| p.name == *prompt_name)
+                .ok_or_else(|| {
+                    CliError::InvalidArgs(format!("Prompt '{}' not found in library", prompt_name))
+                })?;
+            parse_prompt(&prompt.content)?
         }
         (None, None, Some(inline_str)) | (Some(_), None, Some(inline_str)) => {
-            // Parse an inline template string
-            parse_template(inline_str)?
+            // Parse an inline prompt string
+            parse_prompt(inline_str)?
         }
         _ => {
             return Err(CliError::InvalidArgs(
-                "Specify either --template (with --lib) or --inline".to_string(),
+                "Specify either --prompt (with --lib) or --inline".to_string(),
             ));
         }
     };
 
     match format {
         OutputFormat::Text => {
-            println!("Template structure:");
+            println!("Prompt structure:");
             for (node, span) in &ast.nodes {
                 let (node_type, content) = describe_node(node);
                 println!("  [{}-{}] {}: {}", span.start, span.end, node_type, content);
             }
 
             // Show library references
-            let refs: Vec<_> = ast.nodes.iter().filter_map(|(node, _)| {
-                if let promptgen_core::Node::LibraryRef(lib_ref) = node {
-                    Some(format_library_ref(lib_ref))
-                } else {
-                    None
-                }
-            }).collect();
+            let refs: Vec<_> = ast
+                .nodes
+                .iter()
+                .filter_map(|(node, _)| {
+                    if let promptgen_core::Node::LibraryRef(lib_ref) = node {
+                        Some(format_library_ref(lib_ref))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
 
             if !refs.is_empty() {
                 println!("\nLibrary references:");
@@ -268,13 +279,17 @@ fn cmd_parse(
             }
 
             // Show slots
-            let slots: Vec<_> = ast.nodes.iter().filter_map(|(node, _)| {
-                if let promptgen_core::Node::SlotBlock(slot) = node {
-                    Some(slot.label.0.clone())
-                } else {
-                    None
-                }
-            }).collect();
+            let slots: Vec<_> = ast
+                .nodes
+                .iter()
+                .filter_map(|(node, _)| {
+                    if let promptgen_core::Node::SlotBlock(slot) = node {
+                        Some(slot.label.0.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
 
             if !slots.is_empty() {
                 println!("\nSlots:");
@@ -284,28 +299,44 @@ fn cmd_parse(
             }
         }
         OutputFormat::Json => {
-            let nodes: Vec<NodeInfo> = ast.nodes.iter().map(|(node, _)| {
-                let (node_type, content) = describe_node(node);
-                NodeInfo { node_type, content }
-            }).collect();
+            let nodes: Vec<NodeInfo> = ast
+                .nodes
+                .iter()
+                .map(|(node, _)| {
+                    let (node_type, content) = describe_node(node);
+                    NodeInfo { node_type, content }
+                })
+                .collect();
 
-            let refs: Vec<String> = ast.nodes.iter().filter_map(|(node, _)| {
-                if let promptgen_core::Node::LibraryRef(lib_ref) = node {
-                    Some(format_library_ref(lib_ref))
-                } else {
-                    None
-                }
-            }).collect();
+            let refs: Vec<String> = ast
+                .nodes
+                .iter()
+                .filter_map(|(node, _)| {
+                    if let promptgen_core::Node::LibraryRef(lib_ref) = node {
+                        Some(format_library_ref(lib_ref))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
 
-            let slots: Vec<String> = ast.nodes.iter().filter_map(|(node, _)| {
-                if let promptgen_core::Node::SlotBlock(slot) = node {
-                    Some(slot.label.0.clone())
-                } else {
-                    None
-                }
-            }).collect();
+            let slots: Vec<String> = ast
+                .nodes
+                .iter()
+                .filter_map(|(node, _)| {
+                    if let promptgen_core::Node::SlotBlock(slot) = node {
+                        Some(slot.label.0.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
 
-            let output = ParseOutput { nodes, library_refs: refs, slots };
+            let output = ParseOutput {
+                nodes,
+                library_refs: refs,
+                slots,
+            };
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
     }
@@ -322,12 +353,13 @@ fn describe_node(node: &promptgen_core::Node) -> (String, String) {
             ("LibraryRef".to_string(), format_library_ref(lib_ref))
         }
         promptgen_core::Node::InlineOptions(options) => {
-            let items: Vec<String> = options.iter().map(|opt| {
-                match opt {
+            let items: Vec<String> = options
+                .iter()
+                .map(|opt| match opt {
                     promptgen_core::OptionItem::Text(t) => t.clone(),
                     promptgen_core::OptionItem::Nested(_) => "[nested]".to_string(),
-                }
-            }).collect();
+                })
+                .collect();
             ("InlineOptions".to_string(), items.join(" | "))
         }
     }
@@ -351,19 +383,17 @@ struct VariableInfo {
 }
 
 #[derive(Serialize)]
-struct TemplateInfo {
-    id: String,
+struct PromptInfo {
     name: String,
-    description: String,
 }
 
 fn cmd_list(what: ListTarget, lib: PathBuf, format: OutputFormat) -> Result<(), CliError> {
     let content = fs::read_to_string(&lib)?;
-    let library = parse_pack(&content)?;
+    let library = parse_library(&content)?;
 
     match what {
         ListTarget::Variables => list_variables(&library, format),
-        ListTarget::Templates => list_templates(&library, format),
+        ListTarget::Prompts => list_prompts(&library, format),
     }
 }
 
@@ -376,39 +406,37 @@ fn list_variables(library: &Library, format: OutputFormat) -> Result<(), CliErro
             }
         }
         OutputFormat::Json => {
-            let variables: Vec<VariableInfo> = library.variables.iter().map(|g| {
-                VariableInfo {
+            let variables: Vec<VariableInfo> = library
+                .variables
+                .iter()
+                .map(|g| VariableInfo {
                     name: g.name.clone(),
                     option_count: g.options.len(),
-                }
-            }).collect();
+                })
+                .collect();
             println!("{}", serde_json::to_string_pretty(&variables)?);
         }
     }
     Ok(())
 }
 
-fn list_templates(library: &Library, format: OutputFormat) -> Result<(), CliError> {
+fn list_prompts(library: &Library, format: OutputFormat) -> Result<(), CliError> {
     match format {
         OutputFormat::Text => {
-            println!("Templates in '{}':", library.name);
-            for tmpl in &library.templates {
-                if tmpl.description.is_empty() {
-                    println!("  {}", tmpl.name);
-                } else {
-                    println!("  {} - {}", tmpl.name, tmpl.description);
-                }
+            println!("Prompts in '{}':", library.name);
+            for prompt in &library.prompts {
+                println!("  {}", prompt.name);
             }
         }
         OutputFormat::Json => {
-            let templates: Vec<TemplateInfo> = library.templates.iter().map(|t| {
-                TemplateInfo {
-                    id: t.id.clone(),
-                    name: t.name.clone(),
-                    description: t.description.clone(),
-                }
-            }).collect();
-            println!("{}", serde_json::to_string_pretty(&templates)?);
+            let prompts: Vec<PromptInfo> = library
+                .prompts
+                .iter()
+                .map(|p| PromptInfo {
+                    name: p.name.clone(),
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&prompts)?);
         }
     }
     Ok(())
@@ -427,34 +455,37 @@ struct RenderOutput {
 #[derive(Serialize)]
 struct ChosenOptionInfo {
     variable: String,
-    library: Option<String>,
     option: String,
 }
 
 fn cmd_render(
     lib: PathBuf,
-    template: Option<String>,
+    prompt: Option<String>,
     inline: Option<String>,
     slots: Option<String>,
     seed: Option<u64>,
     format: OutputFormat,
 ) -> Result<(), CliError> {
     let content = fs::read_to_string(&lib)?;
-    let library = parse_pack(&content)?;
+    let library = parse_library(&content)?;
 
-    let tmpl: PromptTemplate = match (&template, &inline) {
-        (Some(template_name), None) => {
-            library.find_template(template_name).ok_or_else(|| {
-                CliError::InvalidArgs(format!("Template '{}' not found in library", template_name))
-            })?.clone()
+    let ast = match (&prompt, &inline) {
+        (Some(prompt_name), None) => {
+            let prompt = library
+                .prompts
+                .iter()
+                .find(|p| p.name == *prompt_name)
+                .ok_or_else(|| {
+                    CliError::InvalidArgs(format!("Prompt '{}' not found in library", prompt_name))
+                })?;
+            parse_prompt(&prompt.content).map_err(|e| CliError::Parse(e.to_string()))?
         }
         (None, Some(inline_str)) => {
-            let ast = parse_template(inline_str).map_err(|e| CliError::Parse(e.to_string()))?;
-            PromptTemplate::new("inline", ast)
+            parse_prompt(inline_str).map_err(|e| CliError::Parse(e.to_string()))?
         }
         _ => {
             return Err(CliError::InvalidArgs(
-                "Specify either --template or --inline".to_string(),
+                "Specify either --prompt or --inline".to_string(),
             ));
         }
     };
@@ -466,20 +497,17 @@ fn cmd_render(
         HashMap::new()
     };
 
-    // Create workspace with the library for evaluation
-    let workspace = Workspace::with_single_library(library);
-
     // Create evaluation context
     let mut ctx = match seed {
-        Some(s) => EvalContext::with_seed(&workspace, s),
-        None => EvalContext::new(&workspace),
+        Some(s) => EvalContext::with_seed(&library, s),
+        None => EvalContext::new(&library),
     };
     for (k, v) in slot_overrides {
         ctx.set_slot(&k, v);
     }
 
-    // Render the template
-    let result = render(&tmpl.ast, &mut ctx)?;
+    // Render the prompt
+    let result = render(&ast, &mut ctx)?;
 
     match format {
         OutputFormat::Text => {
@@ -488,13 +516,14 @@ fn cmd_render(
         OutputFormat::Json => {
             let output = RenderOutput {
                 prompt: result.text,
-                chosen_options: result.chosen_options.into_iter().map(|c| {
-                    ChosenOptionInfo {
+                chosen_options: result
+                    .chosen_options
+                    .into_iter()
+                    .map(|c| ChosenOptionInfo {
                         variable: c.variable_name,
-                        library: c.library_name,
                         option: c.option_text,
-                    }
-                }).collect(),
+                    })
+                    .collect(),
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
         }

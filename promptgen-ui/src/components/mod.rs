@@ -2,9 +2,9 @@ mod autocomplete;
 mod editor;
 mod focusable_frame;
 mod preview;
+pub mod prompt_editor;
 mod sidebar;
 mod slots;
-pub mod template_editor;
 mod variable_editor;
 
 pub use editor::EditorPanel;

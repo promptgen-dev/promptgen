@@ -1,8 +1,8 @@
 use crate::span::Span;
 
-/// A parsed template containing a sequence of nodes.
+/// A parsed prompt containing a sequence of nodes.
 #[derive(Debug, Clone)]
-pub struct Template {
+pub struct Prompt {
     pub nodes: Vec<Spanned<Node>>,
 }
 
@@ -268,7 +268,7 @@ impl SlotBlock {
     }
 }
 
-/// Template node types.
+/// Prompt node types.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     /// Plain literal text.

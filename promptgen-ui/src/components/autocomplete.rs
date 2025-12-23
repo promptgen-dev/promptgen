@@ -1,4 +1,4 @@
-//! Autocomplete popup component for the template editor.
+//! Autocomplete popup component for the prompt editor.
 //!
 //! Shows variable and option completions when the user types `@` in the editor.
 
@@ -6,7 +6,7 @@ use egui::Key;
 
 use crate::state::{AppState, AutocompleteMode};
 use crate::theme::syntax;
-use promptgen_core::Workspace;
+use promptgen_core::Library;
 use promptgen_core::search::VariableSearchResult;
 
 /// Maximum number of completions to show in the popup
@@ -18,7 +18,6 @@ pub enum CompletionItem {
     /// A variable name completion
     Variable {
         name: String,
-        library_name: String,
         option_count: usize,
         match_indices: Vec<usize>,
     },
@@ -50,7 +49,7 @@ impl CompletionItem {
 
 /// Get completions based on current autocomplete state for a specific editor
 pub fn get_completions(
-    workspace: &Workspace,
+    library: &Library,
     state: &AppState,
     editor_id: &str,
 ) -> Vec<CompletionItem> {
@@ -62,7 +61,7 @@ pub fn get_completions(
     match &autocomplete.mode {
         Some(AutocompleteMode::Variables) => {
             // Search for variable names
-            let results = workspace.search_variables(query);
+            let results = library.search_variables(query);
 
             // If the query exactly matches a variable name (case-insensitive), don't show completions.
             // This allows Enter to work normally when the user has typed a complete variable reference.
@@ -78,7 +77,6 @@ pub fn get_completions(
                 .take(MAX_COMPLETIONS)
                 .map(|r: VariableSearchResult| CompletionItem::Variable {
                     name: r.variable_name,
-                    library_name: r.library_name,
                     option_count: r.options.len(),
                     match_indices: r.match_indices,
                 })
@@ -86,7 +84,7 @@ pub fn get_completions(
         }
         Some(AutocompleteMode::Options { variable_name }) => {
             // Search for options within matching variables
-            let results = workspace.search_options_in_matching_variables(variable_name, query);
+            let results = library.search_options_in_matching_variables(variable_name, query);
             let mut completions = Vec::new();
             for result in results {
                 for opt in result.matches {
@@ -168,7 +166,6 @@ impl AutocompletePopup {
                             let label = match item {
                                 CompletionItem::Variable {
                                     name,
-                                    library_name,
                                     option_count,
                                     match_indices,
                                 } => {
@@ -201,9 +198,9 @@ impl AutocompletePopup {
                                         );
                                     }
 
-                                    // Add option count and library name
+                                    // Add option count
                                     job.append(
-                                        &format!(" ({}) - {}", option_count, library_name),
+                                        &format!(" ({} options)", option_count),
                                         0.0,
                                         egui::TextFormat {
                                             color: egui::Color32::from_rgb(108, 112, 134), // overlay0

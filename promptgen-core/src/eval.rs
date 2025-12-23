@@ -1,9 +1,9 @@
-//! Template evaluation module.
+//! Prompt evaluation module.
 //!
-//! Evaluates templates against a Workspace to produce resolved prompts.
+//! Evaluates prompts against a Library to produce resolved prompts.
 //!
 //! Key features:
-//! - LibraryRef resolution (finds variables by name, supports multi-library)
+//! - Variable resolution (finds variables by name)
 //! - InlineOptions evaluation (random selection from {a|b|c})
 //! - Lazy parsing of option text for nested grammar
 //! - Cycle detection for circular references
@@ -12,15 +12,14 @@ use std::collections::HashMap;
 
 use rand::prelude::*;
 
-use crate::ast::{LibraryRef, Node, OptionItem, PickOperator, PickSlot, SlotKind, Template};
-use crate::library::PromptVariable;
-use crate::parser::parse_template;
-use crate::workspace::Workspace;
+use crate::ast::{LibraryRef, Node, OptionItem, PickOperator, PickSlot, Prompt, SlotKind};
+use crate::library::Library;
+use crate::parser::parse_prompt;
 
-/// Context for evaluating a template against a workspace.
+/// Context for evaluating a prompt against a library.
 pub struct EvalContext<'a, R: Rng = StdRng> {
-    /// The workspace containing libraries.
-    pub workspace: &'a Workspace,
+    /// The library containing variables.
+    pub library: &'a Library,
     /// Random number generator for selecting options.
     pub rng: R,
     /// Overrides for slots (slot name -> list of values).
@@ -32,12 +31,12 @@ pub struct EvalContext<'a, R: Rng = StdRng> {
 }
 
 impl<'a> EvalContext<'a, StdRng> {
-    /// Create a new context with the given workspace and OS random.
+    /// Create a new context with the given library and OS random.
     /// Note: This will not work in WASM environments. Use `with_seed` instead.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn new(workspace: &'a Workspace) -> Self {
+    pub fn new(library: &'a Library) -> Self {
         Self {
-            workspace,
+            library,
             rng: StdRng::from_os_rng(),
             slot_overrides: HashMap::new(),
             eval_stack: Vec::new(),
@@ -45,9 +44,9 @@ impl<'a> EvalContext<'a, StdRng> {
     }
 
     /// Create a new context with a specific seed for deterministic evaluation.
-    pub fn with_seed(workspace: &'a Workspace, seed: u64) -> Self {
+    pub fn with_seed(library: &'a Library, seed: u64) -> Self {
         Self {
-            workspace,
+            library,
             rng: StdRng::seed_from_u64(seed),
             slot_overrides: HashMap::new(),
             eval_stack: Vec::new(),
@@ -57,9 +56,9 @@ impl<'a> EvalContext<'a, StdRng> {
 
 impl<'a, R: Rng> EvalContext<'a, R> {
     /// Create a new context with a custom RNG.
-    pub fn with_rng(workspace: &'a Workspace, rng: R) -> Self {
+    pub fn with_rng(library: &'a Library, rng: R) -> Self {
         Self {
-            workspace,
+            library,
             rng,
             slot_overrides: HashMap::new(),
             eval_stack: Vec::new(),
@@ -91,15 +90,13 @@ impl<'a, R: Rng> EvalContext<'a, R> {
 pub struct ChosenOption {
     /// The variable name that was referenced.
     pub variable_name: String,
-    /// The library name (if qualified reference or resolved).
-    pub library_name: Option<String>,
     /// The text of the option that was selected.
     pub option_text: String,
     /// The index of the option in the variable.
     pub option_index: usize,
 }
 
-/// Result of rendering a template.
+/// Result of rendering a prompt.
 #[derive(Debug, Clone)]
 pub struct RenderResult {
     /// The final rendered prompt text.
@@ -116,9 +113,6 @@ pub enum RenderError {
     #[error("variable not found: {0}")]
     VariableNotFound(String),
 
-    #[error("library not found: {0}")]
-    LibraryNotFound(String),
-
     #[error("variable has no options: {0}")]
     EmptyVariable(String),
 
@@ -127,9 +121,6 @@ pub enum RenderError {
 
     #[error("parse error in option text: {0}")]
     OptionParseError(String),
-
-    #[error("ambiguous variable reference '{variable}' found in libraries: {libraries}")]
-    AmbiguousVariable { variable: String, libraries: String },
 
     #[error("slot '{slot}' expects exactly one value, but got {count}")]
     TooManyValuesForOne { slot: String, count: usize },
@@ -145,9 +136,9 @@ pub enum RenderError {
     SlotReferencesSlot(String),
 }
 
-/// Render a parsed template AST using the given context.
+/// Render a parsed prompt AST using the given context.
 pub fn render<R: Rng>(
-    ast: &Template,
+    ast: &Prompt,
     ctx: &mut EvalContext<'_, R>,
 ) -> Result<RenderResult, RenderError> {
     let mut output = String::new();
@@ -230,7 +221,7 @@ fn eval_text_with_grammar<R: Rng>(
     ctx: &mut EvalContext<'_, R>,
     chosen_options: &mut Vec<ChosenOption>,
 ) -> Result<String, RenderError> {
-    let ast = parse_template(text).map_err(|e| RenderError::OptionParseError(e.to_string()))?;
+    let ast = parse_prompt(text).map_err(|e| RenderError::OptionParseError(e.to_string()))?;
 
     // Check for slot blocks in the parsed AST - slots may not reference other slots
     for (node, _span) in &ast.nodes {
@@ -335,8 +326,11 @@ fn resolve_library_ref<R: Rng>(
         )));
     }
 
-    // Find the variable using workspace resolution
-    let (library_name, variable) = resolve_variable(ctx.workspace, lib_ref)?;
+    // Find the variable in the library (ignore any library qualifier in single-library mode)
+    let variable = ctx
+        .library
+        .find_variable(variable_name)
+        .ok_or_else(|| RenderError::VariableNotFound(variable_name.clone()))?;
 
     if variable.options.is_empty() {
         return Err(RenderError::EmptyVariable(variable_name.clone()));
@@ -357,51 +351,11 @@ fn resolve_library_ref<R: Rng>(
 
     let chosen = ChosenOption {
         variable_name: variable_name.clone(),
-        library_name: Some(library_name),
         option_text: evaluated_text.clone(),
         option_index: idx,
     };
 
     Ok((evaluated_text, chosen))
-}
-
-/// Resolve a library reference to find the variable.
-/// Returns (library_name, variable) on success.
-fn resolve_variable<'a>(
-    workspace: &'a Workspace,
-    lib_ref: &LibraryRef,
-) -> Result<(String, &'a PromptVariable), RenderError> {
-    match &lib_ref.library {
-        // Qualified reference: @"LibName:VariableName"
-        Some(lib_name) => {
-            let lib = workspace
-                .get_library_by_name(lib_name)
-                .ok_or_else(|| RenderError::LibraryNotFound(lib_name.clone()))?;
-
-            let variable = lib
-                .find_variable(&lib_ref.variable)
-                .ok_or_else(|| RenderError::VariableNotFound(lib_ref.variable.clone()))?;
-
-            Ok((lib.name.clone(), variable))
-        }
-
-        // Unqualified reference: @VariableName
-        None => {
-            let matches = workspace.find_variables(&lib_ref.variable);
-
-            match matches.len() {
-                0 => Err(RenderError::VariableNotFound(lib_ref.variable.clone())),
-                1 => Ok((matches[0].0.name.clone(), matches[0].1)),
-                _ => {
-                    let lib_names: Vec<_> = matches.iter().map(|(l, _)| l.name.as_str()).collect();
-                    Err(RenderError::AmbiguousVariable {
-                        variable: lib_ref.variable.clone(),
-                        libraries: lib_names.join(", "),
-                    })
-                }
-            }
-        }
-    }
 }
 
 /// Evaluate inline options {a|b|c}.
@@ -438,11 +392,10 @@ fn eval_inline_options<R: Rng>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::library::{Library, PromptVariable};
-    use crate::workspace::WorkspaceBuilder;
+    use crate::library::PromptVariable;
 
-    fn make_test_workspace() -> Workspace {
-        let mut lib = Library::with_id("test-lib", "Test Library");
+    fn make_test_library() -> Library {
+        let mut lib = Library::new("Test Library");
 
         lib.variables.push(PromptVariable::with_options(
             "Hair",
@@ -459,39 +412,14 @@ mod tests {
             vec!["red", "blue", "green"],
         ));
 
-        WorkspaceBuilder::new().add_library(lib).build()
-    }
-
-    fn make_multi_library_workspace() -> Workspace {
-        let mut lib1 = Library::with_id("lib1", "Characters");
-        lib1.variables.push(PromptVariable::with_options(
-            "Hair",
-            vec!["blonde", "red", "black"],
-        ));
-        lib1.variables
-            .push(PromptVariable::with_options("Eyes", vec!["blue", "green"]));
-
-        let mut lib2 = Library::with_id("lib2", "Settings");
-        lib2.variables.push(PromptVariable::with_options(
-            "Weather",
-            vec!["sunny", "rainy", "cloudy"],
-        ));
-        lib2.variables.push(PromptVariable::with_options(
-            "Time",
-            vec!["morning", "evening"],
-        ));
-
-        WorkspaceBuilder::new()
-            .add_library(lib1)
-            .add_library(lib2)
-            .build()
+        lib
     }
 
     #[test]
     fn test_render_plain_text() {
-        let ws = make_test_workspace();
-        let ast = parse_template("Hello, world!").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
+        let lib = make_test_library();
+        let ast = parse_prompt("Hello, world!").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
 
         let result = render(&ast, &mut ctx).unwrap();
         assert_eq!(result.text, "Hello, world!");
@@ -500,9 +428,9 @@ mod tests {
 
     #[test]
     fn test_render_library_ref() {
-        let ws = make_test_workspace();
-        let ast = parse_template("A girl with @Hair").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
+        let lib = make_test_library();
+        let ast = parse_prompt("A girl with @Hair").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
 
         let result = render(&ast, &mut ctx).unwrap();
         assert!(result.text.starts_with("A girl with "));
@@ -517,41 +445,28 @@ mod tests {
 
     #[test]
     fn test_render_quoted_library_ref() {
-        let mut lib = Library::with_id("test", "Test");
+        let mut lib = Library::new("Test");
         lib.variables.push(PromptVariable::with_options(
             "Eye Color",
             vec!["amber", "violet"],
         ));
 
-        let ws = WorkspaceBuilder::new().add_library(lib).build();
-        let ast = parse_template(r#"@"Eye Color""#).unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
+        let ast = parse_prompt(r#"@"Eye Color""#).unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
 
         let result = render(&ast, &mut ctx).unwrap();
         assert!(result.text == "amber" || result.text == "violet");
     }
 
     #[test]
-    fn test_render_qualified_reference() {
-        let ws = make_multi_library_workspace();
-        let ast = parse_template(r#"@"Characters:Hair" in @"Settings:Weather" weather"#).unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
-
-        let result = render(&ast, &mut ctx).unwrap();
-        assert!(result.text.contains(" in "));
-        assert!(result.text.contains(" weather"));
-        assert_eq!(result.chosen_options.len(), 2);
-    }
-
-    #[test]
     fn test_render_deterministic_with_seed() {
-        let ws = make_test_workspace();
-        let ast = parse_template("@Hair and @Eyes").unwrap();
+        let lib = make_test_library();
+        let ast = parse_prompt("@Hair and @Eyes").unwrap();
 
-        let mut ctx1 = EvalContext::with_seed(&ws, 12345);
+        let mut ctx1 = EvalContext::with_seed(&lib, 12345);
         let result1 = render(&ast, &mut ctx1).unwrap();
 
-        let mut ctx2 = EvalContext::with_seed(&ws, 12345);
+        let mut ctx2 = EvalContext::with_seed(&lib, 12345);
         let result2 = render(&ast, &mut ctx2).unwrap();
 
         assert_eq!(result1.text, result2.text);
@@ -559,9 +474,9 @@ mod tests {
 
     #[test]
     fn test_render_inline_options() {
-        let ws = make_test_workspace();
-        let ast = parse_template("{hot|cold} weather").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
+        let lib = make_test_library();
+        let ast = parse_prompt("{hot|cold} weather").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
 
         let result = render(&ast, &mut ctx).unwrap();
         assert!(result.text == "hot weather" || result.text == "cold weather");
@@ -569,9 +484,9 @@ mod tests {
 
     #[test]
     fn test_render_slot_with_override() {
-        let ws = make_test_workspace();
-        let ast = parse_template("Hello {{ Name }}!").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
+        let lib = make_test_library();
+        let ast = parse_prompt("Hello {{ Name }}!").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
         ctx.set_slot("Name", "Alice");
 
         let result = render(&ast, &mut ctx).unwrap();
@@ -580,9 +495,9 @@ mod tests {
 
     #[test]
     fn test_render_slot_without_override() {
-        let ws = make_test_workspace();
-        let ast = parse_template("Hello {{ Name }}!").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
+        let lib = make_test_library();
+        let ast = parse_prompt("Hello {{ Name }}!").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
 
         let result = render(&ast, &mut ctx).unwrap();
         // Empty slots render to empty string per spec
@@ -591,9 +506,9 @@ mod tests {
 
     #[test]
     fn test_render_slot_with_grammar() {
-        let ws = make_test_workspace();
-        let ast = parse_template("A hero: {{ character }}").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
+        let lib = make_test_library();
+        let ast = parse_prompt("A hero: {{ character }}").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
         ctx.set_slot("character", "@Hair warrior");
 
         let result = render(&ast, &mut ctx).unwrap();
@@ -603,9 +518,9 @@ mod tests {
 
     #[test]
     fn test_render_comments_not_included() {
-        let ws = make_test_workspace();
-        let ast = parse_template("Hello # this is a comment\nWorld").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
+        let lib = make_test_library();
+        let ast = parse_prompt("Hello # this is a comment\nWorld").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
 
         let result = render(&ast, &mut ctx).unwrap();
         assert!(!result.text.contains("this is a comment"));
@@ -614,65 +529,29 @@ mod tests {
 
     #[test]
     fn test_render_variable_not_found_error() {
-        let ws = make_test_workspace();
-        let ast = parse_template("@NonExistent").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
+        let lib = make_test_library();
+        let ast = parse_prompt("@NonExistent").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
 
         let result = render(&ast, &mut ctx);
         assert!(matches!(result, Err(RenderError::VariableNotFound(_))));
     }
 
     #[test]
-    fn test_render_library_not_found_error() {
-        let ws = make_test_workspace();
-        let ast = parse_template(r#"@"FakeLib:Hair""#).unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
-
-        let result = render(&ast, &mut ctx);
-        assert!(matches!(result, Err(RenderError::LibraryNotFound(_))));
-    }
-
-    #[test]
     fn test_render_empty_variable_error() {
-        let mut lib = Library::with_id("test", "Test");
+        let mut lib = Library::new("Test");
         lib.variables.push(PromptVariable::new("Empty", vec![]));
 
-        let ws = WorkspaceBuilder::new().add_library(lib).build();
-        let ast = parse_template("@Empty").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
+        let ast = parse_prompt("@Empty").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
 
         let result = render(&ast, &mut ctx);
         assert!(matches!(result, Err(RenderError::EmptyVariable(_))));
     }
 
     #[test]
-    fn test_render_ambiguous_variable_error() {
-        // Create two libraries with the same variable name
-        let mut lib1 = Library::with_id("lib1", "Lib1");
-        lib1.variables
-            .push(PromptVariable::with_options("Color", vec!["red", "blue"]));
-
-        let mut lib2 = Library::with_id("lib2", "Lib2");
-        lib2.variables.push(PromptVariable::with_options(
-            "Color",
-            vec!["green", "yellow"],
-        ));
-
-        let ws = WorkspaceBuilder::new()
-            .add_library(lib1)
-            .add_library(lib2)
-            .build();
-
-        let ast = parse_template("@Color").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
-
-        let result = render(&ast, &mut ctx);
-        assert!(matches!(result, Err(RenderError::AmbiguousVariable { .. })));
-    }
-
-    #[test]
     fn test_render_nested_grammar_in_options() {
-        let mut lib = Library::with_id("test", "Test");
+        let mut lib = Library::new("Test");
         lib.variables.push(PromptVariable::with_options(
             "Color",
             vec!["red", "blue", "green"],
@@ -682,15 +561,14 @@ mod tests {
             vec!["@Color eyes", "sparkling eyes"],
         ));
 
-        let ws = WorkspaceBuilder::new().add_library(lib).build();
-        let ast = parse_template("@FancyEyes").unwrap();
+        let ast = parse_prompt("@FancyEyes").unwrap();
 
         // Test multiple times to cover both options
         let mut found_color_eyes = false;
         let mut found_sparkling = false;
 
         for seed in 0..50 {
-            let mut ctx = EvalContext::with_seed(&ws, seed);
+            let mut ctx = EvalContext::with_seed(&lib, seed);
             let result = render(&ast, &mut ctx).unwrap();
 
             if result.text.contains(" eyes") && !result.text.contains("sparkling") {
@@ -711,7 +589,7 @@ mod tests {
 
     #[test]
     fn test_render_cycle_detection() {
-        let mut lib = Library::with_id("test", "Test");
+        let mut lib = Library::new("Test");
 
         // Create a cycle: A references B, B references A
         lib.variables
@@ -719,38 +597,23 @@ mod tests {
         lib.variables
             .push(PromptVariable::with_options("B", vec!["@A"]));
 
-        let ws = WorkspaceBuilder::new().add_library(lib).build();
-        let ast = parse_template("@A").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
+        let ast = parse_prompt("@A").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
 
         let result = render(&ast, &mut ctx);
         assert!(matches!(result, Err(RenderError::CircularReference(_))));
     }
 
     #[test]
-    fn test_render_mixed_template() {
-        let ws = make_test_workspace();
-        let ast = parse_template("A {big|small} creature with @Hair and @Eyes").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
+    fn test_render_mixed_prompt() {
+        let lib = make_test_library();
+        let ast = parse_prompt("A {big|small} creature with @Hair and @Eyes").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
 
         let result = render(&ast, &mut ctx).unwrap();
         assert!(result.text.contains("creature with"));
         assert!(result.text.contains(" and "));
         // Should have 2 chosen options (Hair and Eyes)
         assert_eq!(result.chosen_options.len(), 2);
-    }
-
-    #[test]
-    fn test_chosen_option_includes_library_name() {
-        let ws = make_multi_library_workspace();
-        let ast = parse_template("@Hair").unwrap();
-        let mut ctx = EvalContext::with_seed(&ws, 42);
-
-        let result = render(&ast, &mut ctx).unwrap();
-        assert_eq!(result.chosen_options.len(), 1);
-        assert_eq!(
-            result.chosen_options[0].library_name,
-            Some("Characters".to_string())
-        );
     }
 }

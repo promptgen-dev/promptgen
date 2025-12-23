@@ -1,4 +1,4 @@
-//! Syntax highlighting for promptgen templates using egui LayoutJob.
+//! Syntax highlighting for promptgen prompts using egui LayoutJob.
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, TextStyle};
@@ -62,7 +62,7 @@ impl TokenKind {
 }
 
 /// Create a highlighted LayoutJob from the editor content and parse result.
-pub fn highlight_template(
+pub fn highlight_prompt(
     ctx: &egui::Context,
     text: &str,
     parse_result: Option<&ParseResult>,
@@ -88,7 +88,7 @@ pub fn highlight_template(
 fn highlight_from_ast(
     job: &mut LayoutJob,
     text: &str,
-    ast: &promptgen_core::Template,
+    ast: &promptgen_core::Prompt,
     font_id: &FontId,
     colors: &SyntaxColors,
 ) {

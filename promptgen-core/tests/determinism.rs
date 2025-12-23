@@ -26,7 +26,10 @@ variables:
     let result1 = eval(&lib, "@Hair", Some(12345));
     let result2 = eval(&lib, "@Hair", Some(12345));
 
-    assert_eq!(result1.text, result2.text, "Same seed should produce same result");
+    assert_eq!(
+        result1.text, result2.text,
+        "Same seed should produce same result"
+    );
 }
 
 #[test]
@@ -64,11 +67,14 @@ fn inline_options_are_deterministic() {
     let result1 = eval(&lib, "{a|b|c|d|e}", Some(999));
     let result2 = eval(&lib, "{a|b|c|d|e}", Some(999));
 
-    assert_eq!(result1.text, result2.text, "Inline options with same seed should match");
+    assert_eq!(
+        result1.text, result2.text,
+        "Inline options with same seed should match"
+    );
 }
 
 #[test]
-fn complex_template_is_deterministic() {
+fn complex_prompt_is_deterministic() {
     let lib = lib(r#"
 variables:
   - name: Hair
@@ -81,11 +87,14 @@ variables:
       - green eyes
 "#);
 
-    let template = "@Hair, @Eyes, {happy|sad} expression";
-    let result1 = eval(&lib, template, Some(42));
-    let result2 = eval(&lib, template, Some(42));
+    let prompt = "@Hair, @Eyes, {happy|sad} expression";
+    let result1 = eval(&lib, prompt, Some(42));
+    let result2 = eval(&lib, prompt, Some(42));
 
-    assert_eq!(result1.text, result2.text, "Complex template with same seed should match");
+    assert_eq!(
+        result1.text, result2.text,
+        "Complex prompt with same seed should match"
+    );
 }
 
 #[test]
@@ -133,5 +142,8 @@ variables:
     let result1 = eval(&lib, "@Thing", Some(777));
     let result2 = eval(&lib, "@Thing", Some(777));
 
-    assert_eq!(result1.text, result2.text, "Nested grammar with same seed should match");
+    assert_eq!(
+        result1.text, result2.text,
+        "Nested grammar with same seed should match"
+    );
 }

@@ -5,10 +5,10 @@ use egui::{Color32, RichText, Vec2};
 use egui_material_icons::icons::ICON_ARROW_BACK;
 
 use crate::components::autocomplete::{
-    apply_completion, check_autocomplete_trigger, find_autocomplete_context, get_completions,
-    handle_autocomplete_keyboard, AutocompletePopup,
+    AutocompletePopup, apply_completion, check_autocomplete_trigger, find_autocomplete_context,
+    get_completions, handle_autocomplete_keyboard,
 };
-use crate::highlighting::highlight_template;
+use crate::highlighting::highlight_prompt;
 use crate::state::{AppState, ConfirmDialog};
 use crate::theme::syntax;
 
@@ -45,14 +45,6 @@ impl VariableEditorPanel {
                     should_close = true;
                 }
 
-                // Variable name display
-                let variable_display_name = if state.variable_editor_name.is_empty() {
-                    "New Variable".to_string()
-                } else {
-                    format!("@{}", state.variable_editor_name)
-                };
-                ui.heading(variable_display_name);
-
                 // Dirty indicator
                 if state.variable_editor_dirty {
                     ui.label(RichText::new("•").color(Color32::from_rgb(249, 226, 175))); // Yellow dot
@@ -87,7 +79,7 @@ impl VariableEditorPanel {
 
         // Options section header
         ui.horizontal(|ui| {
-            ui.label("Options (separate with ---):");
+            ui.label("Options:");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let count = state.get_variable_editor_option_count();
                 ui.label(
@@ -144,7 +136,7 @@ impl VariableEditorPanel {
         // IMPORTANT: Handle autocomplete keyboard BEFORE the text editor processes input
         let mut autocomplete_selection: Option<String> = None;
         if state.is_autocomplete_active(editor_id) {
-            let completions = get_completions(&state.workspace, state, editor_id);
+            let completions = get_completions(&state.library, state, editor_id);
             if !completions.is_empty() {
                 autocomplete_selection =
                     handle_autocomplete_keyboard(ui, state, editor_id, &completions);
@@ -170,7 +162,8 @@ impl VariableEditorPanel {
 
                 ui.horizontal(|ui| {
                     // Option numbers column
-                    let max_option_num = option_numbers.iter().filter_map(|n| *n).max().unwrap_or(1);
+                    let max_option_num =
+                        option_numbers.iter().filter_map(|n| *n).max().unwrap_or(1);
                     let max_digits = max_option_num.to_string().len();
                     let number_width = (max_digits as f32) * 8.0 + 12.0;
 
@@ -253,14 +246,15 @@ impl VariableEditorPanel {
 
                     // Show autocomplete popup if active
                     if state.is_autocomplete_active(editor_id) {
-                        let completions = get_completions(&state.workspace, state, editor_id);
+                        let completions = get_completions(&state.library, state, editor_id);
 
                         if completions.is_empty() {
                             state.deactivate_autocomplete(editor_id);
                         } else if let Some(completion_text) =
                             AutocompletePopup::show(ui, state, editor_id, &response, &completions)
                         {
-                            content = apply_completion(state, &content, editor_id, &completion_text);
+                            content =
+                                apply_completion(state, &content, editor_id, &completion_text);
                             state.mark_variable_editor_dirty();
                         }
                     }
@@ -328,8 +322,8 @@ impl VariableEditorPanel {
 
     /// Create a LayoutJob with syntax highlighting for options text
     fn highlight_options_text(ctx: &egui::Context, text: &str) -> egui::text::LayoutJob {
-        use egui::text::{LayoutJob, TextFormat};
         use egui::FontId;
+        use egui::text::{LayoutJob, TextFormat};
 
         let mut job = LayoutJob::default();
         let font_id = FontId::monospace(14.0);
@@ -352,8 +346,8 @@ impl VariableEditorPanel {
                     },
                 );
             } else {
-                // Highlight this line as template syntax (no parse result, use fallback)
-                let line_job = highlight_template(ctx, line_trimmed, None);
+                // Highlight this line as prompt syntax (no parse result, use fallback)
+                let line_job = highlight_prompt(ctx, line_trimmed, None);
 
                 // Append each section from the highlighted job
                 for section in &line_job.sections {
@@ -384,7 +378,7 @@ impl VariableEditorPanel {
 
         let mut errors = Vec::new();
         for (idx, option) in options.iter().enumerate() {
-            let parse_result = state.workspace.parse_template(option);
+            let parse_result = state.library.parse_prompt(option);
             for error in &parse_result.errors {
                 errors.push((idx + 1, error.message.clone()));
             }
@@ -425,10 +419,7 @@ impl VariableEditorPanel {
                         });
                     }
                     ConfirmDialog::DeleteVariable { variable_name } => {
-                        ui.label(format!(
-                            "Delete @{}? This cannot be undone.",
-                            variable_name
-                        ));
+                        ui.label(format!("Delete @{}? This cannot be undone.", variable_name));
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
                             if ui
@@ -456,40 +447,36 @@ impl VariableEditorPanel {
             return false;
         }
 
-        // Get the library ID to update
-        let library_id = match &state.selected_library_id {
-            Some(id) => id.clone(),
-            None => return false,
-        };
-
-        // Find and update the library
-        if let Some(library) = state.libraries.iter_mut().find(|lib| lib.id == library_id) {
-            if let Some(original_name) = &state.variable_editor_original_name {
-                // Editing existing variable - find and update it
-                if let Some(variable) = library.variables.iter_mut().find(|g| g.name == *original_name) {
-                    variable.name = name;
-                    variable.options = options;
-                }
-            } else {
-                // Creating new variable
-                library.variables.push(promptgen_core::PromptVariable::new(name, options));
+        // Update the library
+        if let Some(original_name) = &state.variable_editor_original_name {
+            // Editing existing variable - find and update it
+            if let Some(variable) = state
+                .library
+                .variables
+                .iter_mut()
+                .find(|g| g.name == *original_name)
+            {
+                variable.name = name;
+                variable.options = options;
             }
+        } else {
+            // Creating new variable
+            state
+                .library
+                .variables
+                .push(promptgen_core::PromptVariable::new(name, options));
         }
 
         // Save to disk
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Some(path) = state.library_paths.get(&library_id)
-                && let Some(library) = state.libraries.iter().find(|lib| lib.id == library_id)
-                && let Err(e) = promptgen_core::save_library(library, path)
+            if let Some(path) = &state.library_path
+                && let Err(e) = promptgen_core::save_library(&state.library, path)
             {
                 log::error!("Failed to save library: {}", e);
                 // Still continue - the in-memory state is updated
             }
         }
-
-        // Rebuild workspace to pick up changes
-        state.rebuild_workspace();
 
         // Clear editor state
         state.exit_variable_editor_force();
@@ -499,29 +486,18 @@ impl VariableEditorPanel {
 
     /// Delete a variable from the library
     fn delete_variable(state: &mut AppState, variable_name: &str) {
-        let library_id = match &state.selected_library_id {
-            Some(id) => id.clone(),
-            None => return,
-        };
-
-        // Find and remove the variable
-        if let Some(library) = state.libraries.iter_mut().find(|lib| lib.id == library_id) {
-            library.variables.retain(|g| g.name != variable_name);
-        }
+        // Remove the variable
+        state.library.variables.retain(|g| g.name != variable_name);
 
         // Save to disk
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Some(path) = state.library_paths.get(&library_id)
-                && let Some(library) = state.libraries.iter().find(|lib| lib.id == library_id)
-                && let Err(e) = promptgen_core::save_library(library, path)
+            if let Some(path) = &state.library_path
+                && let Err(e) = promptgen_core::save_library(&state.library, path)
             {
                 log::error!("Failed to save library after delete: {}", e);
             }
         }
-
-        // Rebuild workspace
-        state.rebuild_workspace();
 
         // Clear editor state
         state.exit_variable_editor_force();

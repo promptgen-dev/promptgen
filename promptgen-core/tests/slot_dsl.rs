@@ -11,7 +11,7 @@ mod common;
 use common::{
     empty_lib, eval, eval_with_slot_values, eval_with_slots, lib, try_eval_with_slot_values,
 };
-use promptgen_core::{ParseError, RenderError, parse_template};
+use promptgen_core::{ParseError, RenderError, parse_prompt};
 
 use crate::common::try_eval_with_slots;
 
@@ -435,7 +435,7 @@ fn pick_slot_no_operators_defaults_to_many() {
 #[test]
 fn duplicate_labels_rejected() {
     let src = "{{ Name }} and {{ Name }}";
-    let result = parse_template(src);
+    let result = parse_prompt(src);
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -449,7 +449,7 @@ fn duplicate_labels_rejected() {
 #[test]
 fn duplicate_pick_labels_rejected() {
     let src = "{{ Choice: pick(@A) }} and {{ Choice: pick(@B) }}";
-    let result = parse_template(src);
+    let result = parse_prompt(src);
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -463,7 +463,7 @@ fn duplicate_pick_labels_rejected() {
 #[test]
 fn different_labels_allowed() {
     let src = "{{ Name }} and {{ Age }}";
-    let result = parse_template(src);
+    let result = parse_prompt(src);
     assert!(result.is_ok());
 }
 
@@ -608,6 +608,6 @@ fn slot_label_with_special_chars_quoted() {
 #[test]
 fn empty_pick_source_parses_ok() {
     // This should still parse, but might error at runtime
-    let result = parse_template("{{ Choice: pick(@Empty) }}");
+    let result = parse_prompt("{{ Choice: pick(@Empty) }}");
     assert!(result.is_ok());
 }

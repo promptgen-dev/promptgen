@@ -2,9 +2,8 @@
 
 mod common;
 
-use common::{lib, workspace};
+use common::lib;
 use promptgen_core::search::SearchResult;
-use promptgen_core::WorkspaceBuilder;
 
 fn test_library() -> promptgen_core::Library {
     lib(r#"
@@ -32,31 +31,31 @@ variables:
 
 #[test]
 fn search_variables_empty_query_returns_all() {
-    let ws = workspace(test_library());
-    let results = ws.search_variables("");
+    let library = test_library();
+    let results = library.search_variables("");
     assert_eq!(results.len(), 3);
 }
 
 #[test]
 fn search_variables_finds_exact_match() {
-    let ws = workspace(test_library());
-    let results = ws.search_variables("Hair");
+    let library = test_library();
+    let results = library.search_variables("Hair");
     assert!(!results.is_empty());
     assert_eq!(results[0].variable_name, "Hair");
 }
 
 #[test]
 fn search_variables_case_insensitive() {
-    let ws = workspace(test_library());
-    let results = ws.search_variables("hair");
+    let library = test_library();
+    let results = library.search_variables("hair");
     assert!(!results.is_empty());
     assert_eq!(results[0].variable_name, "Hair");
 }
 
 #[test]
 fn search_variables_fuzzy_match() {
-    let ws = workspace(test_library());
-    let results = ws.search_variables("hr"); // fuzzy for "Hair"
+    let library = test_library();
+    let results = library.search_variables("hr"); // fuzzy for "Hair"
     assert!(!results.is_empty());
     // Should find Hair and Hair Color
     let names: Vec<&str> = results.iter().map(|r| r.variable_name.as_str()).collect();
@@ -65,8 +64,8 @@ fn search_variables_fuzzy_match() {
 
 #[test]
 fn search_variables_includes_match_indices() {
-    let ws = workspace(test_library());
-    let results = ws.search_variables("Hair");
+    let library = test_library();
+    let results = library.search_variables("Hair");
     assert!(!results.is_empty());
     // Exact match should have indices
     assert!(!results[0].match_indices.is_empty());
@@ -74,8 +73,8 @@ fn search_variables_includes_match_indices() {
 
 #[test]
 fn search_variables_sorted_by_score() {
-    let ws = workspace(test_library());
-    let results = ws.search_variables("Hair");
+    let library = test_library();
+    let results = library.search_variables("Hair");
     // Results should be sorted by score descending
     for i in 1..results.len() {
         assert!(results[i - 1].score >= results[i].score);
@@ -88,16 +87,16 @@ fn search_variables_sorted_by_score() {
 
 #[test]
 fn search_options_empty_query_returns_all() {
-    let ws = workspace(test_library());
-    let results = ws.search_options("", None);
+    let library = test_library();
+    let results = library.search_options("", None);
     // Should return results from all variables
     assert!(results.len() >= 2);
 }
 
 #[test]
 fn search_options_finds_match() {
-    let ws = workspace(test_library());
-    let results = ws.search_options("blonde", None);
+    let library = test_library();
+    let results = library.search_options("blonde", None);
     assert!(!results.is_empty());
 
     // Should find blonde options
@@ -110,16 +109,16 @@ fn search_options_finds_match() {
 
 #[test]
 fn search_options_with_variable_filter() {
-    let ws = workspace(test_library());
-    let results = ws.search_options("blonde", Some("Hair"));
+    let library = test_library();
+    let results = library.search_options("blonde", Some("Hair"));
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].variable_name, "Hair");
 }
 
 #[test]
 fn search_options_variable_filter_case_insensitive() {
-    let ws = workspace(test_library());
-    let results = ws.search_options("blonde", Some("hair"));
+    let library = test_library();
+    let results = library.search_options("blonde", Some("hair"));
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].variable_name, "Hair");
 }
@@ -130,8 +129,8 @@ fn search_options_variable_filter_case_insensitive() {
 
 #[test]
 fn unified_search_variables_with_at_prefix() {
-    let ws = workspace(test_library());
-    let result = ws.search("@Hair");
+    let library = test_library();
+    let result = library.search("@Hair");
     match result {
         SearchResult::Variables(variables) => {
             assert!(!variables.is_empty());
@@ -143,8 +142,8 @@ fn unified_search_variables_with_at_prefix() {
 
 #[test]
 fn unified_search_options_with_variable() {
-    let ws = workspace(test_library());
-    let result = ws.search("@Hair/blonde");
+    let library = test_library();
+    let result = library.search("@Hair/blonde");
     match result {
         SearchResult::Options(options) => {
             assert!(!options.is_empty());
@@ -157,8 +156,8 @@ fn unified_search_options_with_variable() {
 
 #[test]
 fn unified_search_options_all_variables() {
-    let ws = workspace(test_library());
-    let result = ws.search("@/blonde");
+    let library = test_library();
+    let result = library.search("@/blonde");
     match result {
         SearchResult::Options(options) => {
             assert!(!options.is_empty());
@@ -175,9 +174,9 @@ fn unified_search_options_all_variables() {
 
 #[test]
 fn unified_search_no_prefix_defaults_to_options() {
-    let ws = workspace(test_library());
+    let library = test_library();
     // Plain text search defaults to searching options across all variables
-    let result = ws.search("blonde");
+    let result = library.search("blonde");
     match result {
         SearchResult::Options(options) => {
             assert!(!options.is_empty());
@@ -187,31 +186,4 @@ fn unified_search_no_prefix_defaults_to_options() {
         }
         SearchResult::Variables(_) => panic!("Expected options result"),
     }
-}
-
-// ============================================================================
-// Multi-Library Search Tests
-// ============================================================================
-
-#[test]
-fn search_across_multiple_libraries() {
-    let lib1 = lib(r#"
-variables:
-  - name: Style
-    options: [modern]
-"#);
-
-    let lib2 = lib(r#"
-variables:
-  - name: Style
-    options: [vintage]
-"#);
-
-    let ws = WorkspaceBuilder::new()
-        .add_library(lib1)
-        .add_library(lib2)
-        .build();
-
-    let results = ws.search_variables("Style");
-    assert_eq!(results.len(), 2);
 }
