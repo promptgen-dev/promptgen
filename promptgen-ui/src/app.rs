@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use crate::components::{
-    dialogs, EditorPanel, PreviewPanel, SidebarPanel, SlotPanel, VariableEditorPanel,
+    dialogs, EditorPanel, PreviewPanel, SidebarPanel, SlotPanel, TabBarPanel, VariableEditorPanel,
 };
-use crate::state::{AppState, EditorMode};
+use crate::state::{AppState, EditorMode, PromptTab};
 use crate::theme;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -15,6 +15,14 @@ use crate::storage::{NativeStorage, StorageBackend};
 pub struct PromptGenApp {
     /// Persisted library file path
     library_file_path: Option<PathBuf>,
+
+    /// Persisted prompt tabs (global, not per-library)
+    #[serde(default)]
+    prompt_tabs: Vec<PromptTab>,
+
+    /// Persisted active tab index
+    #[serde(default)]
+    active_tab_index: Option<usize>,
 
     #[serde(skip)]
     state: AppState,
@@ -78,7 +86,51 @@ impl PromptGenApp {
             app.load_library();
         }
 
+        // Restore persisted tabs
+        app.restore_tabs();
+
         app
+    }
+
+    /// Restore tabs from persisted data into AppState
+    fn restore_tabs(&mut self) {
+        // If we have persisted tabs, restore them
+        if !self.prompt_tabs.is_empty() {
+            self.state.prompt_tabs = self.prompt_tabs.clone();
+
+            // Validate and restore active tab index
+            if let Some(idx) = self.active_tab_index {
+                if idx < self.state.prompt_tabs.len() {
+                    self.state.active_tab_index = Some(idx);
+                } else {
+                    // Index out of bounds, use last tab
+                    self.state.active_tab_index = Some(self.state.prompt_tabs.len() - 1);
+                }
+            } else if !self.state.prompt_tabs.is_empty() {
+                // No saved index, default to first tab
+                self.state.active_tab_index = Some(0);
+            }
+
+            // Sync editor content with active tab
+            if let Some(idx) = self.state.active_tab_index {
+                if let Some(tab) = self.state.prompt_tabs.get(idx) {
+                    self.state.editor_content = tab.content.clone();
+                    self.state.slot_values =
+                        crate::state::AppState::slot_values_to_vec_map(&tab.slots);
+                    self.state.update_parse_result();
+                }
+            }
+        }
+        // If no persisted tabs, the AppState default already creates "Prompt 1"
+    }
+
+    /// Save tabs from AppState to persisted fields
+    fn save_tabs(&mut self) {
+        // Sync current slot values to active tab before saving
+        self.state.save_slot_values_to_active_tab();
+
+        self.prompt_tabs = self.state.prompt_tabs.clone();
+        self.active_tab_index = self.state.active_tab_index;
     }
 
     /// Open a file picker dialog and load the selected library
@@ -323,6 +375,8 @@ impl PromptGenApp {
 impl eframe::App for PromptGenApp {
     /// Called by the framework to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        // Sync tabs from AppState to persisted fields before saving
+        self.save_tabs();
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
 
@@ -406,13 +460,33 @@ impl eframe::App for PromptGenApp {
 
         // Central panel with unified scroll area for editor + slots
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("main_scroll")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    // Choose which editor to show based on editor mode
-                    match &self.state.editor_mode {
-                        EditorMode::Prompt => {
+            // Choose which editor to show based on editor mode
+            match &self.state.editor_mode {
+                EditorMode::Prompt => {
+                    // Tab bar (fixed at top, outside scroll area)
+                    let tab_result = TabBarPanel::show(ui, &mut self.state);
+
+                    // Persist library to disk if it was modified
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if tab_result.library_modified {
+                        if let Some(path) = &self.state.library_path {
+                            if let Err(e) = promptgen_core::save_library(&self.state.library, path)
+                            {
+                                log::error!("Failed to save library: {}", e);
+                            }
+                        }
+                    }
+
+                    #[cfg(target_arch = "wasm32")]
+                    let _ = tab_result;
+
+                    ui.separator();
+
+                    // Scrollable content area
+                    egui::ScrollArea::vertical()
+                        .id_salt("main_scroll")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
                             // Prompt editor section
                             EditorPanel::show(ui, &mut self.state);
 
@@ -423,13 +497,18 @@ impl eframe::App for PromptGenApp {
                                 ui.heading("Slots");
                                 SlotPanel::show(ui, &mut self.state);
                             }
-                        }
-                        EditorMode::VariableEditor { .. } | EditorMode::NewVariable => {
-                            // Variable editor section
+                        });
+                }
+                EditorMode::VariableEditor { .. } | EditorMode::NewVariable => {
+                    // Variable editor (no tabs)
+                    egui::ScrollArea::vertical()
+                        .id_salt("main_scroll")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
                             VariableEditorPanel::show(ui, &mut self.state);
-                        }
-                    }
-                });
+                        });
+                }
+            }
         });
 
         // Render create library dialog (if active)

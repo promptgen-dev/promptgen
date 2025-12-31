@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use promptgen_core::{
     Cardinality, EvalContext, Library, ParseResult, PickSource, RenderError, SlotDefKind,
-    SlotDefinition, render,
+    SlotDefinition, SlotValue, render,
 };
 use serde::{Deserialize, Serialize};
 
@@ -88,13 +88,91 @@ pub struct AutocompleteState {
     pub editor_response_id: Option<egui::Id>,
 }
 
+// ==================== Tab State ====================
+
+/// Origin of a prompt tab - tracks where it came from
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PromptSource {
+    /// Created via [+ New] button - not yet saved to library
+    New,
+    /// Opened from a saved prompt in the library
+    FromLibrary {
+        /// Original name when opened (for tracking renames)
+        original_name: String,
+    },
+}
+
+impl Default for PromptSource {
+    fn default() -> Self {
+        Self::New
+    }
+}
+
+/// A prompt tab being edited
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptTab {
+    /// Tab/prompt name (must be unique across tabs and library)
+    pub name: String,
+    /// Prompt content (the text being edited)
+    pub content: String,
+    /// Slot values for this tab (independent per tab)
+    pub slots: HashMap<String, SlotValue>,
+    /// Where this tab originated from
+    pub source: PromptSource,
+    /// Whether this tab has unsaved changes
+    #[serde(default)]
+    pub dirty: bool,
+}
+
+impl Default for PromptTab {
+    fn default() -> Self {
+        Self {
+            name: "Prompt 1".to_string(),
+            content: String::new(),
+            slots: HashMap::new(),
+            source: PromptSource::New,
+            dirty: false,
+        }
+    }
+}
+
+impl PromptTab {
+    /// Create a new tab with the given name
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            content: String::new(),
+            slots: HashMap::new(),
+            source: PromptSource::New,
+            dirty: false,
+        }
+    }
+
+    /// Create a tab from a saved library prompt
+    pub fn from_library_prompt(name: String, content: String, slots: HashMap<String, SlotValue>) -> Self {
+        Self {
+            name: name.clone(),
+            content,
+            slots,
+            source: PromptSource::FromLibrary {
+                original_name: name,
+            },
+            dirty: false,
+        }
+    }
+}
+
 /// Main application state (not serialized - rebuilt on startup)
 pub struct AppState {
     // Library
     pub library: Library,
     pub library_path: Option<std::path::PathBuf>,
 
-    // Editor
+    // Prompt Tabs
+    pub prompt_tabs: Vec<PromptTab>,
+    pub active_tab_index: Option<usize>,
+
+    // Editor (legacy - will be replaced by active tab)
     pub editor_content: String,
     pub selected_prompt_id: Option<String>,
     pub parse_result: Option<ParseResult>,
@@ -130,9 +208,13 @@ pub struct AppState {
 
 impl Default for AppState {
     fn default() -> Self {
+        // Create a default first tab
+        let first_tab = PromptTab::default();
         Self {
             library: Library::default(),
             library_path: None,
+            prompt_tabs: vec![first_tab],
+            active_tab_index: Some(0),
             editor_content: String::new(),
             selected_prompt_id: None,
             parse_result: None,
@@ -362,6 +444,7 @@ impl AppState {
             }
             if !values.contains(&value) {
                 values.push(value);
+                self.mark_active_tab_dirty();
             }
         }
     }
@@ -369,23 +452,34 @@ impl AppState {
     /// Remove a value from a slot
     pub fn remove_slot_value(&mut self, slot_label: &str, value: &str) {
         if let Some(values) = self.slot_values.get_mut(slot_label) {
+            let len_before = values.len();
             values.retain(|v| v != value);
+            if values.len() != len_before {
+                self.mark_active_tab_dirty();
+            }
         }
     }
 
     /// Set all values for a slot (used for reordering)
     pub fn set_slot_values(&mut self, slot_label: &str, new_values: Vec<String>) {
         if let Some(values) = self.slot_values.get_mut(slot_label) {
-            *values = new_values;
+            if *values != new_values {
+                *values = new_values;
+                self.mark_active_tab_dirty();
+            }
         }
     }
 
     /// Set the single value for a textarea slot
     pub fn set_textarea_value(&mut self, slot_label: &str, value: String) {
         if let Some(values) = self.slot_values.get_mut(slot_label) {
-            values.clear();
-            if !value.is_empty() {
-                values.push(value);
+            let old_value = values.first().cloned().unwrap_or_default();
+            if old_value != value {
+                values.clear();
+                if !value.is_empty() {
+                    values.push(value);
+                }
+                self.mark_active_tab_dirty();
             }
         }
     }
@@ -737,5 +831,327 @@ impl AppState {
     /// Take pending cursor position for a specific editor (returns and clears it)
     pub fn take_pending_cursor_position(&mut self, editor_id: &str) -> Option<usize> {
         self.pending_cursor_positions.remove(editor_id)
+    }
+
+    // ==================== Tab Management Methods ====================
+
+    /// Get the active tab (immutable reference)
+    pub fn get_active_tab(&self) -> Option<&PromptTab> {
+        self.active_tab_index
+            .and_then(|idx| self.prompt_tabs.get(idx))
+    }
+
+    /// Get the active tab (mutable reference)
+    pub fn get_active_tab_mut(&mut self) -> Option<&mut PromptTab> {
+        self.active_tab_index
+            .and_then(|idx| self.prompt_tabs.get_mut(idx))
+    }
+
+    /// Switch to a specific tab by index
+    pub fn switch_to_tab(&mut self, index: usize) {
+        if index < self.prompt_tabs.len() {
+            // Save current slot values to the old active tab before switching
+            self.save_slot_values_to_active_tab();
+
+            self.active_tab_index = Some(index);
+            // Sync editor_content and slot_values with the new active tab
+            if let Some(tab) = self.prompt_tabs.get(index) {
+                self.editor_content = tab.content.clone();
+                // Convert tab's SlotValue HashMap to the working slot_values format
+                self.slot_values = Self::slot_values_to_vec_map(&tab.slots);
+                self.update_parse_result();
+            }
+        }
+    }
+
+    /// Convert SlotValue HashMap to Vec<String> HashMap (working format)
+    pub fn slot_values_to_vec_map(slots: &HashMap<String, SlotValue>) -> HashMap<String, Vec<String>> {
+        slots
+            .iter()
+            .map(|(k, v)| {
+                let vec = match v {
+                    SlotValue::Text(s) => {
+                        if s.is_empty() {
+                            Vec::new()
+                        } else {
+                            vec![s.clone()]
+                        }
+                    }
+                    SlotValue::Pick(items) => items.clone(),
+                };
+                (k.clone(), vec)
+            })
+            .collect()
+    }
+
+    /// Convert Vec<String> HashMap back to SlotValue HashMap
+    /// Uses slot definitions to determine whether each is Text or Pick
+    fn vec_map_to_slot_values(
+        vec_map: &HashMap<String, Vec<String>>,
+        definitions: &[promptgen_core::SlotDefinition],
+    ) -> HashMap<String, SlotValue> {
+        vec_map
+            .iter()
+            .map(|(k, v)| {
+                // Look up the slot definition to determine type
+                let is_textarea = definitions
+                    .iter()
+                    .find(|d| d.label == *k)
+                    .is_some_and(|d| matches!(d.kind, promptgen_core::SlotDefKind::Textarea));
+
+                let slot_value = if is_textarea {
+                    SlotValue::Text(v.first().cloned().unwrap_or_default())
+                } else {
+                    SlotValue::Pick(v.clone())
+                };
+                (k.clone(), slot_value)
+            })
+            .collect()
+    }
+
+    /// Save current slot_values to the active tab
+    pub fn save_slot_values_to_active_tab(&mut self) {
+        let definitions = self.get_slot_definitions();
+        let slot_values = Self::vec_map_to_slot_values(&self.slot_values, &definitions);
+
+        if let Some(tab) = self.get_active_tab_mut() {
+            if tab.slots != slot_values {
+                tab.slots = slot_values;
+                tab.dirty = true;
+            }
+        }
+    }
+
+    /// Create a new tab with an auto-generated unique name
+    pub fn create_new_tab(&mut self) -> usize {
+        let name = self.find_next_prompt_name();
+        let tab = PromptTab::new(name);
+        self.prompt_tabs.push(tab);
+        let new_index = self.prompt_tabs.len() - 1;
+        self.switch_to_tab(new_index);
+        new_index
+    }
+
+    /// Close a tab by index
+    /// Returns true if the tab was closed, false if it was the last tab
+    pub fn close_tab(&mut self, index: usize) -> bool {
+        if self.prompt_tabs.len() <= 1 {
+            // Don't close the last tab
+            return false;
+        }
+
+        if index >= self.prompt_tabs.len() {
+            return false;
+        }
+
+        self.prompt_tabs.remove(index);
+
+        // Adjust active tab index
+        if let Some(active) = self.active_tab_index {
+            if active >= self.prompt_tabs.len() {
+                // Was pointing past end, move to last tab
+                self.active_tab_index = Some(self.prompt_tabs.len() - 1);
+            } else if active > index {
+                // Was pointing after removed tab, shift down
+                self.active_tab_index = Some(active - 1);
+            }
+            // If active was pointing before removed tab, no change needed
+        }
+
+        // Sync editor content and slot values with new active tab
+        if let Some(idx) = self.active_tab_index {
+            if let Some(tab) = self.prompt_tabs.get(idx) {
+                self.editor_content = tab.content.clone();
+                self.slot_values = Self::slot_values_to_vec_map(&tab.slots);
+            }
+            self.update_parse_result();
+        }
+
+        true
+    }
+
+    /// Find the next available sequential prompt name ("Prompt 1", "Prompt 2", etc.)
+    pub fn find_next_prompt_name(&self) -> String {
+        let mut n = 1;
+        loop {
+            let candidate = format!("Prompt {}", n);
+            if self.is_name_available(&candidate) {
+                return candidate;
+            }
+            n += 1;
+        }
+    }
+
+    /// Check if a name is available (not used by any tab or library prompt)
+    pub fn is_name_available(&self, name: &str) -> bool {
+        // Check tabs
+        let used_in_tabs = self.prompt_tabs.iter().any(|t| t.name == name);
+        if used_in_tabs {
+            return false;
+        }
+
+        // Check library prompts
+        let used_in_library = self.library.prompts.iter().any(|p| p.name == name);
+        !used_in_library
+    }
+
+    /// Check if a name is available for renaming a specific tab
+    /// (excludes the tab's current name from the check)
+    pub fn is_name_available_for_rename(&self, name: &str, tab_index: usize) -> bool {
+        // Check other tabs (excluding the one being renamed)
+        let used_in_other_tabs = self
+            .prompt_tabs
+            .iter()
+            .enumerate()
+            .any(|(i, t)| i != tab_index && t.name == name);
+        if used_in_other_tabs {
+            return false;
+        }
+
+        // Check library prompts (but allow if this tab came from that prompt)
+        if let Some(tab) = self.prompt_tabs.get(tab_index) {
+            if let PromptSource::FromLibrary { original_name } = &tab.source {
+                // Allow keeping/restoring the original name
+                if name == original_name {
+                    return true;
+                }
+            }
+        }
+
+        let used_in_library = self.library.prompts.iter().any(|p| p.name == name);
+        !used_in_library
+    }
+
+    /// Find a tab by its source library prompt name
+    pub fn find_tab_by_library_prompt(&self, prompt_name: &str) -> Option<usize> {
+        self.prompt_tabs.iter().position(|tab| {
+            matches!(&tab.source, PromptSource::FromLibrary { original_name } if original_name == prompt_name)
+        })
+    }
+
+    /// Open a saved prompt from the library in a tab
+    /// Returns the tab index (existing or new)
+    pub fn open_library_prompt(&mut self, prompt_name: &str) -> Option<usize> {
+        // Check if already open
+        if let Some(index) = self.find_tab_by_library_prompt(prompt_name) {
+            self.switch_to_tab(index);
+            return Some(index);
+        }
+
+        // Find the prompt in the library
+        let prompt = self.library.prompts.iter().find(|p| p.name == prompt_name)?;
+
+        // Create new tab from the library prompt
+        let tab = PromptTab::from_library_prompt(
+            prompt.name.clone(),
+            prompt.content.clone(),
+            prompt.slots.clone(),
+        );
+
+        self.prompt_tabs.push(tab);
+        let new_index = self.prompt_tabs.len() - 1;
+        self.switch_to_tab(new_index);
+        Some(new_index)
+    }
+
+    /// Mark the active tab as dirty (has unsaved changes)
+    pub fn mark_active_tab_dirty(&mut self) {
+        if let Some(tab) = self.get_active_tab_mut() {
+            tab.dirty = true;
+        }
+    }
+
+    /// Sync active tab content from editor_content
+    /// Call this when editor_content changes
+    pub fn sync_active_tab_content(&mut self) {
+        let new_content = self.editor_content.clone();
+        if let Some(tab) = self.get_active_tab_mut() {
+            if tab.content != new_content {
+                tab.content = new_content;
+                tab.dirty = true;
+            }
+        }
+    }
+
+    /// Save the active tab to the library
+    /// Returns true if successful, false if no active tab
+    pub fn save_active_tab_to_library(&mut self) -> bool {
+        // First sync current slot values to the tab
+        self.save_slot_values_to_active_tab();
+
+        // Get the active tab index and data we need
+        let Some(idx) = self.active_tab_index else {
+            return false;
+        };
+        let Some(tab) = self.prompt_tabs.get(idx) else {
+            return false;
+        };
+
+        let tab_name = tab.name.clone();
+        let tab_content = tab.content.clone();
+        let tab_slots = tab.slots.clone();
+        let tab_source = tab.source.clone();
+
+        // Create or update the library prompt
+        match &tab_source {
+            PromptSource::New => {
+                // New prompt - add to library
+                let saved_prompt = promptgen_core::SavedPrompt {
+                    name: tab_name.clone(),
+                    content: tab_content,
+                    slots: tab_slots,
+                };
+                self.library.prompts.push(saved_prompt);
+
+                // Update tab source to reflect it's now from the library
+                if let Some(tab) = self.prompt_tabs.get_mut(idx) {
+                    tab.source = PromptSource::FromLibrary {
+                        original_name: tab_name,
+                    };
+                    tab.dirty = false;
+                }
+            }
+            PromptSource::FromLibrary { original_name } => {
+                // Existing prompt - find and update it
+                if let Some(prompt) = self
+                    .library
+                    .prompts
+                    .iter_mut()
+                    .find(|p| p.name == *original_name)
+                {
+                    // If name changed, also update the library prompt name
+                    if prompt.name != tab_name {
+                        prompt.name = tab_name.clone();
+                    }
+                    prompt.content = tab_content;
+                    prompt.slots = tab_slots;
+
+                    // Update the source to reflect any name change
+                    if let Some(tab) = self.prompt_tabs.get_mut(idx) {
+                        tab.source = PromptSource::FromLibrary {
+                            original_name: tab_name,
+                        };
+                        tab.dirty = false;
+                    }
+                } else {
+                    // Original prompt not found (maybe deleted), treat as new
+                    let saved_prompt = promptgen_core::SavedPrompt {
+                        name: tab_name.clone(),
+                        content: tab_content,
+                        slots: tab_slots,
+                    };
+                    self.library.prompts.push(saved_prompt);
+
+                    if let Some(tab) = self.prompt_tabs.get_mut(idx) {
+                        tab.source = PromptSource::FromLibrary {
+                            original_name: tab_name,
+                        };
+                        tab.dirty = false;
+                    }
+                }
+            }
+        }
+
+        true
     }
 }

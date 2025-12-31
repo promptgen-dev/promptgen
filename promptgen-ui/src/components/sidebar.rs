@@ -182,25 +182,31 @@ impl SidebarPanel {
             return;
         }
 
-        let mut new_selected_id = state.selected_prompt_id.clone();
-        let mut load_prompt_content: Option<String> = None;
+        let mut prompt_to_open: Option<String> = None;
 
-        for (name, content) in &prompts {
-            let is_selected = new_selected_id.as_ref() == Some(name);
-            let response = ui.selectable_label(is_selected, name);
+        for (name, _content) in &prompts {
+            // Check if this prompt is open in a tab (for visual indication)
+            let is_open_in_tab = state.find_tab_by_library_prompt(name).is_some();
+
+            // Use different styling if open in a tab
+            let label_text = if is_open_in_tab {
+                format!("• {}", name)
+            } else {
+                name.clone()
+            };
+
+            let response = ui.selectable_label(is_open_in_tab, &label_text);
 
             if response.clicked() {
-                new_selected_id = Some(name.clone());
-                load_prompt_content = Some(content.clone());
+                prompt_to_open = Some(name.clone());
             }
         }
 
-        state.selected_prompt_id = new_selected_id;
-
-        // Apply prompt content after the loop
-        if let Some(content) = load_prompt_content {
-            state.editor_content = content;
-            state.update_parse_result();
+        // Open the clicked prompt in a tab
+        if let Some(name) = prompt_to_open {
+            state.open_library_prompt(&name);
+            // Also ensure we're in Prompt editing mode
+            state.editor_mode = crate::state::EditorMode::Prompt;
         }
     }
 

@@ -50,6 +50,8 @@ impl EditorPanel {
             state.parse_result = Some(result.parse_result.clone());
             state.update_parse_result();
             state.request_render();
+            // Sync content back to the active tab
+            state.sync_active_tab_content();
         }
 
         // Track focus - either from TextEdit gaining focus or clicking anywhere in frame
