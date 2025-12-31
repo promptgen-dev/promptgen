@@ -96,6 +96,9 @@ impl eframe::App for PromptGenApp {
         // Ensure custom font sizes are applied (theme switches may reset them)
         theme::apply_font_sizes(ctx);
 
+        // Ensure text cursor is visible (theme switches may change this)
+        theme::ensure_cursor_visible(ctx);
+
         // Top menu bar
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {

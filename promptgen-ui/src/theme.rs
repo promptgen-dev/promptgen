@@ -1,3 +1,5 @@
+use egui::{Color32, Stroke};
+
 /// Our custom font size additions (added to egui defaults)
 const FONT_SIZE_INCREASE: f32 = 2.0;
 
@@ -12,7 +14,7 @@ fn has_custom_font_sizes(ctx: &egui::Context) -> bool {
     }
 }
 
-/// Apply custom font sizes to the current style
+/// Apply custom font sizes and ensure cursor is visible
 pub fn apply_font_sizes(ctx: &egui::Context) {
     if !has_custom_font_sizes(ctx) {
         let mut style = (*ctx.style()).clone();
@@ -21,6 +23,22 @@ pub fn apply_font_sizes(ctx: &egui::Context) {
         }
         ctx.set_style(style);
     }
+}
+
+/// Ensure the text cursor is visible with proper color contrast
+pub fn ensure_cursor_visible(ctx: &egui::Context) {
+    let mut style = (*ctx.style()).clone();
+    let is_dark = style.visuals.dark_mode;
+
+    // Set cursor color to contrast with background
+    let cursor_color = if is_dark {
+        Color32::from_rgb(205, 214, 244) // Catppuccin Mocha Text (light color on dark bg)
+    } else {
+        Color32::from_rgb(76, 79, 105) // Catppuccin Latte Text (dark color on light bg)
+    };
+
+    style.visuals.text_cursor.stroke = Stroke::new(1.5, cursor_color);
+    ctx.set_style(style);
 }
 
 /// Get colors for syntax highlighting that adapt to dark/light mode.

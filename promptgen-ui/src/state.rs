@@ -456,6 +456,8 @@ impl AppState {
         self.variable_editor_original_name = None;
         self.variable_editor_dirty = false;
         self.confirm_dialog = None;
+        // Re-parse the prompt to pick up any new/changed variables
+        self.update_parse_result();
     }
 
     /// Mark the variable editor as having changes
