@@ -2,7 +2,7 @@
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, TextStyle};
-use promptgen_core::{Node, ParseResult};
+use promptgen_core::{Node, ParseResult, PickSource, SlotBlock, SlotKind};
 
 use crate::theme::{self, Theme};
 
@@ -55,8 +55,8 @@ pub fn highlight_prompt(
         return job;
     }
 
-    // Fallback: simple regex-like highlighting for when parsing fails
-    highlight_fallback(&mut job, text, &font_id, &theme);
+    // No AST available - return plain text with default color
+    append_token(&mut job, text, TokenKind::Text, &font_id, &theme);
     job
 }
 
@@ -72,11 +72,11 @@ fn highlight_from_ast(
     let mut last_end = 0;
 
     for (node, span) in &ast.nodes {
-        // Bounds check: if span is out of bounds, fall back to simple highlighting
+        // Bounds check: if span is out of bounds, append remaining text as plain
         if span.start > text_len || span.end > text_len || span.start > span.end {
-            // AST is stale, fall back to fallback highlighting for remaining text
+            // AST is stale, show remaining text as plain
             if last_end < text_len {
-                highlight_fallback_range(job, &text[last_end..], font_id, theme);
+                append_token(job, &text[last_end..], TokenKind::Text, font_id, theme);
             }
             return;
         }
@@ -104,9 +104,9 @@ fn highlight_from_ast(
                 // Highlight @ symbol and the reference name
                 append_token(job, node_text, TokenKind::Reference, font_id, theme);
             }
-            Node::SlotBlock(_) => {
-                // Highlight entire slot including {{ }}
-                append_token(job, node_text, TokenKind::Slot, font_id, theme);
+            Node::SlotBlock(slot_block) => {
+                // Highlight slot with recursive highlighting for variable references
+                highlight_slot_block(job, node_text, slot_block, span.start, font_id, theme);
             }
             Node::InlineOptions(_) => {
                 // Highlight inline options with brace coloring for { and }
@@ -126,9 +126,66 @@ fn highlight_from_ast(
     }
 }
 
-/// Fallback highlighting for a range when AST is stale
-fn highlight_fallback_range(job: &mut LayoutJob, text: &str, font_id: &FontId, theme: &Theme) {
-    highlight_fallback(job, text, font_id, theme);
+/// Highlight a slot block with recursive highlighting for variable references inside pick() sources
+fn highlight_slot_block(
+    job: &mut LayoutJob,
+    text: &str,
+    slot_block: &SlotBlock,
+    block_start: usize,
+    font_id: &FontId,
+    theme: &Theme,
+) {
+    // For pick slots, we need to highlight variable references inside
+    if let SlotKind::Pick(pick_slot) = &slot_block.kind.0 {
+        // Collect all variable reference spans (relative to block_start)
+        let mut ref_spans: Vec<(usize, usize)> = Vec::new();
+        for (source, span) in &pick_slot.sources {
+            if matches!(source, PickSource::VariableRef(_)) {
+                // Convert span to be relative to the slot block text
+                let rel_start = span.start.saturating_sub(block_start);
+                let rel_end = span.end.saturating_sub(block_start);
+                if rel_end <= text.len() {
+                    ref_spans.push((rel_start, rel_end));
+                }
+            }
+        }
+
+        // Sort spans by start position
+        ref_spans.sort_by_key(|(start, _)| *start);
+
+        // Highlight with interleaved slot color and reference color
+        let mut last_end = 0;
+        for (ref_start, ref_end) in ref_spans {
+            // Slot-colored text before this reference
+            if ref_start > last_end {
+                append_token(
+                    job,
+                    &text[last_end..ref_start],
+                    TokenKind::Slot,
+                    font_id,
+                    theme,
+                );
+            }
+            // Reference-colored text
+            if ref_end > ref_start && ref_end <= text.len() {
+                append_token(
+                    job,
+                    &text[ref_start..ref_end],
+                    TokenKind::Reference,
+                    font_id,
+                    theme,
+                );
+            }
+            last_end = ref_end;
+        }
+        // Remaining slot-colored text
+        if last_end < text.len() {
+            append_token(job, &text[last_end..], TokenKind::Slot, font_id, theme);
+        }
+    } else {
+        // Textarea slot - just highlight the whole thing as slot color
+        append_token(job, text, TokenKind::Slot, font_id, theme);
+    }
 }
 
 /// Highlight inline options with colored braces and pipe separators
@@ -154,116 +211,6 @@ fn highlight_inline_options(job: &mut LayoutJob, text: &str, font_id: &FontId, t
     } else {
         // Fallback if format is unexpected
         append_token(job, text, TokenKind::Option, font_id, theme);
-    }
-}
-
-/// Fallback highlighting when parsing fails - uses simple pattern matching
-fn highlight_fallback(job: &mut LayoutJob, text: &str, font_id: &FontId, theme: &Theme) {
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-    let mut current_text = String::new();
-
-    while i < chars.len() {
-        let c = chars[i];
-
-        match c {
-            '@' => {
-                // Flush current text
-                if !current_text.is_empty() {
-                    append_token(job, &current_text, TokenKind::Text, font_id, theme);
-                    current_text.clear();
-                }
-
-                // Check for quoted reference @"..."
-                if i + 1 < chars.len() && chars[i + 1] == '"' {
-                    let start = i;
-                    i += 2; // Skip @"
-                    while i < chars.len() && chars[i] != '"' {
-                        i += 1;
-                    }
-                    if i < chars.len() {
-                        i += 1; // Skip closing "
-                    }
-                    let ref_text: String = chars[start..i].iter().collect();
-                    append_token(job, &ref_text, TokenKind::Reference, font_id, theme);
-                } else {
-                    // Simple reference @Name
-                    let start = i;
-                    i += 1; // Skip @
-                    while i < chars.len()
-                        && (chars[i].is_alphanumeric() || chars[i] == '_' || chars[i] == '-')
-                    {
-                        i += 1;
-                    }
-                    let ref_text: String = chars[start..i].iter().collect();
-                    append_token(job, &ref_text, TokenKind::Reference, font_id, theme);
-                }
-                continue;
-            }
-            '{' => {
-                // Flush current text
-                if !current_text.is_empty() {
-                    append_token(job, &current_text, TokenKind::Text, font_id, theme);
-                    current_text.clear();
-                }
-
-                // Check for slot {{ ... }}
-                if i + 1 < chars.len() && chars[i + 1] == '{' {
-                    let start = i;
-                    i += 2; // Skip {{
-                    while i < chars.len() {
-                        if i + 1 < chars.len() && chars[i] == '}' && chars[i + 1] == '}' {
-                            i += 2;
-                            break;
-                        }
-                        i += 1;
-                    }
-                    let slot_text: String = chars[start..i].iter().collect();
-                    append_token(job, &slot_text, TokenKind::Slot, font_id, theme);
-                } else {
-                    // Inline options { ... }
-                    let start = i;
-                    let mut depth = 1;
-                    i += 1;
-                    while i < chars.len() && depth > 0 {
-                        if chars[i] == '{' {
-                            depth += 1;
-                        } else if chars[i] == '}' {
-                            depth -= 1;
-                        }
-                        i += 1;
-                    }
-                    let opt_text: String = chars[start..i].iter().collect();
-                    highlight_inline_options(job, &opt_text, font_id, theme);
-                }
-                continue;
-            }
-            '#' => {
-                // Flush current text
-                if !current_text.is_empty() {
-                    append_token(job, &current_text, TokenKind::Text, font_id, theme);
-                    current_text.clear();
-                }
-
-                // Comment to end of line
-                let start = i;
-                while i < chars.len() && chars[i] != '\n' {
-                    i += 1;
-                }
-                let comment_text: String = chars[start..i].iter().collect();
-                append_token(job, &comment_text, TokenKind::Comment, font_id, theme);
-                continue;
-            }
-            _ => {
-                current_text.push(c);
-            }
-        }
-        i += 1;
-    }
-
-    // Flush remaining text
-    if !current_text.is_empty() {
-        append_token(job, &current_text, TokenKind::Text, font_id, theme);
     }
 }
 

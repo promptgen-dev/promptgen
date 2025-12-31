@@ -98,7 +98,13 @@ pub fn apply_font_sizes(ctx: &egui::Context) {
 /// Ensure the text cursor is visible with proper color contrast
 pub fn ensure_cursor_visible(ctx: &egui::Context) {
     let theme = current(ctx);
-    let mut style = (*ctx.style()).clone();
-    style.visuals.text_cursor.stroke = Stroke::new(1.5, theme.cursor);
-    ctx.set_style(style);
+    let current_stroke = ctx.style().visuals.text_cursor.stroke;
+    let desired_stroke = Stroke::new(2.0, theme.cursor);
+
+    // Only update if the stroke color doesn't match (avoid unnecessary style updates)
+    if current_stroke.color != desired_stroke.color || current_stroke.width != desired_stroke.width {
+        let mut style = (*ctx.style()).clone();
+        style.visuals.text_cursor.stroke = desired_stroke;
+        ctx.set_style(style);
+    }
 }
