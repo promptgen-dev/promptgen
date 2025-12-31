@@ -13,5 +13,5 @@ pub use editor::EditorPanel;
 pub use preview::PreviewPanel;
 pub use sidebar::SidebarPanel;
 pub use slots::SlotPanel;
-pub use tab_bar::{TabBarPanel, TabBarResult};
+pub use tab_bar::TabBarPanel;
 pub use variable_editor::VariableEditorPanel;

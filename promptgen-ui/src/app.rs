@@ -112,14 +112,13 @@ impl PromptGenApp {
             }
 
             // Sync editor content with active tab
-            if let Some(idx) = self.state.active_tab_index {
-                if let Some(tab) = self.state.prompt_tabs.get(idx) {
+            if let Some(idx) = self.state.active_tab_index
+                && let Some(tab) = self.state.prompt_tabs.get(idx) {
                     self.state.editor_content = tab.content.clone();
                     self.state.slot_values =
                         crate::state::AppState::slot_values_to_vec_map(&tab.slots);
                     self.state.update_parse_result();
                 }
-            }
         }
         // If no persisted tabs, the AppState default already creates "Prompt 1"
     }
@@ -400,11 +399,10 @@ impl PromptGenApp {
 
                 // Persist library to disk
                 #[cfg(not(target_arch = "wasm32"))]
-                if let Some(path) = &self.state.library_path {
-                    if let Err(e) = promptgen_core::save_library(&self.state.library, path) {
+                if let Some(path) = &self.state.library_path
+                    && let Err(e) = promptgen_core::save_library(&self.state.library, path) {
                         log::error!("Failed to save library: {}", e);
                     }
-                }
 
                 // Now close the tab (it's clean now)
                 self.state.close_tab_force(tab_index);
@@ -520,14 +518,12 @@ impl eframe::App for PromptGenApp {
 
                     // Persist library to disk if it was modified
                     #[cfg(not(target_arch = "wasm32"))]
-                    if tab_result.library_modified {
-                        if let Some(path) = &self.state.library_path {
-                            if let Err(e) = promptgen_core::save_library(&self.state.library, path)
+                    if tab_result.library_modified
+                        && let Some(path) = &self.state.library_path
+                            && let Err(e) = promptgen_core::save_library(&self.state.library, path)
                             {
                                 log::error!("Failed to save library: {}", e);
                             }
-                        }
-                    }
 
                     #[cfg(target_arch = "wasm32")]
                     let _ = tab_result;

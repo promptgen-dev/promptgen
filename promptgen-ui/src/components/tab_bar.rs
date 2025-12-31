@@ -99,11 +99,10 @@ impl TabBarPanel {
                                         }
 
                                         // Handle Enter to commit
-                                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                            if !state.commit_tab_rename() {
+                                        if ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                            && !state.commit_tab_rename() {
                                                 // Rename failed (invalid name), keep editing
                                             }
-                                        }
 
                                         // Handle Escape to cancel
                                         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -113,12 +112,10 @@ impl TabBarPanel {
                                         // Handle clicking away to commit
                                         if response.lost_focus()
                                             && !ui.input(|i| i.key_pressed(egui::Key::Escape))
-                                        {
-                                            if !state.commit_tab_rename() {
+                                            && !state.commit_tab_rename() {
                                                 // Rename failed, cancel instead
                                                 state.cancel_tab_rename();
                                             }
-                                        }
                                     } else {
                                         let tab = &state.prompt_tabs[i];
 

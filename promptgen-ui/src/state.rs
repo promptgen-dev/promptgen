@@ -94,8 +94,10 @@ pub struct AutocompleteState {
 
 /// Origin of a prompt tab - tracks where it came from
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum PromptSource {
     /// Created via [+ New] button - not yet saved to library
+    #[default]
     New,
     /// Opened from a saved prompt in the library
     FromLibrary {
@@ -104,11 +106,6 @@ pub enum PromptSource {
     },
 }
 
-impl Default for PromptSource {
-    fn default() -> Self {
-        Self::New
-    }
-}
 
 /// A prompt tab being edited
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -470,12 +467,11 @@ impl AppState {
 
     /// Set all values for a slot (used for reordering)
     pub fn set_slot_values(&mut self, slot_label: &str, new_values: Vec<String>) {
-        if let Some(values) = self.slot_values.get_mut(slot_label) {
-            if *values != new_values {
+        if let Some(values) = self.slot_values.get_mut(slot_label)
+            && *values != new_values {
                 *values = new_values;
                 self.mark_active_tab_dirty();
             }
-        }
     }
 
     /// Set the single value for a textarea slot
@@ -922,12 +918,11 @@ impl AppState {
         let definitions = self.get_slot_definitions();
         let slot_values = Self::vec_map_to_slot_values(&self.slot_values, &definitions);
 
-        if let Some(tab) = self.get_active_tab_mut() {
-            if tab.slots != slot_values {
+        if let Some(tab) = self.get_active_tab_mut()
+            && tab.slots != slot_values {
                 tab.slots = slot_values;
                 tab.dirty = true;
             }
-        }
     }
 
     /// Create a new tab with an auto-generated unique name
@@ -954,13 +949,12 @@ impl AppState {
         }
 
         // Check if tab has unsaved changes
-        if let Some(tab) = self.prompt_tabs.get(index) {
-            if tab.dirty {
+        if let Some(tab) = self.prompt_tabs.get(index)
+            && tab.dirty {
                 // Show confirmation dialog
                 self.confirm_dialog = Some(ConfirmDialog::CloseUnsavedTab { tab_index: index });
                 return false;
             }
-        }
 
         // Tab is clean, close immediately
         self.close_tab_force(index)
@@ -1048,14 +1042,13 @@ impl AppState {
         }
 
         // Check library prompts (but allow if this tab came from that prompt)
-        if let Some(tab) = self.prompt_tabs.get(tab_index) {
-            if let PromptSource::FromLibrary { original_name } = &tab.source {
+        if let Some(tab) = self.prompt_tabs.get(tab_index)
+            && let PromptSource::FromLibrary { original_name } = &tab.source {
                 // Allow keeping/restoring the original name
                 if name == original_name {
                     return true;
                 }
             }
-        }
 
         let used_in_library = self.library.prompts.iter().any(|p| p.name == name);
         !used_in_library
@@ -1104,12 +1097,11 @@ impl AppState {
     /// Call this when editor_content changes
     pub fn sync_active_tab_content(&mut self) {
         let new_content = self.editor_content.clone();
-        if let Some(tab) = self.get_active_tab_mut() {
-            if tab.content != new_content {
+        if let Some(tab) = self.get_active_tab_mut()
+            && tab.content != new_content {
                 tab.content = new_content;
                 tab.dirty = true;
             }
-        }
     }
 
     /// Save the active tab to the library
@@ -1230,12 +1222,11 @@ impl AppState {
         }
 
         // Apply the rename
-        if let Some(tab) = self.prompt_tabs.get_mut(index) {
-            if tab.name != new_name {
+        if let Some(tab) = self.prompt_tabs.get_mut(index)
+            && tab.name != new_name {
                 tab.name = new_name;
                 tab.dirty = true;
             }
-        }
 
         // Clear rename state
         self.tab_rename_index = None;
