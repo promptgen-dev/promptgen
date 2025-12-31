@@ -20,6 +20,19 @@ pub struct PromptGenApp {
     #[cfg(not(target_arch = "wasm32"))]
     #[serde(skip)]
     storage: NativeStorage,
+
+    // Create Library dialog state (ephemeral)
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(skip)]
+    show_create_library_dialog: bool,
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(skip)]
+    create_library_name: String,
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(skip)]
+    create_library_path: Option<PathBuf>,
 }
 
 impl PromptGenApp {
@@ -83,6 +96,106 @@ impl PromptGenApp {
             }
         }
     }
+
+    /// Show the create library dialog
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_create_library_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_create_library_dialog {
+            return;
+        }
+
+        egui::Window::new("Create New Library")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("Library Name:");
+                ui.text_edit_singleline(&mut self.create_library_name);
+
+                ui.add_space(8.0);
+
+                ui.label("File Location:");
+                ui.horizontal(|ui| {
+                    let path_display = self
+                        .create_library_path
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "No location selected".to_string());
+                    ui.add(
+                        egui::TextEdit::singleline(&mut path_display.as_str())
+                            .interactive(false)
+                            .desired_width(300.0),
+                    );
+
+                    if ui.button("...").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_title("Save Library File")
+                            .add_filter("YAML files", &["yaml", "yml"])
+                            .set_file_name(&format!("{}.yaml", self.create_library_name))
+                            .save_file()
+                        {
+                            self.create_library_path = Some(path);
+                        }
+                    }
+                });
+
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        self.show_create_library_dialog = false;
+                        self.create_library_name.clear();
+                        self.create_library_path = None;
+                    }
+
+                    let can_create = !self.create_library_name.trim().is_empty()
+                        && self.create_library_path.is_some();
+
+                    if ui
+                        .add_enabled(can_create, egui::Button::new("Create Library"))
+                        .clicked()
+                    {
+                        self.create_library();
+                    }
+                });
+            });
+    }
+
+    /// Create a new library file
+    #[cfg(not(target_arch = "wasm32"))]
+    fn create_library(&mut self) {
+        let name = self.create_library_name.trim().to_string();
+        let path = self.create_library_path.clone().unwrap();
+
+        // TODO: Check if current library has unsaved changes and prompt user
+
+        // Create empty library
+        let library = promptgen_core::Library {
+            name: name.clone(),
+            description: String::new(),
+            variables: Vec::new(),
+            prompts: Vec::new(),
+        };
+
+        // Save to disk
+        match promptgen_core::save_library(&library, &path) {
+            Ok(()) => {
+                // Load the new library
+                self.state.library = library;
+                self.state.library_path = Some(path.clone());
+                self.library_file_path = Some(path);
+
+                // Close dialog
+                self.show_create_library_dialog = false;
+                self.create_library_name.clear();
+                self.create_library_path = None;
+            }
+            Err(e) => {
+                log::error!("Failed to create library: {}", e);
+                // TODO: Show error in dialog instead of just logging
+            }
+        }
+    }
 }
 
 impl eframe::App for PromptGenApp {
@@ -105,6 +218,10 @@ impl eframe::App for PromptGenApp {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     ui.menu_button("File", |ui| {
+                        if ui.button("Create Library...").clicked() {
+                            ui.close();
+                            self.show_create_library_dialog = true;
+                        }
                         if ui.button("Open Library...").clicked() {
                             ui.close();
                             self.open_library_dialog();
@@ -179,5 +296,9 @@ impl eframe::App for PromptGenApp {
                     }
                 });
         });
+
+        // Render create library dialog (if active)
+        #[cfg(not(target_arch = "wasm32"))]
+        self.render_create_library_dialog(ctx);
     }
 }
