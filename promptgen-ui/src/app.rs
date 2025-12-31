@@ -370,6 +370,58 @@ impl PromptGenApp {
             OverwriteConfirmAction::None => {}
         }
     }
+
+    /// Render the close unsaved tab confirmation dialog and handle actions
+    fn render_close_unsaved_tab_dialog(&mut self, ctx: &egui::Context) {
+        use crate::state::ConfirmDialog;
+        use dialogs::CloseUnsavedTabAction;
+
+        // Check if we have a CloseUnsavedTab dialog active
+        let tab_index = match &self.state.confirm_dialog {
+            Some(ConfirmDialog::CloseUnsavedTab { tab_index }) => *tab_index,
+            _ => return,
+        };
+
+        // Get the tab name for display
+        let tab_name = self
+            .state
+            .prompt_tabs
+            .get(tab_index)
+            .map(|t| t.name.clone())
+            .unwrap_or_else(|| "Prompt".to_string());
+
+        let action = dialogs::render_close_unsaved_tab_dialog(ctx, &tab_name);
+
+        match action {
+            CloseUnsavedTabAction::Save => {
+                // Switch to the tab, save it, then close it
+                self.state.switch_to_tab(tab_index);
+                self.state.save_active_tab_to_library();
+
+                // Persist library to disk
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(path) = &self.state.library_path {
+                    if let Err(e) = promptgen_core::save_library(&self.state.library, path) {
+                        log::error!("Failed to save library: {}", e);
+                    }
+                }
+
+                // Now close the tab (it's clean now)
+                self.state.close_tab_force(tab_index);
+                self.state.confirm_dialog = None;
+            }
+            CloseUnsavedTabAction::DontSave => {
+                // Close without saving
+                self.state.close_tab_force(tab_index);
+                self.state.confirm_dialog = None;
+            }
+            CloseUnsavedTabAction::Cancel => {
+                // Just close the dialog
+                self.state.confirm_dialog = None;
+            }
+            CloseUnsavedTabAction::None => {}
+        }
+    }
 }
 
 impl eframe::App for PromptGenApp {
@@ -522,5 +574,8 @@ impl eframe::App for PromptGenApp {
         // Render overwrite confirmation dialog (if active)
         #[cfg(not(target_arch = "wasm32"))]
         self.render_overwrite_confirm_dialog(ctx);
+
+        // Render close unsaved tab dialog (if active)
+        self.render_close_unsaved_tab_dialog(ctx);
     }
 }

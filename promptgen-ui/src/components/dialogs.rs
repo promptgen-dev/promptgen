@@ -23,6 +23,14 @@ pub enum OverwriteConfirmAction {
     Cancel,
 }
 
+/// Actions that can result from the Close Unsaved Tab dialog
+pub enum CloseUnsavedTabAction {
+    None,
+    Save,
+    DontSave,
+    Cancel,
+}
+
 /// Render the Create Library dialog
 pub fn render_create_library_dialog(
     ctx: &egui::Context,
@@ -172,6 +180,45 @@ pub fn render_overwrite_confirm_dialog(
 
                 if ui.button("Overwrite").clicked() {
                     action = OverwriteConfirmAction::Confirm;
+                }
+            });
+        });
+
+    action
+}
+
+/// Render the Close Unsaved Tab confirmation dialog
+pub fn render_close_unsaved_tab_dialog(
+    ctx: &egui::Context,
+    tab_name: &str,
+) -> CloseUnsavedTabAction {
+    let mut action = CloseUnsavedTabAction::None;
+
+    egui::Window::new("Unsaved Changes")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.label(format!(
+                "\"{}\" has unsaved changes.",
+                tab_name
+            ));
+            ui.label("Do you want to save before closing?");
+
+            ui.add_space(8.0);
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    action = CloseUnsavedTabAction::Cancel;
+                }
+
+                if ui.button("Don't Save").clicked() {
+                    action = CloseUnsavedTabAction::DontSave;
+                }
+
+                if ui.button("Save").clicked() {
+                    action = CloseUnsavedTabAction::Save;
                 }
             });
         });

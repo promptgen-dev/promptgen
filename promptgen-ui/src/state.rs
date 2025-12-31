@@ -60,6 +60,8 @@ pub enum ConfirmDialog {
     DiscardVariableChanges,
     /// Confirm deleting a variable
     DeleteVariable { variable_name: String },
+    /// Confirm closing a tab with unsaved changes
+    CloseUnsavedTab { tab_index: usize },
 }
 
 /// Autocomplete mode - what kind of completions to show
@@ -172,6 +174,10 @@ pub struct AppState {
     pub prompt_tabs: Vec<PromptTab>,
     pub active_tab_index: Option<usize>,
 
+    // Tab Rename State (ephemeral)
+    pub tab_rename_index: Option<usize>,
+    pub tab_rename_text: String,
+
     // Editor (legacy - will be replaced by active tab)
     pub editor_content: String,
     pub selected_prompt_id: Option<String>,
@@ -215,6 +221,8 @@ impl Default for AppState {
             library_path: None,
             prompt_tabs: vec![first_tab],
             active_tab_index: Some(0),
+            tab_rename_index: None,
+            tab_rename_text: String::new(),
             editor_content: String::new(),
             selected_prompt_id: None,
             parse_result: None,
@@ -932,9 +940,35 @@ impl AppState {
         new_index
     }
 
-    /// Close a tab by index
+    /// Try to close a tab by index
+    /// If the tab has unsaved changes, shows a confirmation dialog
+    /// Returns true if the tab was closed immediately, false if confirmation is needed or cannot close
+    pub fn try_close_tab(&mut self, index: usize) -> bool {
+        if self.prompt_tabs.len() <= 1 {
+            // Don't close the last tab
+            return false;
+        }
+
+        if index >= self.prompt_tabs.len() {
+            return false;
+        }
+
+        // Check if tab has unsaved changes
+        if let Some(tab) = self.prompt_tabs.get(index) {
+            if tab.dirty {
+                // Show confirmation dialog
+                self.confirm_dialog = Some(ConfirmDialog::CloseUnsavedTab { tab_index: index });
+                return false;
+            }
+        }
+
+        // Tab is clean, close immediately
+        self.close_tab_force(index)
+    }
+
+    /// Close a tab by index without checking for unsaved changes
     /// Returns true if the tab was closed, false if it was the last tab
-    pub fn close_tab(&mut self, index: usize) -> bool {
+    pub fn close_tab_force(&mut self, index: usize) -> bool {
         if self.prompt_tabs.len() <= 1 {
             // Don't close the last tab
             return false;
@@ -968,6 +1002,11 @@ impl AppState {
         }
 
         true
+    }
+
+    /// Legacy alias for close_tab_force (for backwards compatibility)
+    pub fn close_tab(&mut self, index: usize) -> bool {
+        self.close_tab_force(index)
     }
 
     /// Find the next available sequential prompt name ("Prompt 1", "Prompt 2", etc.)
@@ -1153,5 +1192,60 @@ impl AppState {
         }
 
         true
+    }
+
+    // ==================== Tab Rename Methods ====================
+
+    /// Start renaming a tab
+    pub fn start_tab_rename(&mut self, index: usize) {
+        if let Some(tab) = self.prompt_tabs.get(index) {
+            self.tab_rename_index = Some(index);
+            self.tab_rename_text = tab.name.clone();
+        }
+    }
+
+    /// Cancel tab rename
+    pub fn cancel_tab_rename(&mut self) {
+        self.tab_rename_index = None;
+        self.tab_rename_text.clear();
+    }
+
+    /// Commit tab rename if the new name is valid
+    /// Returns true if rename was successful, false if name is invalid/duplicate
+    pub fn commit_tab_rename(&mut self) -> bool {
+        let Some(index) = self.tab_rename_index else {
+            return false;
+        };
+
+        let new_name = self.tab_rename_text.trim().to_string();
+
+        // Check if name is empty
+        if new_name.is_empty() {
+            return false;
+        }
+
+        // Check if name is available (excluding current tab)
+        if !self.is_name_available_for_rename(&new_name, index) {
+            return false;
+        }
+
+        // Apply the rename
+        if let Some(tab) = self.prompt_tabs.get_mut(index) {
+            if tab.name != new_name {
+                tab.name = new_name;
+                tab.dirty = true;
+            }
+        }
+
+        // Clear rename state
+        self.tab_rename_index = None;
+        self.tab_rename_text.clear();
+
+        true
+    }
+
+    /// Check if a tab is currently being renamed
+    pub fn is_tab_renaming(&self, index: usize) -> bool {
+        self.tab_rename_index == Some(index)
     }
 }
