@@ -5,7 +5,7 @@
 use egui::Key;
 
 use crate::state::{AppState, AutocompleteMode};
-use crate::theme::syntax;
+use crate::theme;
 use promptgen_core::Library;
 use promptgen_core::search::VariableSearchResult;
 
@@ -170,13 +170,14 @@ impl AutocompletePopup {
                                     match_indices,
                                 } => {
                                     let mut job = egui::text::LayoutJob::default();
+                                    let current_theme = theme::current(ui.ctx());
 
                                     // Add @ prefix
                                     job.append(
                                         "@",
                                         0.0,
                                         egui::TextFormat {
-                                            color: syntax::VARIABLE_REF,
+                                            color: current_theme.reference,
                                             ..Default::default()
                                         },
                                     );
@@ -184,9 +185,9 @@ impl AutocompletePopup {
                                     // Add variable name with match highlighting
                                     for (i, c) in name.chars().enumerate() {
                                         let color = if match_indices.contains(&i) {
-                                            syntax::MATCH_HIGHLIGHT
+                                            current_theme.match_highlight
                                         } else {
-                                            syntax::VARIABLE_REF
+                                            current_theme.reference
                                         };
                                         job.append(
                                             &c.to_string(),
@@ -203,7 +204,7 @@ impl AutocompletePopup {
                                         &format!(" ({} options)", option_count),
                                         0.0,
                                         egui::TextFormat {
-                                            color: egui::Color32::from_rgb(108, 112, 134), // overlay0
+                                            color: current_theme.muted,
                                             ..Default::default()
                                         },
                                     );
@@ -216,6 +217,7 @@ impl AutocompletePopup {
                                     match_indices,
                                 } => {
                                     let mut job = egui::text::LayoutJob::default();
+                                    let current_theme = theme::current(ui.ctx());
 
                                     // Truncate long options
                                     let display_text = if text.len() > 50 {
@@ -227,7 +229,7 @@ impl AutocompletePopup {
                                     // Add option text with match highlighting
                                     for (i, c) in display_text.chars().enumerate() {
                                         let color = if match_indices.contains(&i) {
-                                            syntax::MATCH_HIGHLIGHT
+                                            current_theme.match_highlight
                                         } else {
                                             ui.visuals().text_color()
                                         };
@@ -246,7 +248,7 @@ impl AutocompletePopup {
                                         &format!(" (@{})", variable_name),
                                         0.0,
                                         egui::TextFormat {
-                                            color: egui::Color32::from_rgb(108, 112, 134), // overlay0
+                                            color: current_theme.muted,
                                             ..Default::default()
                                         },
                                     );

@@ -2,6 +2,8 @@
 
 use egui::{Color32, Ui};
 
+use crate::theme;
+
 /// A frame that provides consistent focus highlighting and click-to-focus behavior.
 ///
 /// This component wraps content in a styled frame that:
@@ -56,7 +58,7 @@ impl FocusableFrame {
         add_contents: impl FnOnce(&mut Ui) -> R,
     ) -> FocusableFrameResponse<R> {
         let fill_color = if self.is_focused {
-            Color32::from_rgb(49, 50, 68) // Catppuccin surface1
+            theme::current(ui.ctx()).focus_bg
         } else {
             Color32::TRANSPARENT
         };

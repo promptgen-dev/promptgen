@@ -10,7 +10,7 @@ use crate::components::autocomplete::{
 };
 use crate::highlighting::highlight_prompt;
 use crate::state::{AppState, ConfirmDialog};
-use crate::theme::syntax;
+use crate::theme;
 
 /// The editor ID for the variable options editor
 const VARIABLE_OPTIONS_EDITOR_ID: &str = "variable_options_editor";
@@ -70,7 +70,7 @@ impl VariableEditorPanel {
         // Show name validation error
         if let Some(error) = state.validate_variable_name() {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("error:").color(syntax::ERROR));
+                ui.label(RichText::new("error:").color(theme::current(ui.ctx()).error));
                 ui.label(error);
             });
         }
@@ -108,7 +108,7 @@ impl VariableEditorPanel {
             ui.add_space(8.0);
 
             if ui
-                .button(RichText::new("Delete Variable").color(syntax::ERROR))
+                .button(RichText::new("Delete Variable").color(theme::current(ui.ctx()).error))
                 .clicked()
             {
                 state.request_delete_variable(&original_name);
@@ -388,7 +388,7 @@ impl VariableEditorPanel {
             ui.add_space(8.0);
             for (option_num, error_msg) in errors {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("error:").color(syntax::ERROR));
+                    ui.label(RichText::new("error:").color(theme::current(ui.ctx()).error));
                     ui.label(format!("Option {}: {}", option_num, error_msg));
                 });
             }
@@ -423,7 +423,7 @@ impl VariableEditorPanel {
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
                             if ui
-                                .button(RichText::new("Delete").color(syntax::ERROR))
+                                .button(RichText::new("Delete").color(theme::current(ui.ctx()).error))
                                 .clicked()
                             {
                                 Self::delete_variable(state, &variable_name);

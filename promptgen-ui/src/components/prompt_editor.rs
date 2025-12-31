@@ -8,7 +8,7 @@ use crate::components::autocomplete::{
 };
 use crate::highlighting::highlight_prompt;
 use crate::state::AppState;
-use crate::theme::syntax;
+use crate::theme;
 use promptgen_core::ParseResult;
 
 /// Configuration for the template editor widget
@@ -219,7 +219,7 @@ impl PromptEditor {
 
             for error in &parse_result.errors {
                 ui.horizontal(|ui| {
-                    ui.colored_label(syntax::ERROR, "error:");
+                    ui.colored_label(theme::current(ui.ctx()).error, "error:");
                     ui.label(&error.message);
                 });
 

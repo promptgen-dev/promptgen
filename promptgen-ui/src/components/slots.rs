@@ -10,7 +10,7 @@ use crate::components::autocomplete::{
 use crate::components::focusable_frame::FocusableFrame;
 use crate::components::prompt_editor::{PromptEditor, PromptEditorConfig};
 use crate::state::AppState;
-use crate::theme::syntax;
+use crate::theme;
 
 /// Measure text size in the UI (based on hello_egui_utils::measure_text)
 fn measure_text(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) -> Vec2 {
@@ -154,7 +154,7 @@ impl SlotPanel {
             if let Some(nested_label) = find_slot_block_in_parse_result(&result.parse_result) {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.colored_label(syntax::ERROR, "error:");
+                    ui.colored_label(theme::current(ui.ctx()).error, "error:");
                     ui.label(format!(
                         "Slot values cannot contain other slots (found \"{}\")",
                         nested_label
@@ -309,6 +309,7 @@ impl SlotPanel {
                                     item_iter.next(ui, item_id, idx, true, |ui, item_handle| {
                                         item_handle.ui_sized(ui, chip_size, |ui, handle, _state| {
                                             // Chip with X button - entire chip is drag handle
+                                            let chip_bg = theme::current(ui.ctx()).chip_bg;
                                             handle.ui_sized(ui, chip_size, |ui| {
                                                 egui::Frame::NONE
                                                     .inner_margin(egui::Margin {
@@ -318,7 +319,7 @@ impl SlotPanel {
                                                         bottom: chip_vertical_padding as i8,
                                                     })
                                                     .corner_radius(12.0)
-                                                    .fill(egui::Color32::from_rgb(69, 71, 90)) // Catppuccin surface2
+                                                    .fill(chip_bg)
                                                     .show(ui, |ui| {
                                                         ui.horizontal(|ui| {
                                                             ui.spacing_mut().item_spacing.x =

@@ -1,11 +1,81 @@
 use egui::{Color32, Stroke};
 
+/// All theme colors in one place
+#[derive(Clone, Copy)]
+pub struct Theme {
+    // Syntax highlighting
+    pub text: Color32,
+    pub comment: Color32,
+    pub reference: Color32,
+    pub slot: Color32,
+    pub option: Color32,
+    pub brace: Color32,
+    pub error: Color32,
+
+    // UI elements
+    pub chip_bg: Color32,
+    pub focus_bg: Color32,
+    pub cursor: Color32,
+    pub match_highlight: Color32,
+    pub muted: Color32,
+}
+
+/// Dark theme (Catppuccin Mocha inspired)
+pub const DARK: Theme = Theme {
+    // Syntax
+    text: Color32::from_rgb(205, 214, 244),     // Mocha Text
+    comment: Color32::from_rgb(108, 112, 134),  // Mocha Overlay0
+    reference: Color32::from_rgb(137, 180, 250), // Mocha Blue
+    slot: Color32::from_rgb(166, 227, 161),     // Mocha Green
+    option: Color32::from_rgb(250, 179, 135),   // Mocha Peach
+    brace: Color32::from_rgb(147, 153, 178),    // Mocha Overlay2
+    error: Color32::from_rgb(243, 139, 168),    // Mocha Red
+
+    // UI
+    chip_bg: Color32::from_rgb(69, 71, 90),     // Mocha Surface2
+    focus_bg: Color32::from_rgb(49, 50, 68),    // Mocha Surface1
+    cursor: Color32::from_rgb(205, 214, 244),   // Mocha Text
+    match_highlight: Color32::from_rgb(249, 226, 175), // Mocha Yellow
+    muted: Color32::from_rgb(108, 112, 134),    // Mocha Overlay0
+};
+
+/// Light theme (Catppuccin Latte inspired, with contrast adjustments)
+pub const LIGHT: Theme = Theme {
+    // Syntax
+    text: Color32::from_rgb(32, 32, 32),        // Dark gray for contrast
+    comment: Color32::from_rgb(140, 143, 161),  // Latte Overlay0
+    reference: Color32::from_rgb(30, 102, 245), // Latte Blue
+    slot: Color32::from_rgb(64, 160, 43),       // Latte Green
+    option: Color32::from_rgb(254, 100, 11),    // Latte Peach
+    brace: Color32::from_rgb(124, 127, 147),    // Latte Overlay2
+    error: Color32::from_rgb(210, 15, 57),      // Latte Red
+
+    // UI
+    chip_bg: Color32::from_rgb(188, 192, 204),  // Latte Surface2
+    focus_bg: Color32::from_rgb(220, 224, 232), // Latte Surface1
+    cursor: Color32::from_rgb(76, 79, 105),     // Latte Text
+    match_highlight: Color32::from_rgb(223, 142, 29), // Latte Yellow (darker for contrast)
+    muted: Color32::from_rgb(140, 143, 161),    // Latte Overlay0
+};
+
+/// Get the current theme based on dark/light mode
+pub fn current(ctx: &egui::Context) -> Theme {
+    if ctx.style().visuals.dark_mode {
+        DARK
+    } else {
+        LIGHT
+    }
+}
+
+// ============================================================================
+// Font and cursor setup
+// ============================================================================
+
 /// Our custom font size additions (added to egui defaults)
 const FONT_SIZE_INCREASE: f32 = 2.0;
 
 /// Check if our font size customization has been applied
 fn has_custom_font_sizes(ctx: &egui::Context) -> bool {
-    // Check if Body font is larger than default (14.0 -> 16.0)
     let style = ctx.style();
     if let Some(font_id) = style.text_styles.get(&egui::TextStyle::Body) {
         font_id.size > 14.5 // Default is 14.0, we add 2.0
@@ -14,7 +84,7 @@ fn has_custom_font_sizes(ctx: &egui::Context) -> bool {
     }
 }
 
-/// Apply custom font sizes and ensure cursor is visible
+/// Apply custom font sizes
 pub fn apply_font_sizes(ctx: &egui::Context) {
     if !has_custom_font_sizes(ctx) {
         let mut style = (*ctx.style()).clone();
@@ -27,84 +97,8 @@ pub fn apply_font_sizes(ctx: &egui::Context) {
 
 /// Ensure the text cursor is visible with proper color contrast
 pub fn ensure_cursor_visible(ctx: &egui::Context) {
+    let theme = current(ctx);
     let mut style = (*ctx.style()).clone();
-    let is_dark = style.visuals.dark_mode;
-
-    // Set cursor color to contrast with background
-    let cursor_color = if is_dark {
-        Color32::from_rgb(205, 214, 244) // Catppuccin Mocha Text (light color on dark bg)
-    } else {
-        Color32::from_rgb(76, 79, 105) // Catppuccin Latte Text (dark color on light bg)
-    };
-
-    style.visuals.text_cursor.stroke = Stroke::new(1.5, cursor_color);
+    style.visuals.text_cursor.stroke = Stroke::new(1.5, theme.cursor);
     ctx.set_style(style);
-}
-
-/// Get colors for syntax highlighting that adapt to dark/light mode.
-pub mod syntax {
-    use egui::Color32;
-
-    /// Get the text color based on dark/light mode
-    pub fn text(ctx: &egui::Context) -> Color32 {
-        if ctx.style().visuals.dark_mode {
-            Color32::from_rgb(205, 214, 244) // Catppuccin Mocha Text
-        } else {
-            Color32::from_rgb(76, 79, 105) // Catppuccin Latte Text
-        }
-    }
-
-    /// Get the comment color based on dark/light mode
-    pub fn comment(ctx: &egui::Context) -> Color32 {
-        if ctx.style().visuals.dark_mode {
-            Color32::from_rgb(108, 112, 134) // Mocha Overlay0
-        } else {
-            Color32::from_rgb(140, 143, 161) // Latte Overlay0
-        }
-    }
-
-    /// Get the reference color based on dark/light mode
-    pub fn reference(ctx: &egui::Context) -> Color32 {
-        if ctx.style().visuals.dark_mode {
-            Color32::from_rgb(137, 180, 250) // Mocha Blue
-        } else {
-            Color32::from_rgb(30, 102, 245) // Latte Blue
-        }
-    }
-
-    /// Get the slot color based on dark/light mode
-    pub fn slot(ctx: &egui::Context) -> Color32 {
-        if ctx.style().visuals.dark_mode {
-            Color32::from_rgb(166, 227, 161) // Mocha Green
-        } else {
-            Color32::from_rgb(64, 160, 43) // Latte Green
-        }
-    }
-
-    /// Get the option color based on dark/light mode
-    pub fn option(ctx: &egui::Context) -> Color32 {
-        if ctx.style().visuals.dark_mode {
-            Color32::from_rgb(250, 179, 135) // Mocha Peach
-        } else {
-            Color32::from_rgb(254, 100, 11) // Latte Peach
-        }
-    }
-
-    /// Get the brace color based on dark/light mode
-    pub fn brace(ctx: &egui::Context) -> Color32 {
-        if ctx.style().visuals.dark_mode {
-            Color32::from_rgb(147, 153, 178) // Mocha Overlay2
-        } else {
-            Color32::from_rgb(124, 127, 147) // Latte Overlay2
-        }
-    }
-
-    /// Error color (same red works for both modes)
-    pub const ERROR: Color32 = Color32::from_rgb(210, 15, 57); // Latte Red (darker, visible in both)
-
-    /// Variable reference color (constant for autocomplete display)
-    pub const VARIABLE_REF: Color32 = Color32::from_rgb(137, 180, 250); // Mocha Blue
-
-    /// Match highlight color for fuzzy search (bright yellow)
-    pub const MATCH_HIGHLIGHT: Color32 = Color32::from_rgb(249, 226, 175); // Mocha Yellow
 }
