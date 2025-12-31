@@ -1,4 +1,5 @@
 mod autocomplete;
+pub mod dialogs;
 mod editor;
 mod focusable_frame;
 mod preview;
