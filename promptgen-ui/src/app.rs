@@ -33,6 +33,24 @@ pub struct PromptGenApp {
     #[cfg(not(target_arch = "wasm32"))]
     #[serde(skip)]
     create_library_path: Option<PathBuf>,
+
+    // Edit Library dialog state (ephemeral)
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(skip)]
+    show_edit_library_dialog: bool,
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(skip)]
+    edit_library_name: String,
+
+    // Overwrite confirmation dialog state
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(skip)]
+    show_overwrite_confirm: bool,
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(skip)]
+    pending_rename_path: Option<PathBuf>,
 }
 
 impl PromptGenApp {
@@ -127,15 +145,14 @@ impl PromptGenApp {
                             .desired_width(300.0),
                     );
 
-                    if ui.button("...").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
+                    if ui.button("...").clicked()
+                        && let Some(path) = rfd::FileDialog::new()
                             .set_title("Save Library File")
                             .add_filter("YAML files", &["yaml", "yml"])
-                            .set_file_name(&format!("{}.yaml", self.create_library_name))
+                            .set_file_name(format!("{}.yaml", self.create_library_name))
                             .save_file()
-                        {
-                            self.create_library_path = Some(path);
-                        }
+                    {
+                        self.create_library_path = Some(path);
                     }
                 });
 
@@ -196,6 +213,176 @@ impl PromptGenApp {
             }
         }
     }
+
+    /// Show the edit library dialog
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_edit_library_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_edit_library_dialog {
+            return;
+        }
+
+        egui::Window::new("Edit Library")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("Library Name:");
+                ui.text_edit_singleline(&mut self.edit_library_name);
+
+                ui.add_space(8.0);
+
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        self.show_edit_library_dialog = false;
+                        self.edit_library_name.clear();
+                    }
+
+                    let can_save = !self.edit_library_name.trim().is_empty()
+                        && self.edit_library_name.trim() != self.state.library.name;
+
+                    if ui
+                        .add_enabled(can_save, egui::Button::new("Save"))
+                        .clicked()
+                    {
+                        self.rename_library();
+                    }
+                });
+            });
+    }
+
+    /// Rename the library and its file
+    #[cfg(not(target_arch = "wasm32"))]
+    fn rename_library(&mut self) {
+        let new_name = self.edit_library_name.trim().to_string();
+        let Some(current_path) = &self.state.library_path else {
+            log::error!("Cannot rename library: no library path");
+            return;
+        };
+
+        // Generate new filename based on new library name
+        let parent = current_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let extension = current_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("yaml");
+        let new_filename = format!("{}.{}", new_name, extension);
+        let new_path = parent.join(&new_filename);
+
+        // Check if the new path already exists and is different from current
+        if new_path != *current_path && new_path.exists() {
+            // Show confirmation dialog
+            self.pending_rename_path = Some(new_path);
+            self.show_overwrite_confirm = true;
+            return;
+        }
+
+        // Proceed with rename
+        self.do_rename(new_name, new_path);
+    }
+
+    /// Actually perform the rename operation
+    #[cfg(not(target_arch = "wasm32"))]
+    fn do_rename(&mut self, new_name: String, new_path: PathBuf) {
+        let Some(current_path) = &self.state.library_path.clone() else {
+            log::error!("Cannot rename library: no library path");
+            return;
+        };
+
+        // Update library name
+        self.state.library.name = new_name.clone();
+
+        // Save library with new name to current file
+        if let Err(e) = promptgen_core::save_library(&self.state.library, current_path) {
+            log::error!("Failed to save library with new name: {}", e);
+            // TODO: Show error in dialog instead of just logging
+            return;
+        }
+
+        // Rename the file if the path changed
+        if new_path != *current_path {
+            // If target exists, delete it first (we already confirmed with user)
+            if new_path.exists()
+                && let Err(e) = std::fs::remove_file(&new_path)
+            {
+                log::error!("Failed to delete existing file: {}", e);
+                // TODO: Show error in dialog instead of just logging
+                return;
+            }
+
+            match std::fs::rename(current_path, &new_path) {
+                Ok(()) => {
+                    // Update paths
+                    self.state.library_path = Some(new_path.clone());
+                    self.library_file_path = Some(new_path.clone());
+                    self.storage.set_library_path(new_path);
+
+                    log::info!("Library renamed to: {}", new_name);
+                }
+                Err(e) => {
+                    log::error!("Failed to rename library file: {}", e);
+                    // TODO: Show error in dialog instead of just logging
+                    // Note: Library name in YAML was already updated, but file wasn't renamed
+                }
+            }
+        }
+
+        // Close dialogs
+        self.show_edit_library_dialog = false;
+        self.edit_library_name.clear();
+        self.show_overwrite_confirm = false;
+        self.pending_rename_path = None;
+    }
+
+    /// Show the overwrite confirmation dialog
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_overwrite_confirm_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_overwrite_confirm {
+            return;
+        }
+
+        let Some(new_path) = &self.pending_rename_path else {
+            return;
+        };
+
+        // Extract values before closure to avoid borrow checker issues
+        let new_name = self.edit_library_name.trim().to_string();
+        let filename = new_path
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        egui::Window::new("Confirm Overwrite")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "The library \"{}\" already exists in this folder.",
+                    filename
+                ));
+                ui.label("Would you like to overwrite it?");
+
+                ui.add_space(8.0);
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        self.show_overwrite_confirm = false;
+                        self.pending_rename_path = None;
+                    }
+
+                    if ui.button("Overwrite").clicked() {
+                        let new_path = self.pending_rename_path.clone().unwrap();
+                        self.do_rename(new_name.clone(), new_path);
+                    }
+                });
+            });
+    }
 }
 
 impl eframe::App for PromptGenApp {
@@ -226,6 +413,19 @@ impl eframe::App for PromptGenApp {
                             ui.close();
                             self.open_library_dialog();
                         }
+
+                        // Edit Library - only enabled when a library is loaded
+                        let has_library = self.state.library_path.is_some();
+                        if ui
+                            .add_enabled(has_library, egui::Button::new("Edit Library..."))
+                            .clicked()
+                        {
+                            ui.close();
+                            // Initialize dialog with current library name
+                            self.edit_library_name = self.state.library.name.clone();
+                            self.show_edit_library_dialog = true;
+                        }
+
                         ui.separator();
                         if ui.button("Quit").clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -300,5 +500,13 @@ impl eframe::App for PromptGenApp {
         // Render create library dialog (if active)
         #[cfg(not(target_arch = "wasm32"))]
         self.render_create_library_dialog(ctx);
+
+        // Render edit library dialog (if active)
+        #[cfg(not(target_arch = "wasm32"))]
+        self.render_edit_library_dialog(ctx);
+
+        // Render overwrite confirmation dialog (if active)
+        #[cfg(not(target_arch = "wasm32"))]
+        self.render_overwrite_confirm_dialog(ctx);
     }
 }
