@@ -210,6 +210,9 @@ pub struct AppState {
 
     // Pending cursor positions (per-editor, keyed by editor ID)
     pub pending_cursor_positions: HashMap<String, usize>,
+
+    // Variable list expand/collapse all (consumed on next render)
+    pub expand_all_variables: Option<bool>,
 }
 
 impl Default for AppState {
@@ -243,6 +246,7 @@ impl Default for AppState {
             confirm_dialog: None,
             autocomplete_states: HashMap::new(),
             pending_cursor_positions: HashMap::new(),
+            expand_all_variables: None,
         }
     }
 }

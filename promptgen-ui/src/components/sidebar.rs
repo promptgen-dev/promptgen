@@ -6,7 +6,8 @@ use egui_flex::{Flex, FlexItem};
 use promptgen_core::Cardinality;
 
 use egui_material_icons::icons::{
-    ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_DESCRIPTION, ICON_EDIT, ICON_EXPAND_MORE, ICON_SEARCH,
+    ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_COLLAPSE_ALL, ICON_DESCRIPTION, ICON_EDIT,
+    ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_SEARCH,
 };
 
 use crate::state::{AppState, SidebarMode, SidebarViewMode};
@@ -129,6 +130,37 @@ impl SidebarPanel {
                         .desired_width(f32::INFINITY),
                 );
             });
+
+            // Expand/Collapse all buttons (only in Variables view)
+            if state.sidebar_view_mode == SidebarViewMode::Variables {
+                ui.add_space(4.0);
+                Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
+                    // Spacer to push buttons to the right
+                    flex.add_ui(FlexItem::default().grow(1.0), |_ui| {});
+
+                    // Expand all button
+                    flex.add_ui(FlexItem::default(), |ui| {
+                        if ui
+                            .small_button(ICON_EXPAND_ALL)
+                            .on_hover_text("Expand all")
+                            .clicked()
+                        {
+                            state.expand_all_variables = Some(true);
+                        }
+                    });
+
+                    // Collapse all button
+                    flex.add_ui(FlexItem::default(), |ui| {
+                        if ui
+                            .small_button(ICON_COLLAPSE_ALL)
+                            .on_hover_text("Collapse all")
+                            .clicked()
+                        {
+                            state.expand_all_variables = Some(false);
+                        }
+                    });
+                });
+            }
 
             ui.separator();
 
@@ -311,6 +343,9 @@ impl SidebarPanel {
 
         let default_color = ui.visuals().text_color();
 
+        // Take expand_all_variables state (consumed once per render)
+        let expand_all = state.expand_all_variables.take();
+
         // Track which variable to edit (to avoid borrow issues)
         let mut variable_to_edit: Option<String> = None;
 
@@ -325,49 +360,51 @@ impl SidebarPanel {
                     is_searching, // Auto-expand when searching
                 );
 
+            // Apply expand/collapse all if requested
+            if let Some(expand) = expand_all {
+                collapsing_state.set_open(expand);
+            }
+
             // Header row: collapse toggle + label + edit button using flex layout
-            Flex::horizontal()
-                .w_full()
-                .wrap(false)
-                .show(ui, |flex| {
-                    // Toggle icon (fixed size, no grow)
-                    let icon = if collapsing_state.is_open() {
-                        ICON_EXPAND_MORE
-                    } else {
-                        ICON_CHEVRON_RIGHT
-                    };
-                    flex.add_ui(FlexItem::default(), |ui| {
-                        if ui.small_button(icon).clicked() {
-                            collapsing_state.toggle(ui);
-                        }
-                    });
-
-                    // Variable name label (shrinks to fit, truncates text)
-                    let header_text = Self::build_variable_header_text(
-                        &var_display.name,
-                        var_display.options.len(),
-                        var_display.is_option_search,
-                    );
-                    let var_name = var_display.name.clone();
-                    flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
-                        // Left-align and truncate text to available width
-                        ui.set_width(ui.available_width());
-                        let label = egui::Label::new(&header_text).truncate();
-                        let response = ui.add(label);
-                        response.on_hover_text(format!("@{}", var_name));
-                    });
-
-                    // Edit button (fixed size, no grow)
-                    flex.add_ui(FlexItem::default(), |ui| {
-                        if ui
-                            .small_button(ICON_EDIT)
-                            .on_hover_text("Edit variable")
-                            .clicked()
-                        {
-                            variable_to_edit = Some(var_display.name.clone());
-                        }
-                    });
+            Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
+                // Toggle icon (fixed size, no grow)
+                let icon = if collapsing_state.is_open() {
+                    ICON_EXPAND_MORE
+                } else {
+                    ICON_CHEVRON_RIGHT
+                };
+                flex.add_ui(FlexItem::default(), |ui| {
+                    if ui.small_button(icon).clicked() {
+                        collapsing_state.toggle(ui);
+                    }
                 });
+
+                // Variable name label (shrinks to fit, truncates text)
+                let header_text = Self::build_variable_header_text(
+                    &var_display.name,
+                    var_display.options.len(),
+                    var_display.is_option_search,
+                );
+                let var_name = var_display.name.clone();
+                flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
+                    // Left-align and truncate text to available width
+                    ui.set_width(ui.available_width());
+                    let label = egui::Label::new(&header_text).truncate();
+                    let response = ui.add(label);
+                    response.on_hover_text(format!("@{}", var_name));
+                });
+
+                // Edit button (fixed size, no grow)
+                flex.add_ui(FlexItem::default(), |ui| {
+                    if ui
+                        .small_button(ICON_EDIT)
+                        .on_hover_text("Edit variable")
+                        .clicked()
+                    {
+                        variable_to_edit = Some(var_display.name.clone());
+                    }
+                });
+            });
 
             // Body content (only shown when expanded)
             collapsing_state.show_body_unindented(ui, |ui| {
@@ -422,7 +459,11 @@ impl SidebarPanel {
     }
 
     /// Build a simple text string for a variable header (for use with truncation).
-    fn build_variable_header_text(name: &str, option_count: usize, is_option_search: bool) -> String {
+    fn build_variable_header_text(
+        name: &str,
+        option_count: usize,
+        is_option_search: bool,
+    ) -> String {
         let suffix = if is_option_search {
             let match_word = if option_count == 1 {
                 "match"
