@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use egui_flex::{Flex, FlexItem};
 use promptgen_core::Cardinality;
 
 use egui_material_icons::icons::{
@@ -248,8 +249,6 @@ impl SidebarPanel {
         struct VariableDisplay {
             name: String,
             options: Vec<String>,
-            /// Match indices for the variable name (for @-prefix searches)
-            name_match_indices: Vec<usize>,
             /// For each option, the match indices (for option searches)
             option_matches: Vec<(String, Vec<usize>)>,
             /// Whether this is an option-based search result (affects display)
@@ -266,7 +265,6 @@ impl SidebarPanel {
                     .map(|v| VariableDisplay {
                         name: v.name.clone(),
                         options: v.options.clone(),
-                        name_match_indices: vec![],
                         option_matches: vec![],
                         is_option_search: false,
                     })
@@ -279,7 +277,6 @@ impl SidebarPanel {
                     .map(|vr| VariableDisplay {
                         name: vr.variable_name.clone(),
                         options: vr.options.clone(),
-                        name_match_indices: vr.match_indices.clone(),
                         option_matches: vec![],
                         is_option_search: false,
                     })
@@ -292,7 +289,6 @@ impl SidebarPanel {
                     .map(|or| VariableDisplay {
                         name: or.variable_name.clone(),
                         options: or.matches.iter().map(|m| m.text.clone()).collect(),
-                        name_match_indices: vec![],
                         option_matches: or
                             .matches
                             .iter()
@@ -329,39 +325,49 @@ impl SidebarPanel {
                     is_searching, // Auto-expand when searching
                 );
 
-            // Header row: collapse toggle + label + edit button
-            ui.horizontal(|ui| {
-                // Toggle icon
-                let icon = if collapsing_state.is_open() {
-                    ICON_EXPAND_MORE
-                } else {
-                    ICON_CHEVRON_RIGHT
-                };
-                if ui.small_button(icon).clicked() {
-                    collapsing_state.toggle(ui);
-                }
+            // Header row: collapse toggle + label + edit button using flex layout
+            Flex::horizontal()
+                .w_full()
+                .wrap(false)
+                .show(ui, |flex| {
+                    // Toggle icon (fixed size, no grow)
+                    let icon = if collapsing_state.is_open() {
+                        ICON_EXPAND_MORE
+                    } else {
+                        ICON_CHEVRON_RIGHT
+                    };
+                    flex.add_ui(FlexItem::default(), |ui| {
+                        if ui.small_button(icon).clicked() {
+                            collapsing_state.toggle(ui);
+                        }
+                    });
 
-                // Variable name label with optional highlighting
-                let header_job = Self::build_variable_header_job(
-                    &var_display.name,
-                    var_display.options.len(),
-                    &var_display.name_match_indices,
-                    var_display.is_option_search,
-                    default_color,
-                );
-                ui.label(header_job);
+                    // Variable name label (shrinks to fit, truncates text)
+                    let header_text = Self::build_variable_header_text(
+                        &var_display.name,
+                        var_display.options.len(),
+                        var_display.is_option_search,
+                    );
+                    let var_name = var_display.name.clone();
+                    flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
+                        // Left-align and truncate text to available width
+                        ui.set_width(ui.available_width());
+                        let label = egui::Label::new(&header_text).truncate();
+                        let response = ui.add(label);
+                        response.on_hover_text(format!("@{}", var_name));
+                    });
 
-                // Edit button aligned right
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .small_button(ICON_EDIT)
-                        .on_hover_text("Edit variable")
-                        .clicked()
-                    {
-                        variable_to_edit = Some(var_display.name.clone());
-                    }
+                    // Edit button (fixed size, no grow)
+                    flex.add_ui(FlexItem::default(), |ui| {
+                        if ui
+                            .small_button(ICON_EDIT)
+                            .on_hover_text("Edit variable")
+                            .clicked()
+                        {
+                            variable_to_edit = Some(var_display.name.clone());
+                        }
+                    });
                 });
-            });
 
             // Body content (only shown when expanded)
             collapsing_state.show_body_unindented(ui, |ui| {
@@ -415,53 +421,8 @@ impl SidebarPanel {
         }
     }
 
-    /// Build a LayoutJob for a variable header with optional highlighting.
-    fn build_variable_header_job(
-        name: &str,
-        option_count: usize,
-        match_indices: &[usize],
-        is_option_search: bool,
-        default_color: egui::Color32,
-    ) -> egui::text::LayoutJob {
-        use egui::FontId;
-        use egui::text::{LayoutJob, TextFormat};
-
-        let mut job = LayoutJob::default();
-
-        // Add "@" prefix
-        job.append(
-            "@",
-            0.0,
-            TextFormat {
-                font_id: FontId::default(),
-                color: default_color,
-                ..Default::default()
-            },
-        );
-
-        // Add variable name with highlighting if applicable
-        if !match_indices.is_empty() {
-            let name_job = Self::highlighted_text(name, match_indices, default_color);
-            for section in name_job.sections {
-                job.append(
-                    &name_job.text[section.byte_range.clone()],
-                    0.0,
-                    section.format,
-                );
-            }
-        } else {
-            job.append(
-                name,
-                0.0,
-                TextFormat {
-                    font_id: FontId::default(),
-                    color: default_color,
-                    ..Default::default()
-                },
-            );
-        }
-
-        // Add count suffix - for option search, show match count instead of total
+    /// Build a simple text string for a variable header (for use with truncation).
+    fn build_variable_header_text(name: &str, option_count: usize, is_option_search: bool) -> String {
         let suffix = if is_option_search {
             let match_word = if option_count == 1 {
                 "match"
@@ -473,17 +434,7 @@ impl SidebarPanel {
             format!(" ({})", option_count)
         };
 
-        job.append(
-            &suffix,
-            0.0,
-            TextFormat {
-                font_id: FontId::default(),
-                color: default_color,
-                ..Default::default()
-            },
-        );
-
-        job
+        format!("@{}{}", name, suffix)
     }
 
     /// Build a LayoutJob for an option button with highlighting.
