@@ -1246,4 +1246,22 @@ impl AppState {
     pub fn is_tab_renaming(&self, index: usize) -> bool {
         self.tab_rename_index == Some(index)
     }
+
+    /// Validate the current tab rename text without committing
+    /// Returns true if the name is valid and can be saved
+    pub fn is_tab_rename_valid(&self) -> bool {
+        let Some(index) = self.tab_rename_index else {
+            return false;
+        };
+
+        let new_name = self.tab_rename_text.trim();
+
+        // Check if name is empty
+        if new_name.is_empty() {
+            return false;
+        }
+
+        // Check if name is available (excluding current tab)
+        self.is_name_available_for_rename(new_name, index)
+    }
 }

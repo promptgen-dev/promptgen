@@ -2,7 +2,7 @@
 
 use crate::state::AppState;
 use egui_dnd::dnd;
-use egui_material_icons::icons::{ICON_ADD, ICON_CLOSE, ICON_SAVE};
+use egui_material_icons::icons::{ICON_ADD, ICON_CHECK, ICON_CLOSE, ICON_SAVE};
 
 /// Actions that can be triggered by the tab bar
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,25 +83,62 @@ impl TabBarPanel {
 
                                     ui.horizontal(|ui| {
                                         if is_renaming {
+                                            // Validate current rename text
+                                            let is_valid = state.is_tab_rename_valid();
+
                                             // Inline text edit for renaming (not draggable while renaming)
-                                            let text_edit = egui::TextEdit::singleline(
+                                            let mut text_edit = egui::TextEdit::singleline(
                                                 &mut state.tab_rename_text,
                                             )
                                             .desired_width(100.0)
                                             .id(egui::Id::new(("tab_rename", i)));
 
-                                            let response = ui.add(text_edit);
+                                            // Add red border if invalid
+                                            if !is_valid {
+                                                text_edit = text_edit.text_color(
+                                                    egui::Color32::from_rgb(243, 139, 168), // Catppuccin red
+                                                );
+                                            }
+
+                                            // Wrap in a frame with border for error state
+                                            let response = if !is_valid {
+                                                egui::Frame::new()
+                                                    .stroke(egui::Stroke::new(
+                                                        1.0,
+                                                        egui::Color32::from_rgb(243, 139, 168),
+                                                    ))
+                                                    .corner_radius(4.0)
+                                                    .show(ui, |ui| ui.add(text_edit))
+                                                    .inner
+                                            } else {
+                                                ui.add(text_edit)
+                                            };
 
                                             // Request focus on first frame
                                             if response.gained_focus() || !response.has_focus() {
                                                 response.request_focus();
                                             }
 
+                                            // Checkmark button to save (replaces X button)
+                                            let check_response = ui
+                                                .add_enabled(
+                                                    is_valid,
+                                                    egui::Button::new(ICON_CHECK).small(),
+                                                )
+                                                .on_hover_text(if is_valid {
+                                                    "Save name"
+                                                } else {
+                                                    "Name already exists or is empty"
+                                                });
+                                            if check_response.clicked() {
+                                                state.commit_tab_rename();
+                                            }
+
                                             // Handle Enter to commit
                                             if ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                                && !state.commit_tab_rename()
+                                                && is_valid
                                             {
-                                                // Rename failed (invalid name), keep editing
+                                                state.commit_tab_rename();
                                             }
 
                                             // Handle Escape to cancel
@@ -109,12 +146,12 @@ impl TabBarPanel {
                                                 state.cancel_tab_rename();
                                             }
 
-                                            // Handle clicking away to commit
+                                            // Handle clicking away - cancel instead of forcing commit
                                             if response.lost_focus()
                                                 && !ui.input(|i| i.key_pressed(egui::Key::Escape))
-                                                && !state.commit_tab_rename()
+                                                && !check_response.clicked()
                                             {
-                                                // Rename failed, cancel instead
+                                                // Cancel on click away
                                                 state.cancel_tab_rename();
                                             }
                                         } else {
