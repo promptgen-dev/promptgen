@@ -6,8 +6,8 @@ use egui_flex::{Flex, FlexItem};
 use promptgen_core::Cardinality;
 
 use egui_material_icons::icons::{
-    ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_COLLAPSE_ALL, ICON_DESCRIPTION, ICON_EDIT,
-    ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_SEARCH,
+    ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_COLLAPSE_ALL, ICON_DELETE, ICON_DESCRIPTION, ICON_EDIT,
+    ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_MORE_VERT, ICON_SEARCH,
 };
 
 use crate::state::{AppState, SidebarMode, SidebarViewMode};
@@ -203,7 +203,7 @@ impl SidebarPanel {
             .prompts
             .iter()
             .filter(|p| search_query.is_empty() || p.name.to_lowercase().contains(&search_query))
-            .map(|p| (p.name.clone(), p.content.clone()))
+            .map(|p| p.name.clone())
             .collect();
 
         if prompts.is_empty() {
@@ -216,23 +216,85 @@ impl SidebarPanel {
         }
 
         let mut prompt_to_open: Option<String> = None;
+        let mut prompt_to_delete: Option<String> = None;
 
-        for (name, _content) in &prompts {
+        // Get active tab info for highlighting
+        let active_tab_name = state
+            .active_tab_index
+            .and_then(|idx| state.prompt_tabs.get(idx))
+            .and_then(|tab| {
+                if let crate::state::PromptSource::FromLibrary { original_name } = &tab.source {
+                    Some(original_name.clone())
+                } else {
+                    None
+                }
+            });
+
+        for name in &prompts {
             // Check if this prompt is open in a tab (for visual indication)
-            let is_open_in_tab = state.find_tab_by_library_prompt(name).is_some();
+            let tab_index = state.find_tab_by_library_prompt(name);
+            let is_open_in_tab = tab_index.is_some();
+            let is_active_tab = active_tab_name.as_ref() == Some(name);
 
-            // Use different styling if open in a tab
-            let label_text = if is_open_in_tab {
-                format!("• {}", name)
+            // Determine background color based on state
+            let (bg_fill, stroke) = if is_active_tab {
+                // Active tab - bright blue (selection color)
+                (ui.visuals().selection.bg_fill, egui::Stroke::NONE)
+            } else if is_open_in_tab {
+                // Open but not active - duller blue like inactive tabs
+                (
+                    egui::Color32::from_rgb(30, 30, 46),
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(69, 71, 90)),
+                )
             } else {
-                name.clone()
+                // Not open - transparent
+                (egui::Color32::TRANSPARENT, egui::Stroke::NONE)
             };
 
-            let response = ui.selectable_label(is_open_in_tab, &label_text);
+            // Wrap the row in a frame with background color
+            egui::Frame::new()
+                .fill(bg_fill)
+                .stroke(stroke)
+                .corner_radius(4.0)
+                .inner_margin(egui::Margin::symmetric(4, 2))
+                .show(ui, |ui| {
+                    // Use flex layout for prompt row: label (grows/truncates) + menu button (fixed)
+                    Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
+                        // Prompt name label (grows and truncates)
+                        let prompt_name = name.clone();
+                        flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
+                            ui.set_width(ui.available_width());
 
-            if response.clicked() {
-                prompt_to_open = Some(name.clone());
-            }
+                            // Create a selectable label that truncates
+                            let label = egui::Label::new(name.as_str())
+                                .truncate()
+                                .selectable(false)
+                                .sense(egui::Sense::click());
+                            let response = ui.add(label);
+
+                            // Show full name on hover
+                            response.clone().on_hover_text(&prompt_name);
+
+                            if response.clicked() {
+                                prompt_to_open = Some(prompt_name);
+                            }
+                        });
+
+                        // Menu button (fixed size)
+                        let prompt_name_for_delete = name.clone();
+                        flex.add_ui(FlexItem::default(), |ui| {
+                            ui.menu_button(ICON_MORE_VERT, |ui| {
+                                ui.set_min_width(120.0);
+                                if ui.button(format!("{} Delete", ICON_DELETE)).clicked() {
+                                    prompt_to_delete = Some(prompt_name_for_delete.clone());
+                                    ui.close();
+                                }
+                            })
+                            .response
+                            .on_hover_text("More options");
+                        });
+                    });
+                });
         }
 
         // Open the clicked prompt in a tab
@@ -240,6 +302,11 @@ impl SidebarPanel {
             state.open_library_prompt(&name);
             // Also ensure we're in Prompt editing mode
             state.editor_mode = crate::state::EditorMode::Prompt;
+        }
+
+        // Request delete confirmation
+        if let Some(name) = prompt_to_delete {
+            state.request_delete_prompt(&name);
         }
     }
 

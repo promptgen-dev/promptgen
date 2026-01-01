@@ -31,6 +31,13 @@ pub enum CloseUnsavedTabAction {
     Cancel,
 }
 
+/// Actions that can result from the Delete Prompt dialog
+pub enum DeletePromptAction {
+    None,
+    Delete,
+    Cancel,
+}
+
 /// Render the Create Library dialog
 pub fn render_create_library_dialog(
     ctx: &egui::Context,
@@ -219,6 +226,41 @@ pub fn render_close_unsaved_tab_dialog(
 
                 if ui.button("Save").clicked() {
                     action = CloseUnsavedTabAction::Save;
+                }
+            });
+        });
+
+    action
+}
+
+/// Render the Delete Prompt confirmation dialog
+pub fn render_delete_prompt_dialog(ctx: &egui::Context, prompt_name: &str) -> DeletePromptAction {
+    let mut action = DeletePromptAction::None;
+
+    egui::Window::new("Delete Prompt")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.label(format!("Delete \"{}\"?", prompt_name));
+            ui.label("This cannot be undone.");
+
+            ui.add_space(8.0);
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    action = DeletePromptAction::Cancel;
+                }
+
+                if ui
+                    .button(
+                        egui::RichText::new("Delete")
+                            .color(egui::Color32::from_rgb(243, 139, 168)), // Catppuccin red
+                    )
+                    .clicked()
+                {
+                    action = DeletePromptAction::Delete;
                 }
             });
         });

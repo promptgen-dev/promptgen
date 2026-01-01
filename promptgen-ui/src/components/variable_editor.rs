@@ -398,8 +398,8 @@ impl VariableEditorPanel {
                             }
                         });
                     }
-                    // CloseUnsavedTab is handled in app.rs, not here
-                    ConfirmDialog::CloseUnsavedTab { .. } => {}
+                    // CloseUnsavedTab and DeletePrompt are handled in app.rs, not here
+                    ConfirmDialog::CloseUnsavedTab { .. } | ConfirmDialog::DeletePrompt { .. } => {}
                 });
         }
     }

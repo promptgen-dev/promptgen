@@ -62,6 +62,8 @@ pub enum ConfirmDialog {
     DeleteVariable { variable_name: String },
     /// Confirm closing a tab with unsaved changes
     CloseUnsavedTab { tab_index: usize },
+    /// Confirm deleting a prompt from the library
+    DeletePrompt { prompt_name: String },
 }
 
 /// Autocomplete mode - what kind of completions to show
@@ -1282,5 +1284,44 @@ impl AppState {
 
         // Check if name is available (excluding current tab)
         self.is_name_available_for_rename(new_name, index)
+    }
+
+    // ==================== Prompt Management Methods ====================
+
+    /// Request to delete a prompt (shows confirmation dialog)
+    pub fn request_delete_prompt(&mut self, prompt_name: &str) {
+        self.confirm_dialog = Some(ConfirmDialog::DeletePrompt {
+            prompt_name: prompt_name.to_string(),
+        });
+    }
+
+    /// Delete a prompt from the library
+    /// Also closes any tabs that were opened from this prompt
+    pub fn delete_prompt(&mut self, prompt_name: &str) {
+        // Close any tabs that were opened from this prompt
+        let tabs_to_close: Vec<usize> = self
+            .prompt_tabs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, tab)| {
+                if let PromptSource::FromLibrary { original_name } = &tab.source {
+                    if original_name == prompt_name {
+                        return Some(i);
+                    }
+                }
+                None
+            })
+            .collect();
+
+        // Close tabs in reverse order to maintain correct indices
+        for idx in tabs_to_close.into_iter().rev() {
+            self.close_tab_force(idx);
+        }
+
+        // Remove the prompt from the library
+        self.library.prompts.retain(|p| p.name != prompt_name);
+
+        // Clear the confirmation dialog
+        self.confirm_dialog = None;
     }
 }

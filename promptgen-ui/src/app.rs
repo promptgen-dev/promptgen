@@ -420,6 +420,39 @@ impl PromptGenApp {
             CloseUnsavedTabAction::None => {}
         }
     }
+
+    /// Render the delete prompt confirmation dialog and handle actions
+    fn render_delete_prompt_dialog(&mut self, ctx: &egui::Context) {
+        use crate::state::ConfirmDialog;
+        use dialogs::DeletePromptAction;
+
+        // Check if we have a DeletePrompt dialog active
+        let prompt_name = match &self.state.confirm_dialog {
+            Some(ConfirmDialog::DeletePrompt { prompt_name }) => prompt_name.clone(),
+            _ => return,
+        };
+
+        let action = dialogs::render_delete_prompt_dialog(ctx, &prompt_name);
+
+        match action {
+            DeletePromptAction::Delete => {
+                // Delete the prompt
+                self.state.delete_prompt(&prompt_name);
+
+                // Persist library to disk
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(path) = &self.state.library_path
+                    && let Err(e) = promptgen_core::save_library(&self.state.library, path)
+                {
+                    log::error!("Failed to save library after delete: {}", e);
+                }
+            }
+            DeletePromptAction::Cancel => {
+                self.state.confirm_dialog = None;
+            }
+            DeletePromptAction::None => {}
+        }
+    }
 }
 
 impl eframe::App for PromptGenApp {
@@ -573,5 +606,8 @@ impl eframe::App for PromptGenApp {
 
         // Render close unsaved tab dialog (if active)
         self.render_close_unsaved_tab_dialog(ctx);
+
+        // Render delete prompt dialog (if active)
+        self.render_delete_prompt_dialog(ctx);
     }
 }
