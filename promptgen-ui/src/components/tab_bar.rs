@@ -1,6 +1,7 @@
 //! Tab bar component for multi-tab prompt editing
 
 use crate::state::AppState;
+use crate::theme;
 use egui_dnd::dnd;
 use egui_material_icons::icons::{ICON_ADD, ICON_CHECK, ICON_CLOSE, ICON_SAVE};
 
@@ -81,19 +82,17 @@ impl TabBarPanel {
                                     let is_active = active_index == Some(i);
                                     let is_renaming = state.is_tab_renaming(i);
 
-                                    // Tab styling - use theme selection color for active
+                                    // Tab styling - use theme selection colors
+                                    let theme = theme::current(ui.ctx());
                                     let (tab_fill, tab_stroke) = if is_active {
                                         (
-                                            ui.visuals().selection.bg_fill,
-                                            egui::Stroke::NONE,
+                                            theme.active_selected_bg(),
+                                            egui::Stroke::new(1.0, theme.active_selected_stroke()),
                                         )
                                     } else {
                                         (
-                                            egui::Color32::from_rgb(30, 30, 46), // base - darker
-                                            egui::Stroke::new(
-                                                1.0,
-                                                egui::Color32::from_rgb(69, 71, 90), // surface2 - subtle border
-                                            ),
+                                            theme.selected_bg(),
+                                            egui::Stroke::new(1.0, theme.selected_stroke()),
                                         )
                                     };
 

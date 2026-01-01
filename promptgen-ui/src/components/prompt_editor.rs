@@ -175,7 +175,7 @@ impl PromptEditor {
 
             for error in &parse_result.errors {
                 ui.horizontal(|ui| {
-                    ui.colored_label(theme::current(ui.ctx()).error, "error:");
+                    ui.colored_label(theme::current(ui.ctx()).syntax_error(), "error:");
                     ui.label(&error.message);
                 });
 

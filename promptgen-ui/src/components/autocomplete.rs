@@ -192,7 +192,7 @@ impl AutocompletePopup {
                                             "@",
                                             0.0,
                                             egui::TextFormat {
-                                                color: current_theme.reference,
+                                                color: current_theme.syntax_reference(),
                                                 ..Default::default()
                                             },
                                         );
@@ -200,9 +200,9 @@ impl AutocompletePopup {
                                         // Add variable name with match highlighting
                                         for (i, c) in name.chars().enumerate() {
                                             let color = if match_indices.contains(&i) {
-                                                current_theme.match_highlight
+                                                current_theme.match_highlight()
                                             } else {
-                                                current_theme.reference
+                                                current_theme.syntax_reference()
                                             };
                                             job.append(
                                                 &c.to_string(),
@@ -219,7 +219,7 @@ impl AutocompletePopup {
                                             &format!(" ({} options)", option_count),
                                             0.0,
                                             egui::TextFormat {
-                                                color: current_theme.muted,
+                                                color: current_theme.muted(),
                                                 ..Default::default()
                                             },
                                         );
@@ -244,7 +244,7 @@ impl AutocompletePopup {
                                         // Add option text with match highlighting
                                         for (i, c) in display_text.chars().enumerate() {
                                             let color = if match_indices.contains(&i) {
-                                                current_theme.match_highlight
+                                                current_theme.match_highlight()
                                             } else {
                                                 ui.visuals().text_color()
                                             };
@@ -263,7 +263,7 @@ impl AutocompletePopup {
                                             &format!(" (@{})", variable_name),
                                             0.0,
                                             egui::TextFormat {
-                                                color: current_theme.muted,
+                                                color: current_theme.muted(),
                                                 ..Default::default()
                                             },
                                         );

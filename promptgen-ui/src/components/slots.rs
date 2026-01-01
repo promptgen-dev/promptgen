@@ -154,7 +154,7 @@ impl SlotPanel {
             if let Some(nested_label) = find_slot_block_in_parse_result(&result.parse_result) {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.colored_label(theme::current(ui.ctx()).error, "error:");
+                    ui.colored_label(theme::current(ui.ctx()).syntax_error(), "error:");
                     ui.label(format!(
                         "Slot values cannot contain other slots (found \"{}\")",
                         nested_label
@@ -309,7 +309,7 @@ impl SlotPanel {
                                     item_iter.next(ui, item_id, idx, true, |ui, item_handle| {
                                         item_handle.ui_sized(ui, chip_size, |ui, handle, _state| {
                                             // Chip with X button - entire chip is drag handle
-                                            let chip_bg = theme::current(ui.ctx()).chip_bg;
+                                            let chip_bg = theme::current(ui.ctx()).chip_bg();
                                             handle.ui_sized(ui, chip_size, |ui| {
                                                 egui::Frame::NONE
                                                     .inner_margin(egui::Margin {

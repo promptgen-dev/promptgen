@@ -465,6 +465,9 @@ impl eframe::App for PromptGenApp {
 
     /// Called each time the UI needs repainting.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Ensure catppuccin theme is applied (handles dark/light mode switches)
+        theme::ensure_theme_applied(ctx);
+
         // Ensure custom font sizes are applied (theme switches may reset them)
         theme::apply_font_sizes(ctx);
 

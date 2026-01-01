@@ -69,7 +69,7 @@ impl VariableEditorPanel {
         // Show name validation error
         if let Some(error) = state.validate_variable_name() {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("error:").color(theme::current(ui.ctx()).error));
+                ui.label(RichText::new("error:").color(theme::current(ui.ctx()).syntax_error()));
                 ui.label(error);
             });
         }
@@ -107,7 +107,7 @@ impl VariableEditorPanel {
             ui.add_space(8.0);
 
             if ui
-                .button(RichText::new("Delete Variable").color(theme::current(ui.ctx()).error))
+                .button(RichText::new("Delete Variable").color(theme::current(ui.ctx()).syntax_error()))
                 .clicked()
             {
                 state.request_delete_variable(&original_name);
@@ -352,7 +352,7 @@ impl VariableEditorPanel {
             ui.add_space(8.0);
             for (option_num, error_msg) in errors {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("error:").color(theme::current(ui.ctx()).error));
+                    ui.label(RichText::new("error:").color(theme::current(ui.ctx()).syntax_error()));
                     ui.label(format!("Option {}: {}", option_num, error_msg));
                 });
             }
@@ -387,7 +387,7 @@ impl VariableEditorPanel {
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
                             if ui
-                                .button(RichText::new("Delete").color(theme::current(ui.ctx()).error))
+                                .button(RichText::new("Delete").color(theme::current(ui.ctx()).syntax_error()))
                                 .clicked()
                             {
                                 Self::delete_variable(state, &variable_name);

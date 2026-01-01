@@ -58,7 +58,7 @@ impl FocusableFrame {
         add_contents: impl FnOnce(&mut Ui) -> R,
     ) -> FocusableFrameResponse<R> {
         let fill_color = if self.is_focused {
-            theme::current(ui.ctx()).focus_bg
+            theme::current(ui.ctx()).focus_bg()
         } else {
             Color32::TRANSPARENT
         };

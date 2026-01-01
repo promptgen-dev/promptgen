@@ -28,11 +28,11 @@ impl TokenKind {
     fn color(self, theme: &Theme) -> Color32 {
         match self {
             TokenKind::Text => theme.text,
-            TokenKind::Reference => theme.reference,
-            TokenKind::Slot => theme.slot,
-            TokenKind::Option => theme.option,
-            TokenKind::Brace => theme.brace,
-            TokenKind::Comment => theme.comment,
+            TokenKind::Reference => theme.syntax_reference(),
+            TokenKind::Slot => theme.syntax_slot(),
+            TokenKind::Option => theme.syntax_option(),
+            TokenKind::Brace => theme.syntax_brace(),
+            TokenKind::Comment => theme.syntax_comment(),
         }
     }
 }

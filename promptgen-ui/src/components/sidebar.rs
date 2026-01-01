@@ -11,6 +11,7 @@ use egui_material_icons::icons::{
 };
 
 use crate::state::{AppState, SidebarMode, SidebarViewMode};
+use crate::theme;
 
 /// Sidebar panel for navigating libraries, prompts, and variables.
 pub struct SidebarPanel;
@@ -237,14 +238,18 @@ impl SidebarPanel {
             let is_active_tab = active_tab_name.as_ref() == Some(name);
 
             // Determine background color based on state
+            let theme = theme::current(ui.ctx());
             let (bg_fill, stroke) = if is_active_tab {
-                // Active tab - bright blue (selection color)
-                (ui.visuals().selection.bg_fill, egui::Stroke::NONE)
-            } else if is_open_in_tab {
-                // Open but not active - duller blue like inactive tabs
+                // Active tab - bright selection color
                 (
-                    egui::Color32::from_rgb(30, 30, 46),
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(69, 71, 90)),
+                    theme.active_selected_bg(),
+                    egui::Stroke::new(1.0, theme.active_selected_stroke()),
+                )
+            } else if is_open_in_tab {
+                // Open but not active - subtle selection
+                (
+                    theme.selected_bg(),
+                    egui::Stroke::new(1.0, theme.selected_stroke()),
                 )
             } else {
                 // Not open - transparent
