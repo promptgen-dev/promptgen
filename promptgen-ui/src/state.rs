@@ -1304,10 +1304,10 @@ impl AppState {
             .iter()
             .enumerate()
             .filter_map(|(i, tab)| {
-                if let PromptSource::FromLibrary { original_name } = &tab.source {
-                    if original_name == prompt_name {
-                        return Some(i);
-                    }
+                if let PromptSource::FromLibrary { original_name } = &tab.source
+                    && original_name == prompt_name
+                {
+                    return Some(i);
                 }
                 None
             })

@@ -260,24 +260,33 @@ impl SidebarPanel {
                 .show(ui, |ui| {
                     // Use flex layout for prompt row: label (grows/truncates) + menu button (fixed)
                     Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
-                        // Prompt name label (grows and truncates)
+                        // Clickable label area (grows and truncates)
                         let prompt_name = name.clone();
                         flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
-                            ui.set_width(ui.available_width());
+                            // Allocate full width with click sense
+                            let available_width = ui.available_width();
+                            let text_height = ui.text_style_height(&egui::TextStyle::Body);
+                            let (rect, response) = ui.allocate_exact_size(
+                                egui::vec2(available_width, text_height),
+                                egui::Sense::click(),
+                            );
 
-                            // Create a selectable label that truncates
-                            let label = egui::Label::new(name.as_str())
-                                .truncate()
-                                .selectable(false)
-                                .sense(egui::Sense::click());
-                            let response = ui.add(label);
+                            // Draw text left-aligned and vertically centered
+                            ui.painter().text(
+                                rect.left_center(),
+                                egui::Align2::LEFT_CENTER,
+                                name,
+                                egui::TextStyle::Body.resolve(ui.style()),
+                                ui.visuals().text_color(),
+                            );
 
-                            // Show full name on hover
-                            response.clone().on_hover_text(&prompt_name);
-
+                            // Handle click
                             if response.clicked() {
-                                prompt_to_open = Some(prompt_name);
+                                prompt_to_open = Some(prompt_name.clone());
                             }
+
+                            // Show tooltip on hover
+                            response.on_hover_text(&prompt_name);
                         });
 
                         // Menu button (fixed size)
