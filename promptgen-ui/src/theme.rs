@@ -92,7 +92,8 @@ pub const LIGHT: Theme = Theme {
     overlay2: Color32::from_rgb(124, 127, 147),
 
     // Text
-    text: Color32::from_rgb(76, 79, 105),
+    // text: Color32::from_rgb(76, 79, 105),
+    text: Color32::from_rgb(0, 0, 0),
     subtext0: Color32::from_rgb(108, 111, 133),
     subtext1: Color32::from_rgb(92, 95, 119),
 
@@ -121,8 +122,8 @@ impl Theme {
 
         egui::Visuals {
             dark_mode: !self.is_light,
-            override_text_color: Some(self.text),
-            weak_text_color: Some(self.subtext0),
+            override_text_color: None, // Let widgets control text color via fg_stroke
+            weak_text_color: Some(self.overlay0), // More muted for hint/placeholder text
             hyperlink_color: self.accent_six,
             faint_bg_color: self.surface0,
             extreme_bg_color: self.crust,
