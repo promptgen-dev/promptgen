@@ -23,8 +23,6 @@ pub enum TabBarAction {
 
 /// Result of showing the tab bar
 pub struct TabBarResult {
-    /// The action that was triggered
-    pub action: TabBarAction,
     /// Whether the library was modified and needs saving
     pub library_modified: bool,
 }
@@ -77,105 +75,109 @@ impl TabBarPanel {
 
                             // Use egui_dnd for drag-and-drop reordering
                             let response = dnd(ui, "tab_bar_dnd").show_vec(
-                            &mut tab_indices,
-                            |ui, original_idx, handle, _dragging| {
-                                let i = *original_idx;
-                                let is_active = active_index == Some(i);
-                                let is_renaming = state.is_tab_renaming(i);
+                                &mut tab_indices,
+                                |ui, original_idx, handle, _dragging| {
+                                    let i = *original_idx;
+                                    let is_active = active_index == Some(i);
+                                    let is_renaming = state.is_tab_renaming(i);
 
-                                ui.horizontal(|ui| {
-                                    if is_renaming {
-                                        // Inline text edit for renaming (not draggable while renaming)
-                                        let text_edit =
-                                            egui::TextEdit::singleline(&mut state.tab_rename_text)
-                                                .desired_width(100.0)
-                                                .id(egui::Id::new(("tab_rename", i)));
+                                    ui.horizontal(|ui| {
+                                        if is_renaming {
+                                            // Inline text edit for renaming (not draggable while renaming)
+                                            let text_edit = egui::TextEdit::singleline(
+                                                &mut state.tab_rename_text,
+                                            )
+                                            .desired_width(100.0)
+                                            .id(egui::Id::new(("tab_rename", i)));
 
-                                        let response = ui.add(text_edit);
+                                            let response = ui.add(text_edit);
 
-                                        // Request focus on first frame
-                                        if response.gained_focus() || !response.has_focus() {
-                                            response.request_focus();
-                                        }
+                                            // Request focus on first frame
+                                            if response.gained_focus() || !response.has_focus() {
+                                                response.request_focus();
+                                            }
 
-                                        // Handle Enter to commit
-                                        if ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                            && !state.commit_tab_rename() {
+                                            // Handle Enter to commit
+                                            if ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                                && !state.commit_tab_rename()
+                                            {
                                                 // Rename failed (invalid name), keep editing
                                             }
 
-                                        // Handle Escape to cancel
-                                        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                                            state.cancel_tab_rename();
-                                        }
+                                            // Handle Escape to cancel
+                                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                                state.cancel_tab_rename();
+                                            }
 
-                                        // Handle clicking away to commit
-                                        if response.lost_focus()
-                                            && !ui.input(|i| i.key_pressed(egui::Key::Escape))
-                                            && !state.commit_tab_rename() {
+                                            // Handle clicking away to commit
+                                            if response.lost_focus()
+                                                && !ui.input(|i| i.key_pressed(egui::Key::Escape))
+                                                && !state.commit_tab_rename()
+                                            {
                                                 // Rename failed, cancel instead
                                                 state.cancel_tab_rename();
                                             }
-                                    } else {
-                                        let tab = &state.prompt_tabs[i];
-
-                                        // Build tab label (name + dirty indicator)
-                                        let label = if tab.dirty {
-                                            format!("{}*", tab.name)
                                         } else {
-                                            tab.name.clone()
-                                        };
+                                            let tab = &state.prompt_tabs[i];
 
-                                        // Drag handle is the selectable label
-                                        handle.ui(ui, |ui| {
-                                            let response = ui.selectable_label(is_active, &label);
+                                            // Build tab label (name + dirty indicator)
+                                            let label = if tab.dirty {
+                                                format!("{}*", tab.name)
+                                            } else {
+                                                tab.name.clone()
+                                            };
 
-                                            if response.clicked() && !is_active {
-                                                action = TabBarAction::SwitchTab(i);
-                                            }
+                                            // Drag handle is the selectable label
+                                            handle.ui(ui, |ui| {
+                                                let response =
+                                                    ui.selectable_label(is_active, &label);
 
-                                            // Double-click to rename
-                                            if response.double_clicked() {
-                                                action = TabBarAction::StartRename(i);
-                                            }
-                                        });
+                                                if response.clicked() && !is_active {
+                                                    action = TabBarAction::SwitchTab(i);
+                                                }
 
-                                        // Close button (only show if more than one tab)
-                                        if tab_count > 1 {
-                                            let close_response = ui
-                                                .small_button(ICON_CLOSE)
-                                                .on_hover_text("Close tab");
-                                            if close_response.clicked() {
-                                                action = TabBarAction::CloseTab(i);
+                                                // Double-click to rename
+                                                if response.double_clicked() {
+                                                    action = TabBarAction::StartRename(i);
+                                                }
+                                            });
+
+                                            // Close button (only show if more than one tab)
+                                            if tab_count > 1 {
+                                                let close_response = ui
+                                                    .small_button(ICON_CLOSE)
+                                                    .on_hover_text("Close tab");
+                                                if close_response.clicked() {
+                                                    action = TabBarAction::CloseTab(i);
+                                                }
                                             }
                                         }
+
+                                        // Add separator after each tab (except the last)
+                                        // Note: This might not look perfect during drag, but works for now
+                                    });
+                                },
+                            );
+
+                            // Apply reordering if tabs were dragged
+                            if response.is_drag_finished() {
+                                // The tab_indices Vec has been reordered by egui_dnd
+                                // We need to reorder the actual tabs to match
+                                let new_tabs: Vec<_> = tab_indices
+                                    .iter()
+                                    .filter_map(|&idx| state.prompt_tabs.get(idx).cloned())
+                                    .collect();
+
+                                if new_tabs.len() == state.prompt_tabs.len() {
+                                    // Find the new position of the active tab
+                                    if let Some(active) = active_index {
+                                        let new_active =
+                                            tab_indices.iter().position(|&idx| idx == active);
+                                        state.active_tab_index = new_active;
                                     }
-
-                                    // Add separator after each tab (except the last)
-                                    // Note: This might not look perfect during drag, but works for now
-                                });
-                            },
-                        );
-
-                        // Apply reordering if tabs were dragged
-                        if response.is_drag_finished() {
-                            // The tab_indices Vec has been reordered by egui_dnd
-                            // We need to reorder the actual tabs to match
-                            let new_tabs: Vec<_> = tab_indices
-                                .iter()
-                                .filter_map(|&idx| state.prompt_tabs.get(idx).cloned())
-                                .collect();
-
-                            if new_tabs.len() == state.prompt_tabs.len() {
-                                // Find the new position of the active tab
-                                if let Some(active) = active_index {
-                                    let new_active =
-                                        tab_indices.iter().position(|&idx| idx == active);
-                                    state.active_tab_index = new_active;
+                                    state.prompt_tabs = new_tabs;
                                 }
-                                state.prompt_tabs = new_tabs;
                             }
-                        }
                         });
                 });
         });
@@ -203,9 +205,6 @@ impl TabBarPanel {
             TabBarAction::None => {}
         }
 
-        TabBarResult {
-            action,
-            library_modified,
-        }
+        TabBarResult { library_modified }
     }
 }

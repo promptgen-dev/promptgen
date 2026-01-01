@@ -93,8 +93,7 @@ pub struct AutocompleteState {
 // ==================== Tab State ====================
 
 /// Origin of a prompt tab - tracks where it came from
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PromptSource {
     /// Created via [+ New] button - not yet saved to library
     #[default]
@@ -105,7 +104,6 @@ pub enum PromptSource {
         original_name: String,
     },
 }
-
 
 /// A prompt tab being edited
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,7 +146,11 @@ impl PromptTab {
     }
 
     /// Create a tab from a saved library prompt
-    pub fn from_library_prompt(name: String, content: String, slots: HashMap<String, SlotValue>) -> Self {
+    pub fn from_library_prompt(
+        name: String,
+        content: String,
+        slots: HashMap<String, SlotValue>,
+    ) -> Self {
         Self {
             name: name.clone(),
             content,
@@ -177,7 +179,6 @@ pub struct AppState {
 
     // Editor (legacy - will be replaced by active tab)
     pub editor_content: String,
-    pub selected_prompt_id: Option<String>,
     pub parse_result: Option<ParseResult>,
 
     // Preview
@@ -221,7 +222,6 @@ impl Default for AppState {
             tab_rename_index: None,
             tab_rename_text: String::new(),
             editor_content: String::new(),
-            selected_prompt_id: None,
             parse_result: None,
             preview_output: String::new(),
             preview_seed: None,
@@ -468,10 +468,11 @@ impl AppState {
     /// Set all values for a slot (used for reordering)
     pub fn set_slot_values(&mut self, slot_label: &str, new_values: Vec<String>) {
         if let Some(values) = self.slot_values.get_mut(slot_label)
-            && *values != new_values {
-                *values = new_values;
-                self.mark_active_tab_dirty();
-            }
+            && *values != new_values
+        {
+            *values = new_values;
+            self.mark_active_tab_dirty();
+        }
     }
 
     /// Set the single value for a textarea slot
@@ -869,7 +870,9 @@ impl AppState {
     }
 
     /// Convert SlotValue HashMap to Vec<String> HashMap (working format)
-    pub fn slot_values_to_vec_map(slots: &HashMap<String, SlotValue>) -> HashMap<String, Vec<String>> {
+    pub fn slot_values_to_vec_map(
+        slots: &HashMap<String, SlotValue>,
+    ) -> HashMap<String, Vec<String>> {
         slots
             .iter()
             .map(|(k, v)| {
@@ -919,10 +922,11 @@ impl AppState {
         let slot_values = Self::vec_map_to_slot_values(&self.slot_values, &definitions);
 
         if let Some(tab) = self.get_active_tab_mut()
-            && tab.slots != slot_values {
-                tab.slots = slot_values;
-                tab.dirty = true;
-            }
+            && tab.slots != slot_values
+        {
+            tab.slots = slot_values;
+            tab.dirty = true;
+        }
     }
 
     /// Create a new tab with an auto-generated unique name
@@ -950,11 +954,12 @@ impl AppState {
 
         // Check if tab has unsaved changes
         if let Some(tab) = self.prompt_tabs.get(index)
-            && tab.dirty {
-                // Show confirmation dialog
-                self.confirm_dialog = Some(ConfirmDialog::CloseUnsavedTab { tab_index: index });
-                return false;
-            }
+            && tab.dirty
+        {
+            // Show confirmation dialog
+            self.confirm_dialog = Some(ConfirmDialog::CloseUnsavedTab { tab_index: index });
+            return false;
+        }
 
         // Tab is clean, close immediately
         self.close_tab_force(index)
@@ -998,11 +1003,6 @@ impl AppState {
         true
     }
 
-    /// Legacy alias for close_tab_force (for backwards compatibility)
-    pub fn close_tab(&mut self, index: usize) -> bool {
-        self.close_tab_force(index)
-    }
-
     /// Find the next available sequential prompt name ("Prompt 1", "Prompt 2", etc.)
     pub fn find_next_prompt_name(&self) -> String {
         let mut n = 1;
@@ -1043,12 +1043,13 @@ impl AppState {
 
         // Check library prompts (but allow if this tab came from that prompt)
         if let Some(tab) = self.prompt_tabs.get(tab_index)
-            && let PromptSource::FromLibrary { original_name } = &tab.source {
-                // Allow keeping/restoring the original name
-                if name == original_name {
-                    return true;
-                }
+            && let PromptSource::FromLibrary { original_name } = &tab.source
+        {
+            // Allow keeping/restoring the original name
+            if name == original_name {
+                return true;
             }
+        }
 
         let used_in_library = self.library.prompts.iter().any(|p| p.name == name);
         !used_in_library
@@ -1071,7 +1072,11 @@ impl AppState {
         }
 
         // Find the prompt in the library
-        let prompt = self.library.prompts.iter().find(|p| p.name == prompt_name)?;
+        let prompt = self
+            .library
+            .prompts
+            .iter()
+            .find(|p| p.name == prompt_name)?;
 
         // Create new tab from the library prompt
         let tab = PromptTab::from_library_prompt(
@@ -1098,10 +1103,11 @@ impl AppState {
     pub fn sync_active_tab_content(&mut self) {
         let new_content = self.editor_content.clone();
         if let Some(tab) = self.get_active_tab_mut()
-            && tab.content != new_content {
-                tab.content = new_content;
-                tab.dirty = true;
-            }
+            && tab.content != new_content
+        {
+            tab.content = new_content;
+            tab.dirty = true;
+        }
     }
 
     /// Save the active tab to the library
@@ -1223,10 +1229,11 @@ impl AppState {
 
         // Apply the rename
         if let Some(tab) = self.prompt_tabs.get_mut(index)
-            && tab.name != new_name {
-                tab.name = new_name;
-                tab.dirty = true;
-            }
+            && tab.name != new_name
+        {
+            tab.name = new_name;
+            tab.dirty = true;
+        }
 
         // Clear rename state
         self.tab_rename_index = None;
