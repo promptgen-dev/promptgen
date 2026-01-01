@@ -5,8 +5,7 @@ use egui::{Color32, RichText, Vec2};
 use egui_material_icons::icons::ICON_ARROW_BACK;
 
 use crate::components::autocomplete::{
-    AutocompletePopup, apply_completion, check_autocomplete_trigger, find_autocomplete_context,
-    get_completions, handle_autocomplete_keyboard,
+    autocomplete_after_editor, autocomplete_before_editor,
 };
 use crate::highlighting::highlight_prompt;
 use crate::state::{AppState, ConfirmDialog};
@@ -133,19 +132,9 @@ impl VariableEditorPanel {
         // Clone content to avoid double mutable borrow
         let mut content = state.variable_editor_content.clone();
 
-        // IMPORTANT: Handle autocomplete keyboard BEFORE the text editor processes input
-        let mut autocomplete_selection: Option<String> = None;
-        if state.is_autocomplete_active(editor_id) {
-            let completions = get_completions(&state.library, state, editor_id);
-            if !completions.is_empty() {
-                autocomplete_selection =
-                    handle_autocomplete_keyboard(ui, state, editor_id, &completions);
-            }
-        }
-
-        // If we got a selection from keyboard, apply it before rendering
-        if let Some(completion_text) = autocomplete_selection {
-            content = apply_completion(state, &content, editor_id, &completion_text);
+        // Handle autocomplete keyboard input BEFORE the text editor processes input
+        if let Some(new_content) = autocomplete_before_editor(ui, state, editor_id, &content) {
+            content = new_content;
             state.mark_variable_editor_dirty();
         }
 
@@ -226,37 +215,12 @@ impl VariableEditorPanel {
                         .map(|range| range.primary.index)
                         .unwrap_or(content.len());
 
-                    // Handle autocomplete activation/update based on cursor position
-                    if !state.is_autocomplete_active(editor_id) {
-                        if let Some(trigger_pos) = check_autocomplete_trigger(&content, cursor_pos)
-                            .or_else(|| find_autocomplete_context(&content, cursor_pos))
-                        {
-                            state.activate_autocomplete(editor_id, trigger_pos);
-                            state.deactivate_autocomplete_except(editor_id);
-                            state.update_autocomplete_query(editor_id, &content, cursor_pos);
-                        }
-                    } else {
-                        state.update_autocomplete_query(editor_id, &content, cursor_pos);
-                    }
-
-                    // Deactivate autocomplete if editor loses focus
-                    if !response.has_focus() && state.is_autocomplete_active(editor_id) {
-                        state.deactivate_autocomplete(editor_id);
-                    }
-
-                    // Show autocomplete popup if active
-                    if state.is_autocomplete_active(editor_id) {
-                        let completions = get_completions(&state.library, state, editor_id);
-
-                        if completions.is_empty() {
-                            state.deactivate_autocomplete(editor_id);
-                        } else if let Some(completion_text) =
-                            AutocompletePopup::show(ui, state, editor_id, &response, &completions)
-                        {
-                            content =
-                                apply_completion(state, &content, editor_id, &completion_text);
-                            state.mark_variable_editor_dirty();
-                        }
+                    // Handle autocomplete activation, popup display, and focus loss
+                    if let Some(new_content) =
+                        autocomplete_after_editor(ui, state, editor_id, &content, &response, cursor_pos)
+                    {
+                        content = new_content;
+                        state.mark_variable_editor_dirty();
                     }
 
                     if response.changed() {

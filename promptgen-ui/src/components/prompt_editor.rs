@@ -3,8 +3,7 @@
 use egui::TextBuffer;
 
 use crate::components::autocomplete::{
-    AutocompletePopup, apply_completion, check_autocomplete_trigger, find_autocomplete_context,
-    get_completions, handle_autocomplete_keyboard,
+    autocomplete_after_editor, autocomplete_before_editor,
 };
 use crate::highlighting::highlight_prompt;
 use crate::state::AppState;
@@ -66,20 +65,9 @@ impl PromptEditor {
         // Take pending cursor position (will be cleared after use)
         let cursor_position = state.take_pending_cursor_position(editor_id);
 
-        // IMPORTANT: Handle autocomplete keyboard BEFORE the text editor processes input
-        // This prevents Enter/Tab/Arrow keys from being handled by the text editor
-        let mut autocomplete_selection: Option<String> = None;
-        if state.is_autocomplete_active(editor_id) {
-            let completions = get_completions(&state.library, state, editor_id);
-            if !completions.is_empty() {
-                autocomplete_selection =
-                    handle_autocomplete_keyboard(ui, state, editor_id, &completions);
-            }
-        }
-
-        // If we got a selection from keyboard, apply it before rendering
-        if let Some(completion_text) = autocomplete_selection {
-            *content = apply_completion(state, content, editor_id, &completion_text);
+        // Handle autocomplete keyboard input BEFORE the text editor processes input
+        if let Some(new_content) = autocomplete_before_editor(ui, state, editor_id, content) {
+            *content = new_content;
         }
 
         // Parse content for syntax highlighting
@@ -166,43 +154,11 @@ impl PromptEditor {
         let response = layout_response.inner.0;
         let cursor_pos = layout_response.inner.1.unwrap_or(content.len());
 
-        // Handle autocomplete activation/update based on cursor position
-        if !state.is_autocomplete_active(editor_id) {
-            // Check if we're in an autocomplete context (either just typed @ or cursor is after @)
-            if let Some(trigger_pos) = check_autocomplete_trigger(content, cursor_pos)
-                .or_else(|| find_autocomplete_context(content, cursor_pos))
-            {
-                state.activate_autocomplete(editor_id, trigger_pos);
-                // Deactivate autocomplete in other editors
-                state.deactivate_autocomplete_except(editor_id);
-                // Update the query immediately
-                state.update_autocomplete_query(editor_id, content, cursor_pos);
-            }
-        } else {
-            // Autocomplete is active, update the query with actual cursor position
-            state.update_autocomplete_query(editor_id, content, cursor_pos);
-        }
-
-        // Deactivate autocomplete if editor loses focus
-        if !response.has_focus() && state.is_autocomplete_active(editor_id) {
-            state.deactivate_autocomplete(editor_id);
-        }
-
-        // Show autocomplete popup if active (visual only, keyboard already handled above)
-        if state.is_autocomplete_active(editor_id) {
-            let completions = get_completions(&state.library, state, editor_id);
-
-            if completions.is_empty() {
-                // No completions, deactivate
-                state.deactivate_autocomplete(editor_id);
-            } else {
-                // Show popup and handle mouse clicks
-                if let Some(completion_text) =
-                    AutocompletePopup::show(ui, state, editor_id, &response, &completions)
-                {
-                    *content = apply_completion(state, content, editor_id, &completion_text);
-                }
-            }
+        // Handle autocomplete activation, popup display, and focus loss
+        if let Some(new_content) =
+            autocomplete_after_editor(ui, state, editor_id, content, &response, cursor_pos)
+        {
+            *content = new_content;
         }
 
         PromptEditorResponse {

@@ -107,14 +107,21 @@ pub fn get_completions(
     }
 }
 
+/// Result from showing the autocomplete popup
+pub struct AutocompletePopupResult {
+    /// The selected completion text, if any
+    pub selected: Option<String>,
+    /// Whether the pointer is hovering over the popup
+    pub hovered: bool,
+}
+
 /// Autocomplete popup component
 pub struct AutocompletePopup;
 
 impl AutocompletePopup {
     /// Show the autocomplete popup below the editor widget.
     ///
-    /// Returns `Some(completion_text)` if a completion was selected and should be inserted,
-    /// or `None` if no action needed.
+    /// Returns `AutocompletePopupResult` with the selected completion and hover state.
     #[allow(deprecated)]
     pub fn show(
         ui: &mut egui::Ui,
@@ -122,9 +129,12 @@ impl AutocompletePopup {
         editor_id: &str,
         editor_response: &egui::Response,
         completions: &[CompletionItem],
-    ) -> Option<String> {
+    ) -> AutocompletePopupResult {
         if !state.is_autocomplete_active(editor_id) || completions.is_empty() {
-            return None;
+            return AutocompletePopupResult {
+                selected: None,
+                hovered: false,
+            };
         }
 
         let selected_index = state
@@ -132,148 +142,165 @@ impl AutocompletePopup {
             .map(|s| s.selected_index)
             .unwrap_or(0);
 
+        // Take the scroll flag - only scroll when selection changed via keyboard
+        let should_scroll = state.take_autocomplete_scroll_flag(editor_id);
+
         let mut selected_completion: Option<String> = None;
         let editor_id_owned = editor_id.to_string();
 
         // NOTE: Keyboard handling is done in handle_autocomplete_keyboard() which must be
         // called BEFORE the TextEdit widget. This function only handles mouse clicks.
 
-        // Show popup below the editor (unique ID per editor)
-        let popup_id = ui.make_persistent_id(format!("autocomplete_popup_{}", editor_id));
+        // Position the popup below the editor
+        let popup_pos = editor_response.rect.left_bottom() + egui::vec2(0.0, 4.0);
+        let area_id = egui::Id::new(format!("autocomplete_area_{}", editor_id));
 
-        // IMPORTANT: Open the popup BEFORE calling popup_below_widget, otherwise
-        // popup_below_widget will check if it's open and skip rendering since it wasn't open yet.
-        ui.memory_mut(|mem| mem.open_popup(popup_id));
+        // Use Area instead of popup_below_widget to have full control over click handling
+        egui::Area::new(area_id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(popup_pos)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    // Set explicit width to prevent resize when filtering changes item count
+                    let popup_width = 350.0;
+                    ui.set_width(popup_width);
 
-        egui::popup_below_widget(
-            ui,
-            popup_id,
-            editor_response,
-            egui::PopupCloseBehavior::CloseOnClick,
-            |ui| {
-                ui.set_min_width(300.0);
+                    let scroll_id =
+                        ui.make_persistent_id(format!("autocomplete_scroll_{}", editor_id_owned));
+                    egui::ScrollArea::vertical()
+                        .id_salt(scroll_id)
+                        .min_scrolled_height(150.0) // Minimum height to prevent jarring size changes
+                        .max_height(250.0)
+                        .show(ui, |ui| {
+                            // Ensure content fills the width
+                            ui.set_min_width(popup_width - 16.0); // Account for scrollbar
+                            for (idx, item) in completions.iter().enumerate() {
+                                let is_selected = idx == selected_index;
 
-                let scroll_id =
-                    ui.make_persistent_id(format!("autocomplete_scroll_{}", editor_id_owned));
-                egui::ScrollArea::vertical()
-                    .id_salt(scroll_id)
-                    .max_height(250.0)
-                    .show(ui, |ui| {
-                        for (idx, item) in completions.iter().enumerate() {
-                            let is_selected = idx == selected_index;
+                                // Build the label with highlighted characters
+                                let label = match item {
+                                    CompletionItem::Variable {
+                                        name,
+                                        option_count,
+                                        match_indices,
+                                    } => {
+                                        let mut job = egui::text::LayoutJob::default();
+                                        let current_theme = theme::current(ui.ctx());
 
-                            // Build the label with highlighted characters
-                            let label = match item {
-                                CompletionItem::Variable {
-                                    name,
-                                    option_count,
-                                    match_indices,
-                                } => {
-                                    let mut job = egui::text::LayoutJob::default();
-                                    let current_theme = theme::current(ui.ctx());
-
-                                    // Add @ prefix
-                                    job.append(
-                                        "@",
-                                        0.0,
-                                        egui::TextFormat {
-                                            color: current_theme.reference,
-                                            ..Default::default()
-                                        },
-                                    );
-
-                                    // Add variable name with match highlighting
-                                    for (i, c) in name.chars().enumerate() {
-                                        let color = if match_indices.contains(&i) {
-                                            current_theme.match_highlight
-                                        } else {
-                                            current_theme.reference
-                                        };
+                                        // Add @ prefix
                                         job.append(
-                                            &c.to_string(),
+                                            "@",
                                             0.0,
                                             egui::TextFormat {
-                                                color,
+                                                color: current_theme.reference,
                                                 ..Default::default()
                                             },
                                         );
-                                    }
 
-                                    // Add option count
-                                    job.append(
-                                        &format!(" ({} options)", option_count),
-                                        0.0,
-                                        egui::TextFormat {
-                                            color: current_theme.muted,
-                                            ..Default::default()
-                                        },
-                                    );
+                                        // Add variable name with match highlighting
+                                        for (i, c) in name.chars().enumerate() {
+                                            let color = if match_indices.contains(&i) {
+                                                current_theme.match_highlight
+                                            } else {
+                                                current_theme.reference
+                                            };
+                                            job.append(
+                                                &c.to_string(),
+                                                0.0,
+                                                egui::TextFormat {
+                                                    color,
+                                                    ..Default::default()
+                                                },
+                                            );
+                                        }
 
-                                    job
-                                }
-                                CompletionItem::Option {
-                                    text,
-                                    variable_name,
-                                    match_indices,
-                                } => {
-                                    let mut job = egui::text::LayoutJob::default();
-                                    let current_theme = theme::current(ui.ctx());
-
-                                    // Truncate long options
-                                    let display_text = if text.len() > 50 {
-                                        format!("{}...", &text[..47])
-                                    } else {
-                                        text.clone()
-                                    };
-
-                                    // Add option text with match highlighting
-                                    for (i, c) in display_text.chars().enumerate() {
-                                        let color = if match_indices.contains(&i) {
-                                            current_theme.match_highlight
-                                        } else {
-                                            ui.visuals().text_color()
-                                        };
+                                        // Add option count
                                         job.append(
-                                            &c.to_string(),
+                                            &format!(" ({} options)", option_count),
                                             0.0,
                                             egui::TextFormat {
-                                                color,
+                                                color: current_theme.muted,
                                                 ..Default::default()
                                             },
                                         );
+
+                                        job
                                     }
+                                    CompletionItem::Option {
+                                        text,
+                                        variable_name,
+                                        match_indices,
+                                    } => {
+                                        let mut job = egui::text::LayoutJob::default();
+                                        let current_theme = theme::current(ui.ctx());
 
-                                    // Add variable name context
-                                    job.append(
-                                        &format!(" (@{})", variable_name),
-                                        0.0,
-                                        egui::TextFormat {
-                                            color: current_theme.muted,
-                                            ..Default::default()
-                                        },
-                                    );
+                                        // Truncate long options
+                                        let display_text = if text.len() > 50 {
+                                            format!("{}...", &text[..47])
+                                        } else {
+                                            text.clone()
+                                        };
 
-                                    job
+                                        // Add option text with match highlighting
+                                        for (i, c) in display_text.chars().enumerate() {
+                                            let color = if match_indices.contains(&i) {
+                                                current_theme.match_highlight
+                                            } else {
+                                                ui.visuals().text_color()
+                                            };
+                                            job.append(
+                                                &c.to_string(),
+                                                0.0,
+                                                egui::TextFormat {
+                                                    color,
+                                                    ..Default::default()
+                                                },
+                                            );
+                                        }
+
+                                        // Add variable name context
+                                        job.append(
+                                            &format!(" (@{})", variable_name),
+                                            0.0,
+                                            egui::TextFormat {
+                                                color: current_theme.muted,
+                                                ..Default::default()
+                                            },
+                                        );
+
+                                        job
+                                    }
+                                };
+
+                                let response = ui.selectable_label(is_selected, label);
+
+                                // Handle click
+                                if response.clicked() {
+                                    selected_completion = Some(item.insert_text());
                                 }
-                            };
 
-                            let response = ui.selectable_label(is_selected, label);
-
-                            // Handle click - we'll return the completion text, caller handles deactivation
-                            if response.clicked() {
-                                selected_completion = Some(item.insert_text());
+                                // Scroll to selected item only when selection changed via keyboard
+                                if is_selected && should_scroll {
+                                    response.scroll_to_me(Some(egui::Align::Center));
+                                }
                             }
+                        });
+                });
+            });
 
-                            // Scroll to selected item
-                            if is_selected {
-                                response.scroll_to_me(Some(egui::Align::Center));
-                            }
-                        }
-                    });
-            },
-        );
+        // Check if pointer is hovering over the popup area
+        let hovered = ui.ctx().pointer_hover_pos().is_some_and(|pos| {
+            // Get the Area's rect from memory
+            ui.ctx().memory(|mem| {
+                mem.area_rect(area_id)
+                    .is_some_and(|rect| rect.contains(pos))
+            })
+        });
 
-        selected_completion
+        AutocompletePopupResult {
+            selected: selected_completion,
+            hovered,
+        }
     }
 }
 
@@ -465,4 +492,112 @@ pub fn find_autocomplete_context(content: &str, cursor_pos: usize) -> Option<usi
         }
         _ => None, // @ is in the middle of a word, not valid
     }
+}
+
+// =============================================================================
+// Autocomplete Orchestration Helpers
+// =============================================================================
+//
+// These functions encapsulate the autocomplete workflow that is shared between
+// the main prompt editor and the variable options editor. The workflow is:
+//
+// 1. BEFORE TextEdit: Call `autocomplete_before_editor()` to handle keyboard
+//    input (arrow keys, Enter, Tab, Escape) before the TextEdit can consume them.
+//
+// 2. RENDER TextEdit: Show the egui::TextEdit widget normally.
+//
+// 3. AFTER TextEdit: Call `autocomplete_after_editor()` to handle activation,
+//    popup display, mouse clicks, and focus loss.
+
+/// Handle autocomplete keyboard input BEFORE the TextEdit widget.
+///
+/// This must be called before showing the TextEdit to intercept arrow keys,
+/// Enter, Tab, and Escape before the TextEdit processes them.
+///
+/// Returns `Some(new_content)` if a completion was selected via keyboard,
+/// `None` otherwise.
+pub fn autocomplete_before_editor(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    editor_id: &str,
+    content: &str,
+) -> Option<String> {
+    if !state.is_autocomplete_active(editor_id) {
+        return None;
+    }
+
+    let completions = get_completions(&state.library, state, editor_id);
+    if completions.is_empty() {
+        return None;
+    }
+
+    // Handle keyboard input (arrows, enter, tab, escape)
+    let selection = handle_autocomplete_keyboard(ui, state, editor_id, &completions);
+
+    // If a completion was selected, apply it
+    selection.map(|completion_text| apply_completion(state, content, editor_id, &completion_text))
+}
+
+/// Handle autocomplete activation, popup display, and focus loss AFTER the TextEdit widget.
+///
+/// This handles:
+/// - Activating autocomplete when @ is typed or cursor moves into @ context
+/// - Updating the autocomplete query based on cursor position
+/// - Showing the popup and handling mouse clicks
+/// - Deactivating autocomplete when editor loses focus (unless hovering popup)
+///
+/// Returns `Some(new_content)` if a completion was selected via mouse click,
+/// `None` otherwise.
+pub fn autocomplete_after_editor(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    editor_id: &str,
+    content: &str,
+    response: &egui::Response,
+    cursor_pos: usize,
+) -> Option<String> {
+    // Handle autocomplete activation/update based on cursor position
+    if !state.is_autocomplete_active(editor_id) {
+        // Check if we're in an autocomplete context (either just typed @ or cursor is after @)
+        if let Some(trigger_pos) = check_autocomplete_trigger(content, cursor_pos)
+            .or_else(|| find_autocomplete_context(content, cursor_pos))
+        {
+            state.activate_autocomplete(editor_id, trigger_pos);
+            // Deactivate autocomplete in other editors
+            state.deactivate_autocomplete_except(editor_id);
+            // Update the query immediately
+            state.update_autocomplete_query(editor_id, content, cursor_pos);
+        }
+    } else {
+        // Autocomplete is active, update the query with actual cursor position
+        state.update_autocomplete_query(editor_id, content, cursor_pos);
+    }
+
+    // Show autocomplete popup if active
+    // NOTE: We must show the popup BEFORE checking focus loss, because clicking the popup
+    // causes the editor to lose focus. The popup click handler needs to run first.
+    if !state.is_autocomplete_active(editor_id) {
+        return None;
+    }
+
+    let completions = get_completions(&state.library, state, editor_id);
+
+    if completions.is_empty() {
+        state.deactivate_autocomplete(editor_id);
+        return None;
+    }
+
+    // Show popup and handle mouse clicks
+    let popup_result = AutocompletePopup::show(ui, state, editor_id, response, &completions);
+
+    let new_content = popup_result
+        .selected
+        .map(|completion_text| apply_completion(state, content, editor_id, &completion_text));
+
+    // Deactivate autocomplete if editor loses focus, unless pointer is over popup
+    if !response.has_focus() && state.is_autocomplete_active(editor_id) && !popup_result.hovered {
+        state.deactivate_autocomplete(editor_id);
+    }
+
+    new_content
 }

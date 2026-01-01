@@ -88,6 +88,8 @@ pub struct AutocompleteState {
     pub trigger_position: usize,
     /// The response ID of the text editor for popup positioning
     pub editor_response_id: Option<egui::Id>,
+    /// Flag to scroll to selection (set on keyboard nav, cleared after scroll)
+    pub scroll_to_automcomplete_selection: bool,
 }
 
 // ==================== Tab State ====================
@@ -694,6 +696,17 @@ impl AppState {
             .or_default()
     }
 
+    /// Take the scroll_to_selection flag (returns current value and clears it)
+    pub fn take_autocomplete_scroll_flag(&mut self, editor_id: &str) -> bool {
+        if let Some(state) = self.autocomplete_states.get_mut(editor_id) {
+            let should_scroll = state.scroll_to_automcomplete_selection;
+            state.scroll_to_automcomplete_selection = false;
+            should_scroll
+        } else {
+            false
+        }
+    }
+
     /// Check if autocomplete is active for a specific editor
     pub fn is_autocomplete_active(&self, editor_id: &str) -> bool {
         self.autocomplete_states
@@ -814,6 +827,7 @@ impl AppState {
             } else {
                 state.selected_index -= 1;
             }
+            state.scroll_to_automcomplete_selection = true;
         }
     }
 
@@ -824,6 +838,7 @@ impl AppState {
         }
         if let Some(state) = self.autocomplete_states.get_mut(editor_id) {
             state.selected_index = (state.selected_index + 1) % total_items;
+            state.scroll_to_automcomplete_selection = true;
         }
     }
 
