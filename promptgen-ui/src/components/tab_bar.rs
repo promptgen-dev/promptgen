@@ -81,118 +81,143 @@ impl TabBarPanel {
                                     let is_active = active_index == Some(i);
                                     let is_renaming = state.is_tab_renaming(i);
 
-                                    ui.horizontal(|ui| {
-                                        if is_renaming {
-                                            // Validate current rename text
-                                            let is_valid = state.is_tab_rename_valid();
+                                    // Tab styling - use theme selection color for active
+                                    let (tab_fill, tab_stroke) = if is_active {
+                                        (
+                                            ui.visuals().selection.bg_fill,
+                                            egui::Stroke::NONE,
+                                        )
+                                    } else {
+                                        (
+                                            egui::Color32::from_rgb(30, 30, 46), // base - darker
+                                            egui::Stroke::new(
+                                                1.0,
+                                                egui::Color32::from_rgb(69, 71, 90), // surface2 - subtle border
+                                            ),
+                                        )
+                                    };
 
-                                            // Inline text edit for renaming (not draggable while renaming)
-                                            let mut text_edit = egui::TextEdit::singleline(
-                                                &mut state.tab_rename_text,
-                                            )
-                                            .desired_width(100.0)
-                                            .id(egui::Id::new(("tab_rename", i)));
+                                    egui::Frame::new()
+                                        .fill(tab_fill)
+                                        .stroke(tab_stroke)
+                                        .corner_radius(4.0)
+                                        .inner_margin(egui::Margin::symmetric(6, 2))
+                                        .show(ui, |ui| {
+                                            ui.horizontal(|ui| {
+                                                if is_renaming {
+                                                    // Validate current rename text
+                                                    let is_valid = state.is_tab_rename_valid();
 
-                                            // Add red border if invalid
-                                            if !is_valid {
-                                                text_edit = text_edit.text_color(
-                                                    egui::Color32::from_rgb(243, 139, 168), // Catppuccin red
-                                                );
-                                            }
+                                                    // Inline text edit for renaming
+                                                    let mut text_edit = egui::TextEdit::singleline(
+                                                        &mut state.tab_rename_text,
+                                                    )
+                                                    .desired_width(100.0)
+                                                    .id(egui::Id::new(("tab_rename", i)));
 
-                                            // Wrap in a frame with border for error state
-                                            let response = if !is_valid {
-                                                egui::Frame::new()
-                                                    .stroke(egui::Stroke::new(
-                                                        1.0,
-                                                        egui::Color32::from_rgb(243, 139, 168),
-                                                    ))
-                                                    .corner_radius(4.0)
-                                                    .show(ui, |ui| ui.add(text_edit))
-                                                    .inner
-                                            } else {
-                                                ui.add(text_edit)
-                                            };
+                                                    // Add red text color if invalid
+                                                    if !is_valid {
+                                                        text_edit = text_edit.text_color(
+                                                            egui::Color32::from_rgb(243, 139, 168),
+                                                        );
+                                                    }
 
-                                            // Request focus on first frame
-                                            if response.gained_focus() || !response.has_focus() {
-                                                response.request_focus();
-                                            }
+                                                    // Wrap in error frame if invalid
+                                                    let response = if !is_valid {
+                                                        egui::Frame::new()
+                                                            .stroke(egui::Stroke::new(
+                                                                1.0,
+                                                                egui::Color32::from_rgb(243, 139, 168),
+                                                            ))
+                                                            .corner_radius(4.0)
+                                                            .show(ui, |ui| ui.add(text_edit))
+                                                            .inner
+                                                    } else {
+                                                        ui.add(text_edit)
+                                                    };
 
-                                            // Checkmark button to save (replaces X button)
-                                            let check_response = ui
-                                                .add_enabled(
-                                                    is_valid,
-                                                    egui::Button::new(ICON_CHECK).small(),
-                                                )
-                                                .on_hover_text(if is_valid {
-                                                    "Save name"
+                                                    // Request focus on first frame
+                                                    if response.gained_focus() || !response.has_focus()
+                                                    {
+                                                        response.request_focus();
+                                                    }
+
+                                                    // Checkmark button to save
+                                                    let check_response = ui
+                                                        .add_enabled(
+                                                            is_valid,
+                                                            egui::Button::new(ICON_CHECK).small(),
+                                                        )
+                                                        .on_hover_text(if is_valid {
+                                                            "Save name"
+                                                        } else {
+                                                            "Name already exists or is empty"
+                                                        });
+                                                    if check_response.clicked() {
+                                                        state.commit_tab_rename();
+                                                    }
+
+                                                    // Handle Enter to commit
+                                                    if ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                                        && is_valid
+                                                    {
+                                                        state.commit_tab_rename();
+                                                    }
+
+                                                    // Handle Escape to cancel
+                                                    if ui.input(|i| i.key_pressed(egui::Key::Escape))
+                                                    {
+                                                        state.cancel_tab_rename();
+                                                    }
+
+                                                    // Handle clicking away - cancel
+                                                    if response.lost_focus()
+                                                        && !ui
+                                                            .input(|i| i.key_pressed(egui::Key::Escape))
+                                                        && !check_response.clicked()
+                                                    {
+                                                        state.cancel_tab_rename();
+                                                    }
                                                 } else {
-                                                    "Name already exists or is empty"
-                                                });
-                                            if check_response.clicked() {
-                                                state.commit_tab_rename();
-                                            }
+                                                    let tab = &state.prompt_tabs[i];
 
-                                            // Handle Enter to commit
-                                            if ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                                && is_valid
-                                            {
-                                                state.commit_tab_rename();
-                                            }
+                                                    // Build tab label (name + dirty indicator)
+                                                    let label = if tab.dirty {
+                                                        format!("{}*", tab.name)
+                                                    } else {
+                                                        tab.name.clone()
+                                                    };
 
-                                            // Handle Escape to cancel
-                                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                                                state.cancel_tab_rename();
-                                            }
+                                                    // Drag handle wraps the clickable label
+                                                    handle.ui(ui, |ui| {
+                                                        let response = ui.add(
+                                                            egui::Label::new(&label)
+                                                                .selectable(false)
+                                                                .sense(egui::Sense::click()),
+                                                        );
 
-                                            // Handle clicking away - cancel instead of forcing commit
-                                            if response.lost_focus()
-                                                && !ui.input(|i| i.key_pressed(egui::Key::Escape))
-                                                && !check_response.clicked()
-                                            {
-                                                // Cancel on click away
-                                                state.cancel_tab_rename();
-                                            }
-                                        } else {
-                                            let tab = &state.prompt_tabs[i];
+                                                        if response.clicked() && !is_active {
+                                                            action = TabBarAction::SwitchTab(i);
+                                                        }
 
-                                            // Build tab label (name + dirty indicator)
-                                            let label = if tab.dirty {
-                                                format!("{}*", tab.name)
-                                            } else {
-                                                tab.name.clone()
-                                            };
+                                                        // Double-click to rename
+                                                        if response.double_clicked() {
+                                                            action = TabBarAction::StartRename(i);
+                                                        }
+                                                    });
 
-                                            // Drag handle is the selectable label
-                                            handle.ui(ui, |ui| {
-                                                let response =
-                                                    ui.selectable_label(is_active, &label);
-
-                                                if response.clicked() && !is_active {
-                                                    action = TabBarAction::SwitchTab(i);
-                                                }
-
-                                                // Double-click to rename
-                                                if response.double_clicked() {
-                                                    action = TabBarAction::StartRename(i);
+                                                    // Close button (only show if more than one tab)
+                                                    if tab_count > 1 {
+                                                        let close_response = ui
+                                                            .small_button(ICON_CLOSE)
+                                                            .on_hover_text("Close tab");
+                                                        if close_response.clicked() {
+                                                            action = TabBarAction::CloseTab(i);
+                                                        }
+                                                    }
                                                 }
                                             });
-
-                                            // Close button (only show if more than one tab)
-                                            if tab_count > 1 {
-                                                let close_response = ui
-                                                    .small_button(ICON_CLOSE)
-                                                    .on_hover_text("Close tab");
-                                                if close_response.clicked() {
-                                                    action = TabBarAction::CloseTab(i);
-                                                }
-                                            }
-                                        }
-
-                                        // Add separator after each tab (except the last)
-                                        // Note: This might not look perfect during drag, but works for now
-                                    });
+                                        });
                                 },
                             );
 
