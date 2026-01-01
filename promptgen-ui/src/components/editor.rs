@@ -40,13 +40,16 @@ impl EditorPanel {
 
         let result = frame_response.inner;
 
+        // Check if content was modified (by typing OR by autocomplete)
+        let content_changed = content != state.editor_content;
+
         // Update editor content if it changed
-        if content != state.editor_content {
+        if content_changed {
             state.editor_content = content;
         }
 
-        // Update parse result when editor content changes
-        if result.response.changed() {
+        // Update parse result when editor content changes (from typing or autocomplete)
+        if result.response.changed() || content_changed {
             state.parse_result = Some(result.parse_result.clone());
             state.update_parse_result();
             state.request_render();
