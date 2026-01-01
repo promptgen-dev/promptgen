@@ -280,12 +280,19 @@ fn slot_block_to_source(slot_block: &crate::ast::SlotBlock, output: &mut String)
             // Operators
             for (op, _span) in &pick.operators {
                 match op {
-                    PickOperator::One => {
+                    PickOperator::One(spec) => {
                         output.push_str(" | one");
+                        if spec.suffix.is_some() {
+                            output.push('(');
+                            if let Some(suffix) = &spec.suffix {
+                                output.push_str(&format!("suffix=\"{}\"", suffix));
+                            }
+                            output.push(')');
+                        }
                     }
                     PickOperator::Many(spec) => {
                         output.push_str(" | many");
-                        if spec.max.is_some() || spec.sep.is_some() {
+                        if spec.max.is_some() || spec.sep.is_some() || spec.suffix.is_some() {
                             output.push('(');
                             let mut first = true;
                             if let Some(max) = spec.max {
@@ -297,6 +304,13 @@ fn slot_block_to_source(slot_block: &crate::ast::SlotBlock, output: &mut String)
                                     output.push_str(", ");
                                 }
                                 output.push_str(&format!("sep=\"{}\"", sep));
+                                first = false;
+                            }
+                            if let Some(suffix) = &spec.suffix {
+                                if !first {
+                                    output.push_str(", ");
+                                }
+                                output.push_str(&format!("suffix=\"{}\"", suffix));
                             }
                             output.push(')');
                         }

@@ -4,8 +4,8 @@ use chumsky::prelude::*;
 use chumsky::{error::Simple, extra, span::SimpleSpan};
 
 use crate::ast::{
-    LibraryRef, ManySpec, Node, OptionItem, PickOperator, PickSlot, PickSource, Prompt, SlotBlock,
-    SlotKind,
+    LibraryRef, ManySpec, Node, OneSpec, OptionItem, PickOperator, PickSlot, PickSource, Prompt,
+    SlotBlock, SlotKind,
 };
 use crate::span::Span;
 
@@ -324,13 +324,43 @@ fn pick_operator_parser<'src>()
         .ignore_then(choice((one_operator_parser(), many_operator_parser())))
 }
 
-/// Parse `one`
+/// Parse `one` or `one(suffix="...")`
 fn one_operator_parser<'src>()
 -> impl Parser<'src, &'src str, (PickOperator, Span), extra::Err<Simple<'src, char>>> + Clone {
-    just("one").map_with(|_, e| (PickOperator::One, to_range(e.span())))
+    just("one")
+        .ignore_then(one_args_parser().or_not())
+        .map_with(|args, e| {
+            let spec = args.unwrap_or_default();
+            (PickOperator::One(spec), to_range(e.span()))
+        })
 }
 
-/// Parse `many` or `many(max=N, sep="...")`
+/// Parse `(suffix="...")`
+fn one_args_parser<'src>()
+-> impl Parser<'src, &'src str, OneSpec, extra::Err<Simple<'src, char>>> + Clone {
+    just('(')
+        .padded()
+        .ignore_then(
+            operator_arg_parser()
+                .separated_by(just(',').padded())
+                .collect::<Vec<_>>(),
+        )
+        .then_ignore(just(')').padded())
+        .map(|args| {
+            let mut spec = OneSpec::default();
+            for (key, value) in args {
+                match key.as_str() {
+                    "suffix" => {
+                        spec.suffix = Some(value);
+                    }
+                    _ => {} // Ignore unknown args
+                }
+            }
+            spec
+        })
+}
+
+/// Parse `many` or `many(max=N, sep="...", suffix="...")`
 fn many_operator_parser<'src>()
 -> impl Parser<'src, &'src str, (PickOperator, Span), extra::Err<Simple<'src, char>>> + Clone {
     just("many")
@@ -341,13 +371,13 @@ fn many_operator_parser<'src>()
         })
 }
 
-/// Parse `(max=N, sep="...")`
+/// Parse `(max=N, sep="...", suffix="...")`
 fn many_args_parser<'src>()
 -> impl Parser<'src, &'src str, ManySpec, extra::Err<Simple<'src, char>>> + Clone {
     just('(')
         .padded()
         .ignore_then(
-            many_arg_parser()
+            operator_arg_parser()
                 .separated_by(just(',').padded())
                 .collect::<Vec<_>>(),
         )
@@ -364,15 +394,18 @@ fn many_args_parser<'src>()
                     "sep" => {
                         spec.sep = Some(value);
                     }
-                    _ => {} // Ignore unknown args for now
+                    "suffix" => {
+                        spec.suffix = Some(value);
+                    }
+                    _ => {} // Ignore unknown args
                 }
             }
             spec
         })
 }
 
-/// Parse a single many arg: `key=value`
-fn many_arg_parser<'src>()
+/// Parse a single operator arg: `key=value`
+fn operator_arg_parser<'src>()
 -> impl Parser<'src, &'src str, (String, String), extra::Err<Simple<'src, char>>> + Clone {
     // key
     any()
@@ -381,11 +414,11 @@ fn many_arg_parser<'src>()
         .at_least(1)
         .collect::<String>()
         .then_ignore(just('=').padded())
-        .then(many_arg_value_parser())
+        .then(operator_arg_value_parser())
 }
 
-/// Parse a many arg value: number or quoted string
-fn many_arg_value_parser<'src>()
+/// Parse an operator arg value: number or quoted string
+fn operator_arg_value_parser<'src>()
 -> impl Parser<'src, &'src str, String, extra::Err<Simple<'src, char>>> + Clone {
     // Quoted string
     let quoted = just('"')
@@ -658,7 +691,7 @@ mod tests {
                 match &slot.kind.0 {
                     SlotKind::Pick(pick) => {
                         assert_eq!(pick.operators.len(), 1);
-                        assert!(matches!(&pick.operators[0].0, PickOperator::One));
+                        assert!(matches!(&pick.operators[0].0, PickOperator::One(_)));
                     }
                     other => panic!("expected Pick, got {:?}", other),
                 }

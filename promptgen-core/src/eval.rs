@@ -243,7 +243,7 @@ fn eval_text_with_grammar<R: Rng>(
 ///
 /// Validates the values array against the `one` or `many(max=N)` constraints,
 /// evaluates any grammar in each value, and joins the results with the
-/// appropriate separator.
+/// appropriate separator, optionally appending a suffix.
 fn eval_pick_slot_value<R: Rng>(
     slot_name: &str,
     values: &[String],
@@ -251,8 +251,8 @@ fn eval_pick_slot_value<R: Rng>(
     ctx: &mut EvalContext<'_, R>,
     chosen_options: &mut Vec<ChosenOption>,
 ) -> Result<String, RenderError> {
-    // Determine cardinality and separator from operators
-    let (is_one, max, separator) = extract_pick_constraints(pick);
+    // Determine cardinality, separator, and suffix from operators
+    let (is_one, max, separator, suffix) = extract_pick_constraints(pick);
 
     let count = values.len();
 
@@ -282,31 +282,44 @@ fn eval_pick_slot_value<R: Rng>(
     }
 
     // Join with the appropriate separator
-    Ok(evaluated.join(&separator))
+    let mut result = evaluated.join(&separator);
+
+    // Append suffix if there are any values
+    if !result.is_empty() {
+        if let Some(suffix) = suffix {
+            result.push_str(&suffix);
+        }
+    }
+
+    Ok(result)
 }
 
 /// Extract cardinality constraints and separator from pick operators.
 /// Returns (is_one, max_for_many, separator)
-fn extract_pick_constraints(pick: &PickSlot) -> (bool, Option<u32>, String) {
+/// Extracted constraints from pick operators: (is_one, max, separator, suffix)
+fn extract_pick_constraints(pick: &PickSlot) -> (bool, Option<u32>, String, Option<String>) {
     let mut is_one = false;
     let mut max: Option<u32> = None;
     let mut separator = ", ".to_string(); // Default separator
+    let mut suffix: Option<String> = None;
 
     for (op, _span) in &pick.operators {
         match op {
-            PickOperator::One => {
+            PickOperator::One(spec) => {
                 is_one = true;
+                suffix = spec.suffix.clone();
             }
             PickOperator::Many(spec) => {
                 max = spec.max;
                 if let Some(sep) = &spec.sep {
                     separator = sep.clone();
                 }
+                suffix = spec.suffix.clone();
             }
         }
     }
 
-    (is_one, max, separator)
+    (is_one, max, separator, suffix)
 }
 
 /// Resolve a library reference to a random option.

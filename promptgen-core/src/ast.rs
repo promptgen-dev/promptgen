@@ -86,13 +86,14 @@ impl PickSlot {
     pub fn to_definition(&self) -> Result<SlotDefKind, SlotNormError> {
         let sources: Vec<PickSource> = self.sources.iter().map(|(s, _)| s.clone()).collect();
 
-        // Process operators to determine cardinality and separator
+        // Process operators to determine cardinality, separator, and suffix
         let mut cardinality: Option<Cardinality> = None;
         let mut sep: Option<String> = None;
+        let mut suffix: Option<String> = None;
 
         for (op, _span) in &self.operators {
             match op {
-                PickOperator::One => {
+                PickOperator::One(spec) => {
                     if cardinality.is_some() {
                         if matches!(cardinality, Some(Cardinality::One)) {
                             return Err(SlotNormError::DuplicateOne);
@@ -100,6 +101,7 @@ impl PickSlot {
                         return Err(SlotNormError::ConflictingOperators);
                     }
                     cardinality = Some(Cardinality::One);
+                    suffix = spec.suffix.clone();
                 }
                 PickOperator::Many(spec) => {
                     if cardinality.is_some() {
@@ -110,6 +112,7 @@ impl PickSlot {
                     }
                     cardinality = Some(Cardinality::Many { max: spec.max });
                     sep = spec.sep.clone();
+                    suffix = spec.suffix.clone();
                 }
             }
         }
@@ -118,6 +121,7 @@ impl PickSlot {
             sources,
             cardinality: cardinality.unwrap_or_default(),
             sep: sep.unwrap_or_else(|| ", ".to_string()),
+            suffix,
         })
     }
 }
@@ -139,10 +143,17 @@ pub enum PickSource {
 /// Operators that can be applied to a pick expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PickOperator {
-    /// `| one` - select exactly one item.
-    One,
-    /// `| many(max=N, sep="...")` - select multiple items.
+    /// `| one` or `| one(suffix="...")` - select exactly one item.
+    One(OneSpec),
+    /// `| many(max=N, sep="...", suffix="...")` - select multiple items.
     Many(ManySpec),
+}
+
+/// Specification for the `one` operator.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct OneSpec {
+    /// Suffix to append if a value is chosen (default: none).
+    pub suffix: Option<String>,
 }
 
 /// Specification for the `many` operator.
@@ -152,6 +163,8 @@ pub struct ManySpec {
     pub max: Option<u32>,
     /// Separator to join selected items (default: ", ").
     pub sep: Option<String>,
+    /// Suffix to append if any values are chosen (default: none).
+    pub suffix: Option<String>,
 }
 
 impl ManySpec {
@@ -182,6 +195,8 @@ pub enum SlotDefKind {
         sources: Vec<PickSource>,
         cardinality: Cardinality,
         sep: String,
+        /// Suffix to append if any values are chosen.
+        suffix: Option<String>,
     },
     /// Textarea for freeform input.
     Textarea,
@@ -227,13 +242,14 @@ impl SlotBlock {
                 let sources: Vec<PickSource> =
                     pick.sources.iter().map(|(s, _)| s.clone()).collect();
 
-                // Process operators to determine cardinality and separator
+                // Process operators to determine cardinality, separator, and suffix
                 let mut cardinality: Option<Cardinality> = None;
                 let mut sep: Option<String> = None;
+                let mut suffix: Option<String> = None;
 
                 for (op, _span) in &pick.operators {
                     match op {
-                        PickOperator::One => {
+                        PickOperator::One(spec) => {
                             if cardinality.is_some() {
                                 if matches!(cardinality, Some(Cardinality::One)) {
                                     return Err(SlotNormError::DuplicateOne);
@@ -241,6 +257,7 @@ impl SlotBlock {
                                 return Err(SlotNormError::ConflictingOperators);
                             }
                             cardinality = Some(Cardinality::One);
+                            suffix = spec.suffix.clone();
                         }
                         PickOperator::Many(spec) => {
                             if cardinality.is_some() {
@@ -251,6 +268,7 @@ impl SlotBlock {
                             }
                             cardinality = Some(Cardinality::Many { max: spec.max });
                             sep = spec.sep.clone();
+                            suffix = spec.suffix.clone();
                         }
                     }
                 }
@@ -261,6 +279,7 @@ impl SlotBlock {
                         sources,
                         cardinality: cardinality.unwrap_or_default(),
                         sep: sep.unwrap_or_else(|| ", ".to_string()),
+                        suffix,
                     },
                 })
             }
