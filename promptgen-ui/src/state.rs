@@ -345,7 +345,7 @@ impl AppState {
             }
 
             let render_result = render(ast, &mut ctx)?;
-            self.preview_output = render_result.text;
+            self.preview_output = render_result.text.trim().to_string();
 
             // Update the seed to what we actually used
             self.preview_seed = Some(seed);
@@ -983,6 +983,8 @@ impl AppState {
                 // Convert tab's SlotValue HashMap to the working slot_values format
                 self.slot_values = Self::slot_values_to_vec_map(&tab.slots);
                 self.update_parse_result();
+                // Render immediately so preview is updated when switching tabs
+                self.request_render();
             }
         }
     }
@@ -1116,6 +1118,8 @@ impl AppState {
                 self.slot_values = Self::slot_values_to_vec_map(&tab.slots);
             }
             self.update_parse_result();
+            // Render immediately so preview is updated after closing a tab
+            self.request_render();
         }
 
         true

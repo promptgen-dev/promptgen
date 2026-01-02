@@ -125,6 +125,8 @@ impl PromptGenApp {
                     self.state.slot_values =
                         crate::state::AppState::slot_values_to_vec_map(&tab.slots);
                     self.state.update_parse_result();
+                    // Render immediately so preview is populated on app launch
+                    self.state.request_render();
                 }
         }
         // If no persisted tabs, the AppState default already creates "Prompt 1"
