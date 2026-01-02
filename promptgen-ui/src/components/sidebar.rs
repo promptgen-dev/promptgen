@@ -6,12 +6,11 @@ use egui_flex::{Flex, FlexItem};
 use promptgen_core::Cardinality;
 
 use egui_material_icons::icons::{
-    ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_COLLAPSE_ALL, ICON_DELETE,
-    ICON_DESCRIPTION, ICON_EXPAND_ALL, ICON_MORE_VERT, ICON_SEARCH, ICON_SORT_BY_ALPHA,
+    ICON_CLOSE, ICON_DELETE, ICON_DESCRIPTION, ICON_MORE_VERT, ICON_SEARCH,
 };
 
 use super::variable_list::{VariableList, VariableListConfig};
-use crate::state::{AppState, OptionGroup, SidebarMode, SidebarViewMode, VariableSortOrder};
+use crate::state::{AppState, OptionGroup, SidebarMode, SidebarViewMode};
 use crate::theme;
 
 /// Sidebar panel for navigating libraries, prompts, and variables.
@@ -133,59 +132,17 @@ impl SidebarPanel {
                 );
             });
 
-            // Sort and Expand/Collapse buttons (only in Variables view)
+            // Toolbar (only in Variables view) - includes new variable button
             if state.sidebar_view_mode == SidebarViewMode::Variables {
-                ui.add_space(4.0);
-                Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
-                    // Spacer to push buttons to the right
-                    flex.add_ui(FlexItem::default().grow(1.0), |_ui| {});
-
-                    // Sort button - cycles through None -> Ascending -> Descending -> None
-                    flex.add_ui(FlexItem::default(), |ui| {
-                        let (icon, tooltip) = match state.variable_sort_order {
-                            VariableSortOrder::None => {
-                                (ICON_SORT_BY_ALPHA.to_string(), "Sort alphabetically")
-                            }
-                            VariableSortOrder::Ascending => (
-                                format!("{}{}", ICON_SORT_BY_ALPHA, ICON_ARROW_UPWARD),
-                                "Sort Z-A",
-                            ),
-                            VariableSortOrder::Descending => (
-                                format!("{}{}", ICON_SORT_BY_ALPHA, ICON_ARROW_DOWNWARD),
-                                "Clear sort",
-                            ),
-                        };
-                        if ui.small_button(&icon).on_hover_text(tooltip).clicked() {
-                            state.variable_sort_order = match state.variable_sort_order {
-                                VariableSortOrder::None => VariableSortOrder::Ascending,
-                                VariableSortOrder::Ascending => VariableSortOrder::Descending,
-                                VariableSortOrder::Descending => VariableSortOrder::None,
-                            };
-                        }
-                    });
-
-                    // Collapse all button
-                    flex.add_ui(FlexItem::default(), |ui| {
-                        if ui
-                            .small_button(ICON_COLLAPSE_ALL)
-                            .on_hover_text("Collapse all")
-                            .clicked()
-                        {
-                            state.expand_all_variables = Some(false);
-                        }
-                    });
-
-                    // Expand all button
-                    flex.add_ui(FlexItem::default(), |ui| {
-                        if ui
-                            .small_button(ICON_EXPAND_ALL)
-                            .on_hover_text("Expand all")
-                            .clicked()
-                        {
-                            state.expand_all_variables = Some(true);
-                        }
-                    });
-                });
+                let new_var_clicked = VariableList::show_toolbar(
+                    ui,
+                    &mut state.variable_sort_order,
+                    &mut state.expand_all_variables,
+                    true, // show new variable button
+                );
+                if new_var_clicked {
+                    state.enter_new_variable_editor();
+                }
             }
 
             ui.separator();
@@ -373,7 +330,6 @@ impl SidebarPanel {
             selected_values: &[],
             can_add_selection: true,
             show_edit_buttons: true,
-            show_new_variable_button: true,
         };
 
         let result = VariableList::show_groups(
@@ -386,12 +342,9 @@ impl SidebarPanel {
             Some(&state.library),
         );
 
-        // Handle results
+        // Handle edit button clicks
         if let Some(name) = result.edit_clicked {
             state.enter_variable_editor(&name);
-        }
-        if result.new_variable_clicked {
-            state.enter_new_variable_editor();
         }
     }
 
@@ -437,11 +390,12 @@ impl SidebarPanel {
         // Search bar
         VariableList::show_search_bar(ui, &mut state.slot_picker_search_query);
 
-        // Toolbar (sort, expand/collapse)
+        // Toolbar (sort, expand/collapse) - no new variable button in slot picker
         VariableList::show_toolbar(
             ui,
             &mut state.variable_sort_order,
             &mut state.expand_all_variables,
+            false, // don't show new variable button
         );
 
         ui.separator();
@@ -470,7 +424,6 @@ impl SidebarPanel {
             selected_values: &selected_values,
             can_add_selection: can_add,
             show_edit_buttons: true,
-            show_new_variable_button: false,
         };
 
         // Show the option groups in a scroll area

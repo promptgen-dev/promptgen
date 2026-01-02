@@ -4,8 +4,8 @@
 
 use egui_flex::{Flex, FlexItem};
 use egui_material_icons::icons::{
-    ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHEVRON_RIGHT, ICON_COLLAPSE_ALL, ICON_EDIT,
-    ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_SEARCH, ICON_SORT_BY_ALPHA,
+    ICON_ADD, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHEVRON_RIGHT, ICON_COLLAPSE_ALL,
+    ICON_EDIT, ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_SEARCH, ICON_SORT_BY_ALPHA,
 };
 
 use crate::state::{OptionGroup, VariableSortOrder};
@@ -23,8 +23,6 @@ pub struct VariableListConfig<'a> {
     pub can_add_selection: bool,
     /// Whether to show edit buttons on variable groups
     pub show_edit_buttons: bool,
-    /// Whether to show the "+ New Variable" button at the bottom
-    pub show_new_variable_button: bool,
 }
 
 impl Default for VariableListConfig<'_> {
@@ -35,7 +33,6 @@ impl Default for VariableListConfig<'_> {
             selected_values: &[],
             can_add_selection: true,
             show_edit_buttons: true,
-            show_new_variable_button: true,
         }
     }
 }
@@ -47,8 +44,6 @@ pub struct VariableListResult {
     pub option_clicked: Option<String>,
     /// Edit button clicked for a group (group_name)
     pub edit_clicked: Option<String>,
-    /// New Variable button was clicked
-    pub new_variable_clicked: bool,
 }
 
 /// Internal display data for a group after search filtering
@@ -80,16 +75,32 @@ impl VariableList {
         });
     }
 
-    /// Render the sort and expand/collapse buttons.
-    /// Returns true if sort order changed.
+    /// Render the toolbar with optional new variable button, sort, and expand/collapse buttons.
+    /// Returns true if the new variable button was clicked.
     pub fn show_toolbar(
         ui: &mut egui::Ui,
         sort_order: &mut VariableSortOrder,
         expand_all: &mut Option<bool>,
-    ) {
+        show_new_variable_button: bool,
+    ) -> bool {
+        let mut new_variable_clicked = false;
+
         ui.add_space(4.0);
         Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
-            // Spacer to push buttons to the right
+            // New variable button (left-aligned)
+            if show_new_variable_button {
+                flex.add_ui(FlexItem::default(), |ui| {
+                    if ui
+                        .small_button(ICON_ADD)
+                        .on_hover_text("New variable")
+                        .clicked()
+                    {
+                        new_variable_clicked = true;
+                    }
+                });
+            }
+
+            // Spacer to push remaining buttons to the right
             flex.add_ui(FlexItem::default().grow(1.0), |_ui| {});
 
             // Sort button - cycles through None -> Ascending -> Descending -> None
@@ -138,6 +149,8 @@ impl VariableList {
                 }
             });
         });
+
+        new_variable_clicked
     }
 
     /// Render the variable/option group list.
@@ -163,12 +176,6 @@ impl VariableList {
 
         if groups.is_empty() {
             ui.label("No options available");
-            if config.show_new_variable_button {
-                ui.add_space(8.0);
-                if ui.button("+ New Variable").clicked() {
-                    result.new_variable_clicked = true;
-                }
-            }
             return result;
         }
 
@@ -192,12 +199,6 @@ impl VariableList {
 
         if groups_display.is_empty() && is_searching {
             ui.label("No matching options");
-            if config.show_new_variable_button {
-                ui.add_space(8.0);
-                if ui.button("+ New Variable").clicked() {
-                    result.new_variable_clicked = true;
-                }
-            }
             return result;
         }
 
@@ -339,14 +340,6 @@ impl VariableList {
                     }
                 });
             });
-        }
-
-        // Add new variable button at the bottom
-        if config.show_new_variable_button {
-            ui.add_space(8.0);
-            if ui.button("+ New Variable").clicked() {
-                result.new_variable_clicked = true;
-            }
         }
 
         result
