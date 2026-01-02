@@ -14,6 +14,18 @@ pub enum SidebarViewMode {
     Variables,
 }
 
+/// Variable list sort order
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum VariableSortOrder {
+    /// No sorting - show in library order
+    #[default]
+    None,
+    /// Sort A-Z by variable name
+    Ascending,
+    /// Sort Z-A by variable name
+    Descending,
+}
+
 /// Sidebar mode - normal navigation vs slot picker overlay
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SidebarMode {
@@ -202,6 +214,7 @@ pub struct AppState {
 
     // UI State
     pub sidebar_view_mode: SidebarViewMode,
+    pub variable_sort_order: VariableSortOrder,
     pub sidebar_mode: SidebarMode,
     pub search_query: String,
     pub editor_focus: EditorFocus,
@@ -244,6 +257,7 @@ impl Default for AppState {
             auto_render: true,
             preview_dirty: false,
             sidebar_view_mode: SidebarViewMode::default(),
+            variable_sort_order: VariableSortOrder::default(),
             sidebar_mode: SidebarMode::default(),
             search_query: String::new(),
             editor_focus: EditorFocus::default(),

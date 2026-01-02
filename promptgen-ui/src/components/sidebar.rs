@@ -6,11 +6,12 @@ use egui_flex::{Flex, FlexItem};
 use promptgen_core::Cardinality;
 
 use egui_material_icons::icons::{
-    ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_COLLAPSE_ALL, ICON_DELETE, ICON_DESCRIPTION, ICON_EDIT,
-    ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_MORE_VERT, ICON_SEARCH,
+    ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_COLLAPSE_ALL,
+    ICON_DELETE, ICON_DESCRIPTION, ICON_EDIT, ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_MORE_VERT,
+    ICON_SEARCH, ICON_SORT_BY_ALPHA,
 };
 
-use crate::state::{AppState, SidebarMode, SidebarViewMode};
+use crate::state::{AppState, SidebarMode, SidebarViewMode, VariableSortOrder};
 use crate::theme;
 
 /// Sidebar panel for navigating libraries, prompts, and variables.
@@ -132,21 +133,34 @@ impl SidebarPanel {
                 );
             });
 
-            // Expand/Collapse all buttons (only in Variables view)
+            // Sort and Expand/Collapse buttons (only in Variables view)
             if state.sidebar_view_mode == SidebarViewMode::Variables {
                 ui.add_space(4.0);
                 Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
                     // Spacer to push buttons to the right
                     flex.add_ui(FlexItem::default().grow(1.0), |_ui| {});
 
-                    // Expand all button
+                    // Sort button - cycles through None -> Ascending -> Descending -> None
                     flex.add_ui(FlexItem::default(), |ui| {
-                        if ui
-                            .small_button(ICON_EXPAND_ALL)
-                            .on_hover_text("Expand all")
-                            .clicked()
-                        {
-                            state.expand_all_variables = Some(true);
+                        let (icon, tooltip) = match state.variable_sort_order {
+                            VariableSortOrder::None => {
+                                (ICON_SORT_BY_ALPHA.to_string(), "Sort alphabetically")
+                            }
+                            VariableSortOrder::Ascending => (
+                                format!("{}{}", ICON_SORT_BY_ALPHA, ICON_ARROW_UPWARD),
+                                "Sort Z-A",
+                            ),
+                            VariableSortOrder::Descending => (
+                                format!("{}{}", ICON_SORT_BY_ALPHA, ICON_ARROW_DOWNWARD),
+                                "Clear sort",
+                            ),
+                        };
+                        if ui.small_button(&icon).on_hover_text(tooltip).clicked() {
+                            state.variable_sort_order = match state.variable_sort_order {
+                                VariableSortOrder::None => VariableSortOrder::Ascending,
+                                VariableSortOrder::Ascending => VariableSortOrder::Descending,
+                                VariableSortOrder::Descending => VariableSortOrder::None,
+                            };
                         }
                     });
 
@@ -158,6 +172,17 @@ impl SidebarPanel {
                             .clicked()
                         {
                             state.expand_all_variables = Some(false);
+                        }
+                    });
+
+                    // Expand all button
+                    flex.add_ui(FlexItem::default(), |ui| {
+                        if ui
+                            .small_button(ICON_EXPAND_ALL)
+                            .on_hover_text("Expand all")
+                            .clicked()
+                        {
+                            state.expand_all_variables = Some(true);
                         }
                     });
                 });
@@ -412,6 +437,18 @@ impl SidebarPanel {
                     .collect()
             }
         };
+
+        // Apply sorting based on current sort order
+        let mut variables_display = variables_display;
+        match state.variable_sort_order {
+            VariableSortOrder::None => {} // Keep original order
+            VariableSortOrder::Ascending => {
+                variables_display.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            }
+            VariableSortOrder::Descending => {
+                variables_display.sort_by(|a, b| b.name.to_lowercase().cmp(&a.name.to_lowercase()));
+            }
+        }
 
         if variables_display.is_empty() && is_searching {
             ui.label("No matching variables");

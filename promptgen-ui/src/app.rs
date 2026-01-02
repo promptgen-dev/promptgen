@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::components::{
     dialogs, EditorPanel, PreviewPanel, SidebarPanel, SlotPanel, TabBarPanel, VariableEditorPanel,
 };
-use crate::state::{AppState, EditorMode, PromptTab};
+use crate::state::{AppState, EditorMode, PromptTab, VariableSortOrder};
 use crate::theme;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -23,6 +23,10 @@ pub struct PromptGenApp {
     /// Persisted active tab index
     #[serde(default)]
     active_tab_index: Option<usize>,
+
+    /// Persisted variable sort order
+    #[serde(default)]
+    variable_sort_order: VariableSortOrder,
 
     #[serde(skip)]
     state: AppState,
@@ -94,6 +98,9 @@ impl PromptGenApp {
 
     /// Restore tabs from persisted data into AppState
     fn restore_tabs(&mut self) {
+        // Restore variable sort order
+        self.state.variable_sort_order = self.variable_sort_order;
+
         // If we have persisted tabs, restore them
         if !self.prompt_tabs.is_empty() {
             self.state.prompt_tabs = self.prompt_tabs.clone();
@@ -130,6 +137,7 @@ impl PromptGenApp {
 
         self.prompt_tabs = self.state.prompt_tabs.clone();
         self.active_tab_index = self.state.active_tab_index;
+        self.variable_sort_order = self.state.variable_sort_order;
     }
 
     /// Open a file picker dialog and load the selected library
