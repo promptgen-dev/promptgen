@@ -92,7 +92,7 @@ impl VariableList {
             if show_new_variable_button {
                 flex.add_ui(FlexItem::default(), |ui| {
                     if ui
-                        .small_button(ICON_ADD)
+                        .small_button(format!("{} Add", ICON_ADD))
                         .on_hover_text("New variable")
                         .clicked()
                     {
@@ -131,9 +131,10 @@ impl VariableList {
             // Option sort button - cycles through None -> Ascending -> Descending -> None
             flex.add_ui(FlexItem::default(), |ui| {
                 let (icon, tooltip) = match option_sort_order {
-                    VariableSortOrder::None => {
-                        (format!("{}{}", ICON_MENU, ICON_SORT_BY_ALPHA), "Sort options A-Z")
-                    }
+                    VariableSortOrder::None => (
+                        format!("{}{}", ICON_MENU, ICON_SORT_BY_ALPHA),
+                        "Sort options A-Z",
+                    ),
                     VariableSortOrder::Ascending => (
                         format!("{}{}{}", ICON_MENU, ICON_SORT_BY_ALPHA, ICON_ARROW_UPWARD),
                         "Sort options Z-A",

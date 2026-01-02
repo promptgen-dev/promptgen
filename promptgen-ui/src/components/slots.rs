@@ -3,7 +3,7 @@
 use egui::{Align, Id, Label, Layout, UiBuilder, Vec2};
 use egui_dnd::dnd;
 use egui_flex::{Flex, FlexItem};
-use egui_material_icons::icons::ICON_CLOSE;
+use egui_material_icons::icons::{ICON_CHECK, ICON_CLOSE, ICON_DONE_ALL, ICON_TEXT_AD};
 use promptgen_core::{Cardinality, Node, ParseResult, SlotDefKind};
 
 use crate::components::autocomplete::{
@@ -131,57 +131,9 @@ impl SlotPanel {
             Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
                 // Label and type indicator (grows and truncates)
                 flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
-                    let available_width = ui.available_width();
-                    let text_height = ui.text_style_height(&egui::TextStyle::Body);
-                    let (rect, _response) = ui.allocate_exact_size(
-                        egui::vec2(available_width, text_height),
-                        egui::Sense::hover(),
-                    );
-
-                    let type_text = " (text)";
-
-                    // Draw label (strong) and type (muted) with painter for truncation
-                    let painter = ui.painter();
-                    let font_id = egui::TextStyle::Body.resolve(ui.style());
-                    let text_color = ui.visuals().text_color();
-                    let muted_color = egui::Color32::from_rgb(108, 112, 134);
-
-                    // Create a galley for the full text to check if truncation is needed
-                    let full_text = format!("{}{}", label_owned, type_text);
-                    let galley =
-                        painter.layout_no_wrap(full_text.clone(), font_id.clone(), text_color);
-
-                    if galley.rect.width() > rect.width() {
-                        // Need truncation - use elided layout
-                        let job = egui::text::LayoutJob::simple(
-                            full_text.clone(),
-                            font_id.clone(),
-                            text_color,
-                            rect.width(),
-                        );
-                        let galley = painter.layout_job(job);
-                        painter.galley(rect.left_top(), galley, text_color);
-                    } else {
-                        // No truncation needed - draw with different colors
-                        painter.text(
-                            rect.left_center(),
-                            egui::Align2::LEFT_CENTER,
-                            &label_owned,
-                            font_id.clone(),
-                            text_color,
-                        );
-                        // Draw type text after the label
-                        let label_galley =
-                            painter.layout_no_wrap(label_owned.clone(), font_id.clone(), text_color);
-                        let type_x = rect.left() + label_galley.rect.width();
-                        painter.text(
-                            egui::pos2(type_x, rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            type_text,
-                            font_id,
-                            muted_color,
-                        );
-                    }
+                    ui.set_width(ui.available_width());
+                    let header_text = format!("{} {}", ICON_TEXT_AD, label_owned);
+                    ui.add(Label::new(header_text).truncate());
                 });
 
                 // Clear button (fixed size, only shown if there's content)
@@ -298,63 +250,21 @@ impl SlotPanel {
             Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
                 // Label and cardinality (grows and truncates)
                 flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
-                    let available_width = ui.available_width();
-                    let text_height = ui.text_style_height(&egui::TextStyle::Body);
-                    let (rect, _response) = ui.allocate_exact_size(
-                        egui::vec2(available_width, text_height),
-                        egui::Sense::hover(),
-                    );
+                    ui.set_width(ui.available_width());
 
-                    // Build the header text: "Label (cardinality)"
-                    let cardinality_text = match &cardinality_clone {
-                        Cardinality::One => " (single)".to_string(),
-                        Cardinality::Many { max: None } => " (multi)".to_string(),
+                    // Build the header text with icon based on cardinality
+                    let header_text = match &cardinality_clone {
+                        Cardinality::One => format!("{} {}", ICON_CHECK, label_owned),
+                        Cardinality::Many { max: None } => {
+                            format!("{} {}", ICON_DONE_ALL, label_owned)
+                        }
                         Cardinality::Many { max: Some(n) } => {
                             let count = items.len();
-                            format!(" ({}/{})", count, n)
+                            format!("{} {} ({}/{})", ICON_DONE_ALL, label_owned, count, n)
                         }
                     };
 
-                    // Draw label (strong) and cardinality (muted) with painter for truncation
-                    let painter = ui.painter();
-                    let font_id = egui::TextStyle::Body.resolve(ui.style());
-                    let text_color = ui.visuals().text_color();
-                    let muted_color = egui::Color32::from_rgb(108, 112, 134);
-
-                    // Create a galley for the full text to check if truncation is needed
-                    let full_text = format!("{}{}", label_owned, cardinality_text);
-                    let galley = painter.layout_no_wrap(full_text.clone(), font_id.clone(), text_color);
-
-                    if galley.rect.width() > rect.width() {
-                        // Need truncation - use elided layout
-                        let job = egui::text::LayoutJob::simple(
-                            full_text.clone(),
-                            font_id.clone(),
-                            text_color,
-                            rect.width(),
-                        );
-                        let galley = painter.layout_job(job);
-                        painter.galley(rect.left_top(), galley, text_color);
-                    } else {
-                        // No truncation needed - draw with different colors
-                        painter.text(
-                            rect.left_center(),
-                            egui::Align2::LEFT_CENTER,
-                            &label_owned,
-                            font_id.clone(),
-                            text_color,
-                        );
-                        // Draw cardinality text after the label
-                        let label_galley = painter.layout_no_wrap(label_owned.clone(), font_id.clone(), text_color);
-                        let cardinality_x = rect.left() + label_galley.rect.width();
-                        painter.text(
-                            egui::pos2(cardinality_x, rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            &cardinality_text,
-                            font_id,
-                            muted_color,
-                        );
-                    }
+                    ui.add(Label::new(header_text).truncate());
                 });
 
                 // Clear button (fixed size, only shown if there are values)
