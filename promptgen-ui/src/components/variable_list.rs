@@ -106,6 +106,8 @@ impl VariableList {
 
             // Variable sort button - cycles through None -> Ascending -> Descending -> None
             flex.add_ui(FlexItem::default(), |ui| {
+                let current_theme = theme::current(ui.ctx());
+                let is_active = *sort_order != VariableSortOrder::None;
                 let (icon, tooltip) = match sort_order {
                     VariableSortOrder::None => {
                         (ICON_SORT_BY_ALPHA.to_string(), "Sort variables A-Z")
@@ -119,7 +121,16 @@ impl VariableList {
                         "Clear variable sort",
                     ),
                 };
-                if ui.small_button(&icon).on_hover_text(tooltip).clicked() {
+                let fill = if is_active {
+                    current_theme.active_selected_bg()
+                } else {
+                    egui::Color32::TRANSPARENT
+                };
+                if ui
+                    .add(egui::Button::new(&icon).small().fill(fill))
+                    .on_hover_text(tooltip)
+                    .clicked()
+                {
                     *sort_order = match sort_order {
                         VariableSortOrder::None => VariableSortOrder::Ascending,
                         VariableSortOrder::Ascending => VariableSortOrder::Descending,
@@ -130,6 +141,8 @@ impl VariableList {
 
             // Option sort button - cycles through None -> Ascending -> Descending -> None
             flex.add_ui(FlexItem::default(), |ui| {
+                let current_theme = theme::current(ui.ctx());
+                let is_active = *option_sort_order != VariableSortOrder::None;
                 let (icon, tooltip) = match option_sort_order {
                     VariableSortOrder::None => (
                         format!("{}{}", ICON_MENU, ICON_SORT_BY_ALPHA),
@@ -144,7 +157,16 @@ impl VariableList {
                         "Clear option sort",
                     ),
                 };
-                if ui.small_button(&icon).on_hover_text(tooltip).clicked() {
+                let fill = if is_active {
+                    current_theme.active_selected_bg()
+                } else {
+                    egui::Color32::TRANSPARENT
+                };
+                if ui
+                    .add(egui::Button::new(&icon).small().fill(fill))
+                    .on_hover_text(tooltip)
+                    .clicked()
+                {
                     *option_sort_order = match option_sort_order {
                         VariableSortOrder::None => VariableSortOrder::Ascending,
                         VariableSortOrder::Ascending => VariableSortOrder::Descending,
@@ -190,6 +212,7 @@ impl VariableList {
     /// * `expand_all` - If Some, expand or collapse all groups
     /// * `config` - Configuration for the component
     /// * `library` - The library for search functionality (optional, for variable search)
+    #[allow(clippy::too_many_arguments)]
     pub fn show_groups(
         ui: &mut egui::Ui,
         groups: &[OptionGroup],

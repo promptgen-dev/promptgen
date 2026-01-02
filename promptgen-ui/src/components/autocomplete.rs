@@ -9,6 +9,38 @@ use crate::theme;
 use promptgen_core::Library;
 use promptgen_core::search::VariableSearchResult;
 
+/// Safely get a substring from start to end of string.
+/// Returns None if start is not a valid UTF-8 character boundary.
+fn safe_slice_from(s: &str, start: usize) -> Option<&str> {
+    if start <= s.len() && s.is_char_boundary(start) {
+        Some(&s[start..])
+    } else {
+        None
+    }
+}
+
+/// Safely get a substring from start of string to end position.
+/// Returns None if end is not a valid UTF-8 character boundary.
+fn safe_slice_to(s: &str, end: usize) -> Option<&str> {
+    if end <= s.len() && s.is_char_boundary(end) {
+        Some(&s[..end])
+    } else {
+        None
+    }
+}
+
+/// Truncate a string to approximately n characters, adding "..." if truncated.
+/// This is safe for multi-byte UTF-8 characters.
+fn truncate_chars(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_chars {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max_chars.saturating_sub(3)).collect();
+        format!("{}...", truncated)
+    }
+}
+
 /// Maximum number of completions to show in the popup
 const MAX_COMPLETIONS: usize = 10;
 
@@ -234,12 +266,8 @@ impl AutocompletePopup {
                                         let mut job = egui::text::LayoutJob::default();
                                         let current_theme = theme::current(ui.ctx());
 
-                                        // Truncate long options
-                                        let display_text = if text.len() > 50 {
-                                            format!("{}...", &text[..47])
-                                        } else {
-                                            text.clone()
-                                        };
+                                        // Truncate long options (safe for multi-byte UTF-8)
+                                        let display_text = truncate_chars(text, 50);
 
                                         // Add option text with match highlighting
                                         for (i, c) in display_text.chars().enumerate() {
@@ -393,12 +421,9 @@ pub fn apply_completion(
     };
 
     // Build the new content, preserving text before @ and after the query
-    let before = &content[..trigger_pos];
-    let after = if query_end <= content.len() {
-        &content[query_end..]
-    } else {
-        ""
-    };
+    // Use safe slicing to handle multi-byte UTF-8 characters
+    let before = safe_slice_to(content, trigger_pos).unwrap_or("");
+    let after = safe_slice_from(content, query_end).unwrap_or("");
 
     let new_content = format!("{}{}{}", before, completion_text, after);
 
@@ -419,8 +444,8 @@ pub fn check_autocomplete_trigger(content: &str, cursor_byte_pos: usize) -> Opti
         return None;
     }
 
-    // Look at the character just typed (before cursor)
-    let before_cursor = &content[..cursor_byte_pos];
+    // Safely get the substring before cursor (handles multi-byte UTF-8)
+    let before_cursor = safe_slice_to(content, cursor_byte_pos)?;
 
     // Check if the last character is @
     if before_cursor.ends_with('@') {
@@ -432,7 +457,9 @@ pub fn check_autocomplete_trigger(content: &str, cursor_byte_pos: usize) -> Opti
             return Some(at_pos);
         }
 
-        let prev_char = before_cursor[..at_pos].chars().last();
+        // Get the character before @ safely
+        let before_at = safe_slice_to(before_cursor, at_pos)?;
+        let prev_char = before_at.chars().last();
         match prev_char {
             None => Some(at_pos),
             Some(c) if c.is_whitespace() || c == '{' || c == '|' || c == '(' || c == ',' => {
@@ -453,10 +480,12 @@ pub fn find_autocomplete_context(content: &str, cursor_pos: usize) -> Option<usi
         return None;
     }
 
-    let before_cursor = &content[..cursor_pos];
+    // Safely get the substring before cursor (handles multi-byte UTF-8)
+    let before_cursor = safe_slice_to(content, cursor_pos)?;
 
     // Scan backwards to find @ that could start an autocomplete context
     // Stop at whitespace or certain delimiters
+    // Note: char_indices() returns byte indices at character boundaries, so at_pos is always valid
     let mut at_pos = None;
     for (i, c) in before_cursor.char_indices().rev() {
         if c == '@' {
@@ -484,7 +513,9 @@ pub fn find_autocomplete_context(content: &str, cursor_pos: usize) -> Option<usi
         return Some(at_pos);
     }
 
-    let prev_char = before_cursor[..at_pos].chars().last();
+    // at_pos came from char_indices() so it's a valid char boundary
+    let before_at = safe_slice_to(before_cursor, at_pos)?;
+    let prev_char = before_at.chars().last();
     match prev_char {
         None => Some(at_pos),
         Some(c) if c.is_whitespace() || c == '{' || c == '|' || c == '(' || c == ',' => {
