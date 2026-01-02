@@ -522,6 +522,18 @@ impl AppState {
             .unwrap_or_default()
     }
 
+    /// Clear all slot values
+    pub fn clear_all_slot_values(&mut self) {
+        let had_values = self.slot_values.values().any(|v| !v.is_empty());
+        for values in self.slot_values.values_mut() {
+            values.clear();
+        }
+        if had_values {
+            self.mark_active_tab_dirty();
+            self.request_render();
+        }
+    }
+
     // ==================== Variable Editor Methods ====================
 
     /// Enter variable editor mode for an existing variable

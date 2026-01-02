@@ -621,6 +621,11 @@ impl eframe::App for PromptGenApp {
                                         }
                                         self.state.request_render();
                                     }
+
+                                    ui.add_space(16.0);
+                                    if ui.button("Clear All").clicked() {
+                                        self.state.clear_all_slot_values();
+                                    }
                                 });
 
                                 SlotPanel::show(ui, &mut self.state);
