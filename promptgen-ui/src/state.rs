@@ -588,6 +588,17 @@ impl AppState {
         }
     }
 
+    /// Clear a single slot's values
+    pub fn clear_slot(&mut self, slot_label: &str) {
+        if let Some(values) = self.slot_values.get_mut(slot_label)
+            && !values.is_empty()
+        {
+            values.clear();
+            self.mark_active_tab_dirty();
+            self.request_render();
+        }
+    }
+
     // ==================== Variable Editor Methods ====================
 
     /// Enter variable editor mode for an existing variable

@@ -2,6 +2,8 @@
 
 use egui::{Align, Id, Label, Layout, UiBuilder, Vec2};
 use egui_dnd::dnd;
+use egui_flex::{Flex, FlexItem};
+use egui_material_icons::icons::ICON_CLOSE;
 use promptgen_core::{Cardinality, Node, ParseResult, SlotDefKind};
 
 use crate::components::autocomplete::{
@@ -118,16 +120,82 @@ impl SlotPanel {
             state.request_render();
         }
 
+        // Track if clear button was clicked
+        let clear_clicked = std::cell::Cell::new(false);
+        let has_content = !state.get_textarea_value(&label_owned).is_empty();
+
         let frame_response = FocusableFrame::new(is_focused).show(ui, |ui| {
             ui.set_width(ui.available_width());
 
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(&label_owned).strong());
-                ui.label(
-                    egui::RichText::new("(text)")
-                        .small()
-                        .color(egui::Color32::from_rgb(108, 112, 134)),
-                );
+            // Header with label, type indicator, and clear button using flex layout
+            Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
+                // Label and type indicator (grows and truncates)
+                flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
+                    let available_width = ui.available_width();
+                    let text_height = ui.text_style_height(&egui::TextStyle::Body);
+                    let (rect, _response) = ui.allocate_exact_size(
+                        egui::vec2(available_width, text_height),
+                        egui::Sense::hover(),
+                    );
+
+                    let type_text = " (text)";
+
+                    // Draw label (strong) and type (muted) with painter for truncation
+                    let painter = ui.painter();
+                    let font_id = egui::TextStyle::Body.resolve(ui.style());
+                    let text_color = ui.visuals().text_color();
+                    let muted_color = egui::Color32::from_rgb(108, 112, 134);
+
+                    // Create a galley for the full text to check if truncation is needed
+                    let full_text = format!("{}{}", label_owned, type_text);
+                    let galley =
+                        painter.layout_no_wrap(full_text.clone(), font_id.clone(), text_color);
+
+                    if galley.rect.width() > rect.width() {
+                        // Need truncation - use elided layout
+                        let job = egui::text::LayoutJob::simple(
+                            full_text.clone(),
+                            font_id.clone(),
+                            text_color,
+                            rect.width(),
+                        );
+                        let galley = painter.layout_job(job);
+                        painter.galley(rect.left_top(), galley, text_color);
+                    } else {
+                        // No truncation needed - draw with different colors
+                        painter.text(
+                            rect.left_center(),
+                            egui::Align2::LEFT_CENTER,
+                            &label_owned,
+                            font_id.clone(),
+                            text_color,
+                        );
+                        // Draw type text after the label
+                        let label_galley =
+                            painter.layout_no_wrap(label_owned.clone(), font_id.clone(), text_color);
+                        let type_x = rect.left() + label_galley.rect.width();
+                        painter.text(
+                            egui::pos2(type_x, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            type_text,
+                            font_id,
+                            muted_color,
+                        );
+                    }
+                });
+
+                // Clear button (fixed size, only shown if there's content)
+                if has_content {
+                    flex.add_ui(FlexItem::default(), |ui| {
+                        if ui
+                            .small_button(ICON_CLOSE)
+                            .on_hover_text("Clear slot")
+                            .clicked()
+                        {
+                            clear_clicked.set(true);
+                        }
+                    });
+                }
             });
 
             let config = PromptEditorConfig {
@@ -166,6 +234,11 @@ impl SlotPanel {
         });
 
         let result = frame_response.inner;
+
+        // Handle clear button
+        if clear_clicked.get() {
+            state.clear_slot(&label_owned);
+        }
 
         // Track focus - either from TextEdit gaining focus or clicking anywhere in frame
         if (result.response.has_focus() || frame_response.clicked) && !is_focused {
@@ -215,34 +288,86 @@ impl SlotPanel {
         // Track value to remove
         let to_remove = std::cell::RefCell::new(None::<String>);
 
+        // Track if clear button was clicked
+        let clear_clicked = std::cell::Cell::new(false);
+
         let frame_response = FocusableFrame::new(is_focused).show(ui, |ui| {
             ui.set_width(ui.available_width());
 
-            // Header with label and cardinality info
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(&label_owned).strong());
-
-                let cardinality_text = match &cardinality_clone {
-                    Cardinality::One => "(single)",
-                    Cardinality::Many { max: None } => "(multi)",
-                    Cardinality::Many { max: Some(n) } => {
-                        // Show count/max
-                        let count = items.len();
-                        ui.label(
-                            egui::RichText::new(format!("{}/{}", count, n))
-                                .small()
-                                .color(egui::Color32::from_rgb(108, 112, 134)),
-                        );
-                        ""
-                    }
-                };
-
-                if !cardinality_text.is_empty() {
-                    ui.label(
-                        egui::RichText::new(cardinality_text)
-                            .small()
-                            .color(egui::Color32::from_rgb(108, 112, 134)),
+            // Header with label, cardinality info, and clear button using flex layout
+            Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
+                // Label and cardinality (grows and truncates)
+                flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
+                    let available_width = ui.available_width();
+                    let text_height = ui.text_style_height(&egui::TextStyle::Body);
+                    let (rect, _response) = ui.allocate_exact_size(
+                        egui::vec2(available_width, text_height),
+                        egui::Sense::hover(),
                     );
+
+                    // Build the header text: "Label (cardinality)"
+                    let cardinality_text = match &cardinality_clone {
+                        Cardinality::One => " (single)".to_string(),
+                        Cardinality::Many { max: None } => " (multi)".to_string(),
+                        Cardinality::Many { max: Some(n) } => {
+                            let count = items.len();
+                            format!(" ({}/{})", count, n)
+                        }
+                    };
+
+                    // Draw label (strong) and cardinality (muted) with painter for truncation
+                    let painter = ui.painter();
+                    let font_id = egui::TextStyle::Body.resolve(ui.style());
+                    let text_color = ui.visuals().text_color();
+                    let muted_color = egui::Color32::from_rgb(108, 112, 134);
+
+                    // Create a galley for the full text to check if truncation is needed
+                    let full_text = format!("{}{}", label_owned, cardinality_text);
+                    let galley = painter.layout_no_wrap(full_text.clone(), font_id.clone(), text_color);
+
+                    if galley.rect.width() > rect.width() {
+                        // Need truncation - use elided layout
+                        let job = egui::text::LayoutJob::simple(
+                            full_text.clone(),
+                            font_id.clone(),
+                            text_color,
+                            rect.width(),
+                        );
+                        let galley = painter.layout_job(job);
+                        painter.galley(rect.left_top(), galley, text_color);
+                    } else {
+                        // No truncation needed - draw with different colors
+                        painter.text(
+                            rect.left_center(),
+                            egui::Align2::LEFT_CENTER,
+                            &label_owned,
+                            font_id.clone(),
+                            text_color,
+                        );
+                        // Draw cardinality text after the label
+                        let label_galley = painter.layout_no_wrap(label_owned.clone(), font_id.clone(), text_color);
+                        let cardinality_x = rect.left() + label_galley.rect.width();
+                        painter.text(
+                            egui::pos2(cardinality_x, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            &cardinality_text,
+                            font_id,
+                            muted_color,
+                        );
+                    }
+                });
+
+                // Clear button (fixed size, only shown if there are values)
+                if !items.is_empty() {
+                    flex.add_ui(FlexItem::default(), |ui| {
+                        if ui
+                            .small_button(ICON_CLOSE)
+                            .on_hover_text("Clear slot")
+                            .clicked()
+                        {
+                            clear_clicked.set(true);
+                        }
+                    });
                 }
             });
 
@@ -371,8 +496,11 @@ impl SlotPanel {
             }
         });
 
-        // Handle removal
-        if let Some(value) = to_remove.borrow().as_ref() {
+        // Handle clear button
+        if clear_clicked.get() {
+            state.clear_slot(&label_owned);
+        } else if let Some(value) = to_remove.borrow().as_ref() {
+            // Handle single chip removal
             state.remove_slot_value(&label_owned, value);
             state.request_render();
         } else {
@@ -384,8 +512,9 @@ impl SlotPanel {
             }
         }
 
-        // Focus slot when clicking anywhere in frame (except on chip X buttons)
-        if frame_response.clicked && can_open_picker && !chip_removed.get() {
+        // Focus slot when clicking anywhere in frame (except on chip X buttons or clear button)
+        if frame_response.clicked && can_open_picker && !chip_removed.get() && !clear_clicked.get()
+        {
             state.focus_slot(label);
         }
     }
