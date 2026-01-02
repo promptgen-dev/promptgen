@@ -113,7 +113,7 @@ prompts:
 
 #[test]
 fn prompt_extracts_slots() {
-    use promptgen_core::parse_prompt;
+    use promptgen_core::{SlotDefaults, parse_prompt};
 
     let lib = lib(r#"
 variables: []
@@ -124,7 +124,7 @@ prompts:
 
     let prompt = lib.prompts.iter().find(|p| p.name == "Greeting").unwrap();
     let ast = parse_prompt(&prompt.content).unwrap();
-    let slots = lib.get_slot_definitions(&ast);
+    let slots = lib.get_slot_definitions(&ast, &SlotDefaults::default());
 
     assert_eq!(slots.len(), 2);
     assert!(slots.iter().any(|s| s.label == "Name"));

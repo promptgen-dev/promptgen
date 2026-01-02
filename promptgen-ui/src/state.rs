@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use promptgen_core::{
     Cardinality, EvalContext, Library, ParseResult, PickSource, RenderError, SlotDefKind,
-    SlotDefinition, SlotValue, render,
+    SlotDefaults, SlotDefinition, SlotValue, render,
 };
 use serde::{Deserialize, Serialize};
 
@@ -351,7 +351,7 @@ impl AppState {
         if let Some(result) = &self.parse_result
             && let Some(ast) = &result.ast
         {
-            return self.library.get_slot_definitions(ast);
+            return self.library.get_slot_definitions(ast, &SlotDefaults::default());
         }
         Vec::new()
     }

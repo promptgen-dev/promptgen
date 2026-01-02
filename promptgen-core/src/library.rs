@@ -7,7 +7,7 @@ use std::collections::HashMap;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::ast::{LibraryRef, Node, Prompt, SlotDefinition};
+use crate::ast::{LibraryRef, Node, Prompt, SlotDefaults, SlotDefinition};
 use crate::parser::parse_prompt;
 use crate::span::Span;
 
@@ -152,7 +152,8 @@ impl Library {
 
     /// Extract slot definitions from a parsed prompt.
     /// Returns normalized SlotDefinition structs with full type information.
-    pub fn get_slot_definitions(&self, ast: &Prompt) -> Vec<SlotDefinition> {
+    /// The `defaults` parameter provides fallback values for separator and suffix.
+    pub fn get_slot_definitions(&self, ast: &Prompt, defaults: &SlotDefaults) -> Vec<SlotDefinition> {
         let mut slots = Vec::new();
         let mut seen_labels = std::collections::HashSet::new();
 
@@ -161,7 +162,7 @@ impl Library {
                 let label = &slot_block.label.0;
                 // Only include first occurrence of each slot label
                 if seen_labels.insert(label.clone())
-                    && let Ok(def) = slot_block.to_definition()
+                    && let Ok(def) = slot_block.to_definition_with_defaults(defaults)
                 {
                     slots.push(def);
                 }

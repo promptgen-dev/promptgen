@@ -84,6 +84,16 @@ pub struct PickSlot {
 impl PickSlot {
     /// Normalize this pick slot into a SlotDefKind for evaluation.
     pub fn to_definition(&self) -> Result<SlotDefKind, SlotNormError> {
+        self.to_definition_with_defaults(&SlotDefaults::default())
+    }
+
+    /// Normalize this pick slot with custom defaults.
+    ///
+    /// The defaults are used when the slot doesn't specify its own values.
+    pub fn to_definition_with_defaults(
+        &self,
+        defaults: &SlotDefaults,
+    ) -> Result<SlotDefKind, SlotNormError> {
         let sources: Vec<PickSource> = self.sources.iter().map(|(s, _)| s.clone()).collect();
 
         // Process operators to determine cardinality, separator, and suffix
@@ -117,11 +127,15 @@ impl PickSlot {
             }
         }
 
+        // Use slot-specific values, falling back to defaults
+        let final_sep = sep.unwrap_or_else(|| defaults.separator().to_string());
+        let final_suffix = suffix.or_else(|| defaults.suffix.clone());
+
         Ok(SlotDefKind::Pick {
             sources,
             cardinality: cardinality.unwrap_or_default(),
-            sep: sep.unwrap_or_else(|| ", ".to_string()),
-            suffix,
+            sep: final_sep,
+            suffix: final_suffix,
         })
     }
 }
@@ -217,6 +231,52 @@ impl Default for Cardinality {
     }
 }
 
+/// Default values for slot normalization.
+///
+/// These defaults are applied when a slot doesn't specify its own values.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SlotDefaults {
+    /// Default separator for `many` slots (default: ", ").
+    pub sep: Option<String>,
+    /// Default suffix appended when values are selected (default: None).
+    pub suffix: Option<String>,
+}
+
+impl SlotDefaults {
+    /// Create slot defaults with a separator.
+    pub fn with_sep(sep: impl Into<String>) -> Self {
+        Self {
+            sep: Some(sep.into()),
+            suffix: None,
+        }
+    }
+
+    /// Create slot defaults with a suffix.
+    pub fn with_suffix(suffix: impl Into<String>) -> Self {
+        Self {
+            sep: None,
+            suffix: Some(suffix.into()),
+        }
+    }
+
+    /// Set the default separator.
+    pub fn sep(mut self, sep: impl Into<String>) -> Self {
+        self.sep = Some(sep.into());
+        self
+    }
+
+    /// Set the default suffix.
+    pub fn suffix(mut self, suffix: impl Into<String>) -> Self {
+        self.suffix = Some(suffix.into());
+        self
+    }
+
+    /// Get the separator, falling back to ", " if not set.
+    pub fn separator(&self) -> &str {
+        self.sep.as_deref().unwrap_or(", ")
+    }
+}
+
 /// Error when normalizing a SlotBlock to SlotDefinition.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum SlotNormError {
@@ -231,6 +291,16 @@ pub enum SlotNormError {
 impl SlotBlock {
     /// Normalize this slot block into a SlotDefinition for evaluation.
     pub fn to_definition(&self) -> Result<SlotDefinition, SlotNormError> {
+        self.to_definition_with_defaults(&SlotDefaults::default())
+    }
+
+    /// Normalize this slot block with custom defaults.
+    ///
+    /// The defaults are used when a pick slot doesn't specify its own values.
+    pub fn to_definition_with_defaults(
+        &self,
+        defaults: &SlotDefaults,
+    ) -> Result<SlotDefinition, SlotNormError> {
         let label = self.label.0.clone();
 
         match &self.kind.0 {
@@ -238,51 +308,10 @@ impl SlotBlock {
                 label,
                 kind: SlotDefKind::Textarea,
             }),
-            SlotKind::Pick(pick) => {
-                let sources: Vec<PickSource> =
-                    pick.sources.iter().map(|(s, _)| s.clone()).collect();
-
-                // Process operators to determine cardinality, separator, and suffix
-                let mut cardinality: Option<Cardinality> = None;
-                let mut sep: Option<String> = None;
-                let mut suffix: Option<String> = None;
-
-                for (op, _span) in &pick.operators {
-                    match op {
-                        PickOperator::One(spec) => {
-                            if cardinality.is_some() {
-                                if matches!(cardinality, Some(Cardinality::One)) {
-                                    return Err(SlotNormError::DuplicateOne);
-                                }
-                                return Err(SlotNormError::ConflictingOperators);
-                            }
-                            cardinality = Some(Cardinality::One);
-                            suffix = spec.suffix.clone();
-                        }
-                        PickOperator::Many(spec) => {
-                            if cardinality.is_some() {
-                                if matches!(cardinality, Some(Cardinality::Many { .. })) {
-                                    return Err(SlotNormError::DuplicateMany);
-                                }
-                                return Err(SlotNormError::ConflictingOperators);
-                            }
-                            cardinality = Some(Cardinality::Many { max: spec.max });
-                            sep = spec.sep.clone();
-                            suffix = spec.suffix.clone();
-                        }
-                    }
-                }
-
-                Ok(SlotDefinition {
-                    label,
-                    kind: SlotDefKind::Pick {
-                        sources,
-                        cardinality: cardinality.unwrap_or_default(),
-                        sep: sep.unwrap_or_else(|| ", ".to_string()),
-                        suffix,
-                    },
-                })
-            }
+            SlotKind::Pick(pick) => Ok(SlotDefinition {
+                label,
+                kind: pick.to_definition_with_defaults(defaults)?,
+            }),
         }
     }
 }

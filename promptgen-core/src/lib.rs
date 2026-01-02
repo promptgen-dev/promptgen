@@ -9,8 +9,8 @@ pub mod span;
 
 // Re-exports for convenience
 pub use ast::{
-    Cardinality, LibraryRef, Node, OptionItem, PickSource, PickSlot, Prompt, SlotBlock, SlotDefKind,
-    SlotDefinition, SlotKind, Spanned,
+    Cardinality, LibraryRef, Node, OptionItem, PickSource, PickSlot, Prompt, SlotBlock, SlotDefaults,
+    SlotDefKind, SlotDefinition, SlotKind, Spanned,
 };
 
 // Eval module exports
