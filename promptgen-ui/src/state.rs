@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use promptgen_core::{
     Cardinality, EvalContext, Library, ParseResult, PickSource, RenderError, SlotDefKind,
@@ -232,6 +232,10 @@ pub struct AppState {
     pub slot_picker_search_query: String,
     pub editor_focus: EditorFocus,
 
+    // Slot manual edit mode (keyed by slot label)
+    pub slot_manual_edit: HashSet<String>,
+    pub slot_manual_edit_text: HashMap<String, String>,
+
     // Variable Editor State
     pub editor_mode: EditorMode,
     pub variable_editor_name: String,
@@ -276,6 +280,8 @@ impl Default for AppState {
             search_query: String::new(),
             slot_picker_search_query: String::new(),
             editor_focus: EditorFocus::default(),
+            slot_manual_edit: HashSet::new(),
+            slot_manual_edit_text: HashMap::new(),
             editor_mode: EditorMode::default(),
             variable_editor_name: String::new(),
             variable_editor_content: String::new(),
@@ -596,6 +602,82 @@ impl AppState {
             values.clear();
             self.mark_active_tab_dirty();
             self.request_render();
+        }
+    }
+
+    // ==================== Slot Manual Edit Mode ====================
+
+    /// Check if a slot is in manual edit mode
+    pub fn is_slot_manual_edit(&self, slot_label: &str) -> bool {
+        self.slot_manual_edit.contains(slot_label)
+    }
+
+    /// Get the manual edit text for a slot
+    pub fn get_slot_manual_edit_text(&self, slot_label: &str) -> String {
+        self.slot_manual_edit_text
+            .get(slot_label)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Set the manual edit text for a slot
+    pub fn set_slot_manual_edit_text(&mut self, slot_label: &str, text: String) {
+        self.slot_manual_edit_text
+            .insert(slot_label.to_string(), text);
+    }
+
+    /// Enter manual edit mode for a slot, converting current values to text
+    pub fn enter_slot_manual_edit(&mut self, slot_label: &str, separator: &str) {
+        if !self.slot_manual_edit.contains(slot_label) {
+            // Convert current values to text
+            let values = self
+                .slot_values
+                .get(slot_label)
+                .cloned()
+                .unwrap_or_default();
+            let text = values.join(separator);
+            self.slot_manual_edit_text
+                .insert(slot_label.to_string(), text);
+            self.slot_manual_edit.insert(slot_label.to_string());
+        }
+    }
+
+    /// Exit manual edit mode for a slot, converting text back to values
+    /// For single-select: just trim the text as a single value
+    /// For multi-select: split by separator, trim each, filter empties
+    pub fn exit_slot_manual_edit(
+        &mut self,
+        slot_label: &str,
+        separator: &str,
+        is_single_select: bool,
+    ) {
+        if self.slot_manual_edit.remove(slot_label) {
+            if let Some(text) = self.slot_manual_edit_text.remove(slot_label) {
+                let new_values = if is_single_select {
+                    // For single-select, just use the trimmed text as one value
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        vec![]
+                    } else {
+                        vec![trimmed.to_string()]
+                    }
+                } else {
+                    // For multi-select, split by separator
+                    text.split(separator)
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                };
+
+                // Update the slot values
+                if let Some(values) = self.slot_values.get_mut(slot_label) {
+                    *values = new_values;
+                } else {
+                    self.slot_values.insert(slot_label.to_string(), new_values);
+                }
+                self.mark_active_tab_dirty();
+                self.request_render();
+            }
         }
     }
 
