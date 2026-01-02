@@ -118,6 +118,9 @@ pub struct PromptTab {
     pub content: String,
     /// Slot values for this tab (independent per tab)
     pub slots: HashMap<String, SlotValue>,
+    /// Default separator and suffix for slots
+    #[serde(default)]
+    pub slot_defaults: SlotDefaults,
     /// Where this tab originated from
     pub source: PromptSource,
     /// Whether this tab has unsaved changes
@@ -131,6 +134,7 @@ impl Default for PromptTab {
             name: "Prompt 1".to_string(),
             content: String::new(),
             slots: HashMap::new(),
+            slot_defaults: SlotDefaults::default(),
             source: PromptSource::New,
             dirty: false,
         }
@@ -144,6 +148,7 @@ impl PromptTab {
             name,
             content: String::new(),
             slots: HashMap::new(),
+            slot_defaults: SlotDefaults::default(),
             source: PromptSource::New,
             dirty: false,
         }
@@ -154,11 +159,13 @@ impl PromptTab {
         name: String,
         content: String,
         slots: HashMap<String, SlotValue>,
+        slot_defaults: SlotDefaults,
     ) -> Self {
         Self {
             name: name.clone(),
             content,
             slots,
+            slot_defaults,
             source: PromptSource::FromLibrary {
                 original_name: name,
             },
@@ -296,6 +303,11 @@ impl AppState {
 
             let mut ctx = EvalContext::with_seed(&self.library, seed);
 
+            // Set slot defaults from active tab
+            if let Some(tab) = self.get_active_tab() {
+                ctx.set_slot_defaults(tab.slot_defaults.clone());
+            }
+
             // Set slot overrides (multi-value)
             for (name, values) in &self.slot_values {
                 if !values.is_empty() {
@@ -351,7 +363,11 @@ impl AppState {
         if let Some(result) = &self.parse_result
             && let Some(ast) = &result.ast
         {
-            return self.library.get_slot_definitions(ast, &SlotDefaults::default());
+            let defaults = self
+                .get_active_tab()
+                .map(|t| t.slot_defaults.clone())
+                .unwrap_or_default();
+            return self.library.get_slot_definitions(ast, &defaults);
         }
         Vec::new()
     }
@@ -1104,6 +1120,7 @@ impl AppState {
             prompt.name.clone(),
             prompt.content.clone(),
             prompt.slots.clone(),
+            prompt.slot_defaults.clone(),
         );
 
         self.prompt_tabs.push(tab);
@@ -1148,6 +1165,7 @@ impl AppState {
         let tab_name = tab.name.clone();
         let tab_content = tab.content.clone();
         let tab_slots = tab.slots.clone();
+        let tab_slot_defaults = tab.slot_defaults.clone();
         let tab_source = tab.source.clone();
 
         // Create or update the library prompt
@@ -1158,6 +1176,7 @@ impl AppState {
                     name: tab_name.clone(),
                     content: tab_content,
                     slots: tab_slots,
+                    slot_defaults: tab_slot_defaults,
                 };
                 self.library.prompts.push(saved_prompt);
 
@@ -1183,6 +1202,7 @@ impl AppState {
                     }
                     prompt.content = tab_content;
                     prompt.slots = tab_slots;
+                    prompt.slot_defaults = tab_slot_defaults;
 
                     // Update the source to reflect any name change
                     if let Some(tab) = self.prompt_tabs.get_mut(idx) {
@@ -1197,6 +1217,7 @@ impl AppState {
                         name: tab_name.clone(),
                         content: tab_content,
                         slots: tab_slots,
+                        slot_defaults: tab_slot_defaults,
                     };
                     self.library.prompts.push(saved_prompt);
 

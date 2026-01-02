@@ -8,7 +8,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ast::{LibraryRef, Node, OptionItem};
+use crate::ast::{LibraryRef, Node, OptionItem, SlotDefaults};
 use crate::library::{Library, PromptVariable, SavedPrompt, SlotValue};
 
 /// Error type for I/O operations.
@@ -80,6 +80,9 @@ pub struct PromptDto {
     /// Slot values for reproducibility.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub slots: HashMap<String, SlotValueDto>,
+    /// Default separator and suffix for slots in this prompt.
+    #[serde(default, skip_serializing_if = "SlotDefaults::is_default")]
+    pub slot_defaults: SlotDefaults,
 }
 
 /// DTO for a complete library (single-file format).
@@ -114,6 +117,7 @@ impl From<PromptDto> for SavedPrompt {
             name: dto.name,
             content: dto.content,
             slots: dto.slots.into_iter().map(|(k, v)| (k, v.into())).collect(),
+            slot_defaults: dto.slot_defaults,
         }
     }
 }
@@ -141,6 +145,7 @@ impl From<&SavedPrompt> for PromptDto {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.into()))
                 .collect(),
+            slot_defaults: prompt.slot_defaults.clone(),
         }
     }
 }

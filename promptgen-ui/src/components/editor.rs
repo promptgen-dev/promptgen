@@ -13,9 +13,6 @@ pub struct EditorPanel;
 impl EditorPanel {
     /// Render the editor panel.
     pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
-        ui.heading("Editor");
-        ui.separator();
-
         let config = PromptEditorConfig {
             id: MAIN_EDITOR_ID.to_string(),
             min_lines: 5,

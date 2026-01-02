@@ -1,5 +1,8 @@
 use crate::span::Span;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// A parsed prompt containing a sequence of nodes.
 #[derive(Debug, Clone)]
 pub struct Prompt {
@@ -235,6 +238,7 @@ impl Default for Cardinality {
 ///
 /// These defaults are applied when a slot doesn't specify its own values.
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SlotDefaults {
     /// Default separator for `many` slots (default: ", ").
     pub sep: Option<String>,
@@ -274,6 +278,11 @@ impl SlotDefaults {
     /// Get the separator, falling back to ", " if not set.
     pub fn separator(&self) -> &str {
         self.sep.as_deref().unwrap_or(", ")
+    }
+
+    /// Check if this is the default (empty) configuration.
+    pub fn is_default(&self) -> bool {
+        self.sep.is_none() && self.suffix.is_none()
     }
 }
 

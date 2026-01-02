@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use rand::prelude::*;
 
-use crate::ast::{LibraryRef, Node, OptionItem, PickOperator, PickSlot, Prompt, SlotKind};
+use crate::ast::{LibraryRef, Node, OptionItem, PickOperator, PickSlot, Prompt, SlotDefaults, SlotKind};
 use crate::library::Library;
 use crate::parser::parse_prompt;
 
@@ -26,6 +26,8 @@ pub struct EvalContext<'a, R: Rng = StdRng> {
     /// For `| one` slots, provide a single-element vec.
     /// For `| many` slots, provide multiple values.
     pub slot_overrides: HashMap<String, Vec<String>>,
+    /// Default separator and suffix for slots.
+    pub slot_defaults: SlotDefaults,
     /// Stack of variable names being evaluated (for cycle detection).
     eval_stack: Vec<String>,
 }
@@ -39,6 +41,7 @@ impl<'a> EvalContext<'a, StdRng> {
             library,
             rng: StdRng::from_os_rng(),
             slot_overrides: HashMap::new(),
+            slot_defaults: SlotDefaults::default(),
             eval_stack: Vec::new(),
         }
     }
@@ -49,6 +52,7 @@ impl<'a> EvalContext<'a, StdRng> {
             library,
             rng: StdRng::seed_from_u64(seed),
             slot_overrides: HashMap::new(),
+            slot_defaults: SlotDefaults::default(),
             eval_stack: Vec::new(),
         }
     }
@@ -61,8 +65,14 @@ impl<'a, R: Rng> EvalContext<'a, R> {
             library,
             rng,
             slot_overrides: HashMap::new(),
+            slot_defaults: SlotDefaults::default(),
             eval_stack: Vec::new(),
         }
+    }
+
+    /// Set the slot defaults (separator and suffix fallbacks).
+    pub fn set_slot_defaults(&mut self, defaults: SlotDefaults) {
+        self.slot_defaults = defaults;
     }
 
     /// Add a slot override with a single value.
@@ -251,8 +261,8 @@ fn eval_pick_slot_value<R: Rng>(
     ctx: &mut EvalContext<'_, R>,
     chosen_options: &mut Vec<ChosenOption>,
 ) -> Result<String, RenderError> {
-    // Determine cardinality, separator, and suffix from operators
-    let (is_one, max, separator, suffix) = extract_pick_constraints(pick);
+    // Determine cardinality, separator, and suffix from operators (with defaults as fallback)
+    let (is_one, max, separator, suffix) = extract_pick_constraints(pick, &ctx.slot_defaults);
 
     let count = values.len();
 
@@ -295,29 +305,39 @@ fn eval_pick_slot_value<R: Rng>(
 }
 
 /// Extract cardinality constraints and separator from pick operators.
-/// Returns (is_one, max_for_many, separator)
-/// Extracted constraints from pick operators: (is_one, max, separator, suffix)
-fn extract_pick_constraints(pick: &PickSlot) -> (bool, Option<u32>, String, Option<String>) {
+/// Returns (is_one, max_for_many, separator, suffix)
+/// Uses the provided defaults as fallbacks when the slot doesn't specify values.
+fn extract_pick_constraints(pick: &PickSlot, defaults: &SlotDefaults) -> (bool, Option<u32>, String, Option<String>) {
     let mut is_one = false;
     let mut max: Option<u32> = None;
-    let mut separator = ", ".to_string(); // Default separator
+    let mut separator: Option<String> = None;
     let mut suffix: Option<String> = None;
 
     for (op, _span) in &pick.operators {
         match op {
             PickOperator::One(spec) => {
                 is_one = true;
-                suffix = spec.suffix.clone();
+                if spec.suffix.is_some() {
+                    suffix = spec.suffix.clone();
+                }
             }
             PickOperator::Many(spec) => {
                 max = spec.max;
-                if let Some(sep) = &spec.sep {
-                    separator = sep.clone();
+                if spec.sep.is_some() {
+                    separator = spec.sep.clone();
                 }
-                suffix = spec.suffix.clone();
+                if spec.suffix.is_some() {
+                    suffix = spec.suffix.clone();
+                }
             }
         }
     }
+
+    // Apply defaults as fallbacks
+    let separator = separator
+        .or_else(|| defaults.sep.clone())
+        .unwrap_or_else(|| ", ".to_string());
+    let suffix = suffix.or_else(|| defaults.suffix.clone());
 
     (is_one, max, separator, suffix)
 }

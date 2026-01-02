@@ -234,6 +234,9 @@ pub struct SavedPrompt {
     /// Slot values for reproducibility - maps slot label to its value.
     #[cfg_attr(feature = "serde", serde(default))]
     pub slots: HashMap<String, SlotValue>,
+    /// Default separator and suffix for slots in this prompt.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "SlotDefaults::is_default"))]
+    pub slot_defaults: SlotDefaults,
 }
 
 impl SavedPrompt {
@@ -243,6 +246,7 @@ impl SavedPrompt {
             name: name.into(),
             content: content.into(),
             slots: HashMap::new(),
+            slot_defaults: SlotDefaults::default(),
         }
     }
 
@@ -256,6 +260,7 @@ impl SavedPrompt {
             name: name.into(),
             content: content.into(),
             slots,
+            slot_defaults: SlotDefaults::default(),
         }
     }
 }

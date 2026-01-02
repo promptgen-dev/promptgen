@@ -578,7 +578,51 @@ impl eframe::App for PromptGenApp {
                             let has_slots = !self.state.get_slot_definitions().is_empty();
                             if has_slots {
                                 ui.separator();
-                                ui.heading("Slots");
+
+                                // Slots header with config
+                                ui.horizontal(|ui| {
+                                    ui.heading("Slots");
+                                    ui.add_space(16.0);
+
+                                    // Get current defaults from active tab
+                                    let (mut sep, mut suffix) =
+                                        if let Some(tab) = self.state.get_active_tab() {
+                                            (
+                                                tab.slot_defaults.sep.clone().unwrap_or_default(),
+                                                tab.slot_defaults.suffix.clone().unwrap_or_default(),
+                                            )
+                                        } else {
+                                            (String::new(), String::new())
+                                        };
+
+                                    ui.label("Default Separator:");
+                                    let sep_response = ui.add(
+                                        egui::TextEdit::singleline(&mut sep)
+                                            .desired_width(60.0)
+                                            .hint_text(", "),
+                                    );
+
+                                    ui.add_space(8.0);
+                                    ui.label("Default Suffix:");
+                                    let suffix_response = ui.add(
+                                        egui::TextEdit::singleline(&mut suffix)
+                                            .desired_width(60.0)
+                                            .hint_text("none"),
+                                    );
+
+                                    // Update state if changed
+                                    if sep_response.changed() || suffix_response.changed() {
+                                        if let Some(tab) = self.state.get_active_tab_mut() {
+                                            tab.slot_defaults.sep =
+                                                if sep.is_empty() { None } else { Some(sep) };
+                                            tab.slot_defaults.suffix =
+                                                if suffix.is_empty() { None } else { Some(suffix) };
+                                            tab.dirty = true;
+                                        }
+                                        self.state.request_render();
+                                    }
+                                });
+
                                 SlotPanel::show(ui, &mut self.state);
                             }
                         });
