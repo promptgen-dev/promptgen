@@ -349,11 +349,8 @@ fn one_args_parser<'src>()
         .map(|args| {
             let mut spec = OneSpec::default();
             for (key, value) in args {
-                match key.as_str() {
-                    "suffix" => {
-                        spec.suffix = Some(value);
-                    }
-                    _ => {} // Ignore unknown args
+                if key.as_str() == "suffix" {
+                    spec.suffix = Some(value);
                 }
             }
             spec

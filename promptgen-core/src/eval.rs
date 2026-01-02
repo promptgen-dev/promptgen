@@ -12,7 +12,9 @@ use std::collections::HashMap;
 
 use rand::prelude::*;
 
-use crate::ast::{LibraryRef, Node, OptionItem, PickOperator, PickSlot, Prompt, SlotDefaults, SlotKind};
+use crate::ast::{
+    LibraryRef, Node, OptionItem, PickOperator, PickSlot, Prompt, SlotDefaults, SlotKind,
+};
 use crate::library::Library;
 use crate::parser::parse_prompt;
 
@@ -295,10 +297,10 @@ fn eval_pick_slot_value<R: Rng>(
     let mut result = evaluated.join(&separator);
 
     // Append suffix if there are any values
-    if !result.is_empty() {
-        if let Some(suffix) = suffix {
-            result.push_str(&suffix);
-        }
+    if !result.is_empty()
+        && let Some(suffix) = suffix
+    {
+        result.push_str(&suffix);
     }
 
     Ok(result)
@@ -307,7 +309,10 @@ fn eval_pick_slot_value<R: Rng>(
 /// Extract cardinality constraints and separator from pick operators.
 /// Returns (is_one, max_for_many, separator, suffix)
 /// Uses the provided defaults as fallbacks when the slot doesn't specify values.
-fn extract_pick_constraints(pick: &PickSlot, defaults: &SlotDefaults) -> (bool, Option<u32>, String, Option<String>) {
+fn extract_pick_constraints(
+    pick: &PickSlot,
+    defaults: &SlotDefaults,
+) -> (bool, Option<u32>, String, Option<String>) {
     let mut is_one = false;
     let mut max: Option<u32> = None;
     let mut separator: Option<String> = None;
