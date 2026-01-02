@@ -8,6 +8,7 @@ mod sidebar;
 mod slots;
 mod tab_bar;
 mod variable_editor;
+mod variable_list;
 
 pub use editor::EditorPanel;
 pub use preview::PreviewPanel;

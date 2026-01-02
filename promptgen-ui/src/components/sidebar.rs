@@ -6,12 +6,12 @@ use egui_flex::{Flex, FlexItem};
 use promptgen_core::Cardinality;
 
 use egui_material_icons::icons::{
-    ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_COLLAPSE_ALL,
-    ICON_DELETE, ICON_DESCRIPTION, ICON_EDIT, ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_MORE_VERT,
-    ICON_SEARCH, ICON_SORT_BY_ALPHA,
+    ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_COLLAPSE_ALL, ICON_DELETE,
+    ICON_DESCRIPTION, ICON_EXPAND_ALL, ICON_MORE_VERT, ICON_SEARCH, ICON_SORT_BY_ALPHA,
 };
 
-use crate::state::{AppState, SidebarMode, SidebarViewMode, VariableSortOrder};
+use super::variable_list::{VariableList, VariableListConfig};
+use crate::state::{AppState, OptionGroup, SidebarMode, SidebarViewMode, VariableSortOrder};
 use crate::theme;
 
 /// Sidebar panel for navigating libraries, prompts, and variables.
@@ -350,332 +350,49 @@ impl SidebarPanel {
     }
 
     /// Render the variable list with expandable options.
-    ///
-    /// Uses a unified rendering path that:
-    /// - Filters variables based on search query
-    /// - Highlights matched characters
-    /// - Maintains edit buttons and collapse controls in all cases
-    ///
-    /// Supports advanced search syntax:
-    /// - `blue` - search all options across all variables
-    /// - `@Ey` - search variable names only, show all options for matches
-    /// - `@Ey/bl` - search variables matching "Ey" that have options matching "bl"
-    /// - `@/bl` - search all options (same as plain search)
+    /// Uses the shared VariableList component.
     fn render_variable_list(ui: &mut egui::Ui, state: &mut AppState) {
-        if state.library.variables.is_empty() {
-            ui.label("No variables in this library");
-            ui.add_space(8.0);
-            if ui.button("+ New Variable").clicked() {
-                state.enter_new_variable_editor();
-            }
-            return;
-        }
-
-        let search_query = state.search_query.trim();
-        let is_searching = !search_query.is_empty();
-
-        // Get search results for highlighting if we have a search query
-        let search_result = if is_searching {
-            Some(state.library.search(search_query))
-        } else {
-            None
-        };
-
-        // Build the display data: for each variable, determine if it should be shown
-        // and what highlighting to apply
-        #[derive(Clone)]
-        struct VariableDisplay {
-            name: String,
-            options: Vec<String>,
-            /// For each option, the match indices (for option searches)
-            option_matches: Vec<(String, Vec<usize>)>,
-            /// Whether this is an option-based search result (affects display)
-            is_option_search: bool,
-        }
-
-        let variables_display: Vec<VariableDisplay> = match &search_result {
-            None => {
-                // No search - show all variables
-                state
-                    .library
-                    .variables
-                    .iter()
-                    .map(|v| VariableDisplay {
-                        name: v.name.clone(),
-                        options: v.options.clone(),
-                        option_matches: vec![],
-                        is_option_search: false,
-                    })
-                    .collect()
-            }
-            Some(promptgen_core::SearchResult::Variables(var_results)) => {
-                // Variable name search - show matched variables with their full options
-                var_results
-                    .iter()
-                    .map(|vr| VariableDisplay {
-                        name: vr.variable_name.clone(),
-                        options: vr.options.clone(),
-                        option_matches: vec![],
-                        is_option_search: false,
-                    })
-                    .collect()
-            }
-            Some(promptgen_core::SearchResult::Options(opt_results)) => {
-                // Option search - show variables with matching options only
-                opt_results
-                    .iter()
-                    .map(|or| VariableDisplay {
-                        name: or.variable_name.clone(),
-                        options: or.matches.iter().map(|m| m.text.clone()).collect(),
-                        option_matches: or
-                            .matches
-                            .iter()
-                            .map(|m| (m.text.clone(), m.match_indices.clone()))
-                            .collect(),
-                        is_option_search: true,
-                    })
-                    .collect()
-            }
-        };
-
-        // Apply sorting based on current sort order
-        let mut variables_display = variables_display;
-        match state.variable_sort_order {
-            VariableSortOrder::None => {} // Keep original order
-            VariableSortOrder::Ascending => {
-                variables_display.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-            }
-            VariableSortOrder::Descending => {
-                variables_display.sort_by(|a, b| b.name.to_lowercase().cmp(&a.name.to_lowercase()));
-            }
-        }
-
-        if variables_display.is_empty() && is_searching {
-            ui.label("No matching variables");
-            ui.add_space(8.0);
-            if ui.button("+ New Variable").clicked() {
-                state.enter_new_variable_editor();
-            }
-            return;
-        }
-
-        let default_color = ui.visuals().text_color();
+        // Convert library variables to OptionGroups
+        let groups: Vec<OptionGroup> = state
+            .library
+            .variables
+            .iter()
+            .map(|v| OptionGroup {
+                name: v.name.clone(),
+                options: v.options.clone(),
+                is_editable: true,
+            })
+            .collect();
 
         // Take expand_all_variables state (consumed once per render)
         let expand_all = state.expand_all_variables.take();
 
-        // Track which variable to edit (to avoid borrow issues)
-        let mut variable_to_edit: Option<String> = None;
-
-        for var_display in &variables_display {
-            let id = ui.make_persistent_id(&var_display.name);
-
-            // Use CollapsingState for custom header layout
-            let mut collapsing_state =
-                egui::collapsing_header::CollapsingState::load_with_default_open(
-                    ui.ctx(),
-                    id,
-                    is_searching, // Auto-expand when searching
-                );
-
-            // Apply expand/collapse all if requested
-            if let Some(expand) = expand_all {
-                collapsing_state.set_open(expand);
-            }
-
-            // Header row: collapse toggle + label + edit button using flex layout
-            Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
-                // Toggle icon (fixed size, no grow)
-                let icon = if collapsing_state.is_open() {
-                    ICON_EXPAND_MORE
-                } else {
-                    ICON_CHEVRON_RIGHT
-                };
-                flex.add_ui(FlexItem::default(), |ui| {
-                    if ui.small_button(icon).clicked() {
-                        collapsing_state.toggle(ui);
-                    }
-                });
-
-                // Variable name label (shrinks to fit, truncates text)
-                let header_text = Self::build_variable_header_text(
-                    &var_display.name,
-                    var_display.options.len(),
-                    var_display.is_option_search,
-                );
-                let var_name = var_display.name.clone();
-                flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
-                    // Left-align and truncate text to available width
-                    ui.set_width(ui.available_width());
-                    let label = egui::Label::new(&header_text).truncate();
-                    let response = ui.add(label);
-                    response.on_hover_text(format!("@{}", var_name));
-                });
-
-                // Edit button (fixed size, no grow)
-                flex.add_ui(FlexItem::default(), |ui| {
-                    if ui
-                        .small_button(ICON_EDIT)
-                        .on_hover_text("Edit variable")
-                        .clicked()
-                    {
-                        variable_to_edit = Some(var_display.name.clone());
-                    }
-                });
-            });
-
-            // Body content (only shown when expanded)
-            collapsing_state.show_body_unindented(ui, |ui| {
-                // Use justified layout to make buttons fill full width (like slot picker)
-                ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
-                    if var_display.is_option_search && !var_display.option_matches.is_empty() {
-                        // Show options with highlighting as clickable buttons
-                        for (option_text, match_indices) in &var_display.option_matches {
-                            let option_job = Self::build_option_button_job(
-                                option_text,
-                                match_indices,
-                                default_color,
-                            );
-                            let response = ui.add(
-                                egui::Button::new(option_job)
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .wrap(),
-                            );
-                            if response.clicked() {
-                                ui.ctx().copy_text(option_text.clone());
-                            }
-                            response.on_hover_text("Click to copy");
-                        }
-                    } else {
-                        // Show plain options as clickable buttons
-                        for option in &var_display.options {
-                            let response = ui.add(
-                                egui::Button::new(format!("• {}", option))
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .wrap(),
-                            );
-                            if response.clicked() {
-                                ui.ctx().copy_text(option.clone());
-                            }
-                            response.on_hover_text("Click to copy");
-                        }
-                    }
-                });
-            });
-        }
-
-        // Handle edit action after the loop
-        if let Some(name) = variable_to_edit {
-            state.enter_variable_editor(&name);
-        }
-
-        // Add new variable button at the bottom
-        ui.add_space(8.0);
-        if ui.button("+ New Variable").clicked() {
-            state.enter_new_variable_editor();
-        }
-    }
-
-    /// Build a simple text string for a variable header (for use with truncation).
-    fn build_variable_header_text(
-        name: &str,
-        option_count: usize,
-        is_option_search: bool,
-    ) -> String {
-        let suffix = if is_option_search {
-            let match_word = if option_count == 1 {
-                "match"
-            } else {
-                "matches"
-            };
-            format!(" ({} {})", option_count, match_word)
-        } else {
-            format!(" ({})", option_count)
+        let config = VariableListConfig {
+            id_prefix: "variables",
+            selectable: false,
+            selected_values: &[],
+            can_add_selection: true,
+            show_edit_buttons: true,
+            show_new_variable_button: true,
         };
 
-        format!("@{}{}", name, suffix)
-    }
-
-    /// Build a LayoutJob for an option button with highlighting.
-    fn build_option_button_job(
-        option_text: &str,
-        match_indices: &[usize],
-        default_color: egui::Color32,
-    ) -> egui::text::LayoutJob {
-        use egui::FontId;
-        use egui::text::{LayoutJob, TextFormat};
-
-        let mut job = LayoutJob::default();
-
-        // Add bullet prefix
-        job.append(
-            "• ",
-            0.0,
-            TextFormat {
-                font_id: FontId::default(),
-                color: default_color,
-                ..Default::default()
-            },
+        let result = VariableList::show_groups(
+            ui,
+            &groups,
+            &state.search_query,
+            state.variable_sort_order,
+            expand_all,
+            &config,
+            Some(&state.library),
         );
 
-        // Add highlighted option text
-        let text_job = Self::highlighted_text(option_text, match_indices, default_color);
-        for section in text_job.sections {
-            job.append(
-                &text_job.text[section.byte_range.clone()],
-                0.0,
-                section.format,
-            );
+        // Handle results
+        if let Some(name) = result.edit_clicked {
+            state.enter_variable_editor(&name);
         }
-
-        job
-    }
-
-    /// Create a LayoutJob that highlights matched characters in green.
-    fn highlighted_text(
-        text: &str,
-        match_indices: &[usize],
-        default_color: egui::Color32,
-    ) -> egui::text::LayoutJob {
-        use egui::FontId;
-        use egui::text::{LayoutJob, TextFormat};
-
-        let highlight_color = egui::Color32::from_rgb(166, 227, 161); // Catppuccin green
-        let mut job = LayoutJob::default();
-
-        let chars: Vec<char> = text.chars().collect();
-        let match_set: std::collections::HashSet<usize> = match_indices.iter().copied().collect();
-
-        let mut i = 0;
-        while i < chars.len() {
-            // Find a run of same-colored characters
-            let is_highlighted = match_set.contains(&i);
-            let start = i;
-
-            while i < chars.len() && match_set.contains(&i) == is_highlighted {
-                i += 1;
-            }
-
-            // Collect the substring
-            let substring: String = chars[start..i].iter().collect();
-            let color = if is_highlighted {
-                highlight_color
-            } else {
-                default_color
-            };
-
-            job.append(
-                &substring,
-                0.0,
-                TextFormat {
-                    font_id: FontId::default(),
-                    color,
-                    ..Default::default()
-                },
-            );
+        if result.new_variable_clicked {
+            state.enter_new_variable_editor();
         }
-
-        job
     }
 
     /// Render the slot picker overlay for selecting options for a pick slot.
@@ -711,15 +428,27 @@ impl SidebarPanel {
             ui.label(
                 egui::RichText::new(cardinality_text)
                     .small()
-                    .color(egui::Color32::from_rgb(108, 112, 134)),
+                    .color(ui.visuals().weak_text_color()),
             );
         }
 
+        ui.add_space(4.0);
+
+        // Search bar
+        VariableList::show_search_bar(ui, &mut state.slot_picker_search_query);
+
+        // Toolbar (sort, expand/collapse)
+        VariableList::show_toolbar(
+            ui,
+            &mut state.variable_sort_order,
+            &mut state.expand_all_variables,
+        );
+
         ui.separator();
 
-        // Get available options
-        let options = state.get_pick_options(&slot_label);
-        let selected_values = state
+        // Get option groups and selected values
+        let groups = state.get_pick_option_groups(&slot_label);
+        let selected_values: Vec<String> = state
             .slot_values
             .get(&slot_label)
             .cloned()
@@ -732,49 +461,47 @@ impl SidebarPanel {
             _ => true,
         };
 
-        // Show options list
+        // Take expand_all_variables state (consumed once per render)
+        let expand_all = state.expand_all_variables.take();
+
+        let config = VariableListConfig {
+            id_prefix: "slot_picker",
+            selectable: true,
+            selected_values: &selected_values,
+            can_add_selection: can_add,
+            show_edit_buttons: true,
+            show_new_variable_button: false,
+        };
+
+        // Show the option groups in a scroll area
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                if options.is_empty() {
-                    ui.label(
-                        egui::RichText::new("No options available")
-                            .italics()
-                            .color(egui::Color32::from_rgb(108, 112, 134)),
-                    );
-                    return;
+                let result = VariableList::show_groups(
+                    ui,
+                    &groups,
+                    &state.slot_picker_search_query,
+                    state.variable_sort_order,
+                    expand_all,
+                    &config,
+                    Some(&state.library),
+                );
+
+                // Handle option clicks - toggle selection
+                if let Some(option) = result.option_clicked {
+                    let is_selected = selected_values.contains(&option);
+                    if is_selected {
+                        state.remove_slot_value(&slot_label, &option);
+                    } else if can_add {
+                        state.add_slot_value(&slot_label, option);
+                    }
+                    state.request_render();
                 }
 
-                // Use justified layout to make buttons fill full width
-                ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
-                    for option in &options {
-                        let is_selected = selected_values.contains(option);
-                        let display_text = format!("• {}", option);
-
-                        // Full-width selectable button - transparent when not selected, highlight when selected
-                        let fill = if is_selected {
-                            ui.visuals().selection.bg_fill
-                        } else {
-                            egui::Color32::TRANSPARENT
-                        };
-                        let response = ui.add(egui::Button::new(display_text).fill(fill).wrap());
-
-                        // Show full text on hover for truncated options
-                        response.clone().on_hover_text(option);
-
-                        if response.clicked() {
-                            if is_selected {
-                                // Remove selection
-                                state.remove_slot_value(&slot_label, option);
-                                state.request_render();
-                            } else if can_add {
-                                // Add/replace selection (add_slot_value handles single-select replacement)
-                                state.add_slot_value(&slot_label, option.clone());
-                                state.request_render();
-                            }
-                        }
-                    }
-                });
+                // Handle edit button clicks - navigate to variable editor
+                if let Some(name) = result.edit_clicked {
+                    state.enter_variable_editor(&name);
+                }
             });
     }
 }

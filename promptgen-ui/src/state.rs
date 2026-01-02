@@ -6,6 +6,17 @@ use promptgen_core::{
 };
 use serde::{Deserialize, Serialize};
 
+/// A group of options to display (either a real variable or a pseudo-group like "Options").
+#[derive(Clone)]
+pub struct OptionGroup {
+    /// Display name (variable name or "Options" for free-form literals)
+    pub name: String,
+    /// The options in this group
+    pub options: Vec<String>,
+    /// Whether this group can be edited (false for "Options" pseudo-group)
+    pub is_editable: bool,
+}
+
 /// Sidebar view mode - what to show in the sidebar list
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SidebarViewMode {
@@ -217,6 +228,7 @@ pub struct AppState {
     pub variable_sort_order: VariableSortOrder,
     pub sidebar_mode: SidebarMode,
     pub search_query: String,
+    pub slot_picker_search_query: String,
     pub editor_focus: EditorFocus,
 
     // Variable Editor State
@@ -260,6 +272,7 @@ impl Default for AppState {
             variable_sort_order: VariableSortOrder::default(),
             sidebar_mode: SidebarMode::default(),
             search_query: String::new(),
+            slot_picker_search_query: String::new(),
             editor_focus: EditorFocus::default(),
             editor_mode: EditorMode::default(),
             variable_editor_name: String::new(),
@@ -408,6 +421,9 @@ impl AppState {
         self.sidebar_mode = SidebarMode::SlotPicker {
             slot_label: slot_label.to_string(),
         };
+        // Reset slot picker state - clear search and expand all groups
+        self.slot_picker_search_query.clear();
+        self.expand_all_variables = Some(true);
     }
 
     /// Unfocus the current editor/slot and return sidebar to normal mode
@@ -429,29 +445,51 @@ impl AppState {
         matches!(self.editor_focus, EditorFocus::MainEditor)
     }
 
-    /// Get expanded options for a pick slot, resolving variable references
-    pub fn get_pick_options(&self, slot_label: &str) -> Vec<String> {
+    /// Get option groups for a pick slot, separating variables from free-form literals.
+    /// Returns groups in source order, with literals grouped under "Options" (shown first unless sorted).
+    pub fn get_pick_option_groups(&self, slot_label: &str) -> Vec<OptionGroup> {
         let definitions = self.get_slot_definitions();
-        if let Some(def) = definitions.iter().find(|d| d.label == slot_label)
-            && let SlotDefKind::Pick { sources, .. } = &def.kind
-        {
-            let mut options = Vec::new();
-            for source in sources {
-                match source {
-                    PickSource::VariableRef(lib_ref) => {
-                        // Resolve variable reference (library field is ignored in single-library mode)
-                        if let Some(variable) = self.library.find_variable(&lib_ref.variable) {
-                            options.extend(variable.options.iter().cloned());
-                        }
-                    }
-                    PickSource::Literal { value, .. } => {
-                        options.push(value.clone());
+        let Some(def) = definitions.iter().find(|d| d.label == slot_label) else {
+            return Vec::new();
+        };
+        let SlotDefKind::Pick { sources, .. } = &def.kind else {
+            return Vec::new();
+        };
+
+        let mut groups = Vec::new();
+        let mut literals = Vec::new();
+
+        for source in sources {
+            match source {
+                PickSource::VariableRef(lib_ref) => {
+                    // Resolve variable reference
+                    if let Some(variable) = self.library.find_variable(&lib_ref.variable) {
+                        groups.push(OptionGroup {
+                            name: variable.name.clone(),
+                            options: variable.options.clone(),
+                            is_editable: true,
+                        });
                     }
                 }
+                PickSource::Literal { value, .. } => {
+                    literals.push(value.clone());
+                }
             }
-            return options;
         }
-        Vec::new()
+
+        // Add literals as "Options" group at the beginning (unless sorted)
+        if !literals.is_empty() {
+            groups.insert(
+                0,
+                OptionGroup {
+                    name: "Options".to_string(),
+                    options: literals,
+                    is_editable: false,
+                },
+            );
+        }
+
+        groups
     }
 
     /// Get the cardinality for a pick slot
@@ -568,9 +606,11 @@ impl AppState {
             self.editor_mode = EditorMode::VariableEditor {
                 variable_name: variable_name.to_string(),
             };
-            // Switch sidebar to variables view
-            self.sidebar_view_mode = SidebarViewMode::Variables;
-            self.sidebar_mode = SidebarMode::Normal;
+            // Switch sidebar to variables view, but preserve slot picker mode
+            if !matches!(self.sidebar_mode, SidebarMode::SlotPicker { .. }) {
+                self.sidebar_view_mode = SidebarViewMode::Variables;
+                self.sidebar_mode = SidebarMode::Normal;
+            }
         }
     }
 
@@ -581,9 +621,11 @@ impl AppState {
         self.variable_editor_original_name = None;
         self.variable_editor_dirty = false;
         self.editor_mode = EditorMode::NewVariable;
-        // Switch sidebar to variables view
-        self.sidebar_view_mode = SidebarViewMode::Variables;
-        self.sidebar_mode = SidebarMode::Normal;
+        // Switch sidebar to variables view, but preserve slot picker mode
+        if !matches!(self.sidebar_mode, SidebarMode::SlotPicker { .. }) {
+            self.sidebar_view_mode = SidebarViewMode::Variables;
+            self.sidebar_mode = SidebarMode::Normal;
+        }
     }
 
     /// Exit variable editor mode and return to prompt editor
