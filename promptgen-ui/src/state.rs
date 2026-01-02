@@ -226,6 +226,7 @@ pub struct AppState {
     // UI State
     pub sidebar_view_mode: SidebarViewMode,
     pub variable_sort_order: VariableSortOrder,
+    pub option_sort_order: VariableSortOrder,
     pub sidebar_mode: SidebarMode,
     pub search_query: String,
     pub slot_picker_search_query: String,
@@ -270,6 +271,7 @@ impl Default for AppState {
             preview_dirty: false,
             sidebar_view_mode: SidebarViewMode::default(),
             variable_sort_order: VariableSortOrder::default(),
+            option_sort_order: VariableSortOrder::default(),
             sidebar_mode: SidebarMode::default(),
             search_query: String::new(),
             slot_picker_search_query: String::new(),

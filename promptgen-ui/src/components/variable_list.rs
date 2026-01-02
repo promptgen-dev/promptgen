@@ -5,7 +5,7 @@
 use egui_flex::{Flex, FlexItem};
 use egui_material_icons::icons::{
     ICON_ADD, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHEVRON_RIGHT, ICON_COLLAPSE_ALL,
-    ICON_EDIT, ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_SEARCH, ICON_SORT_BY_ALPHA,
+    ICON_EDIT, ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_MENU, ICON_SEARCH, ICON_SORT_BY_ALPHA,
 };
 
 use crate::state::{OptionGroup, VariableSortOrder};
@@ -80,6 +80,7 @@ impl VariableList {
     pub fn show_toolbar(
         ui: &mut egui::Ui,
         sort_order: &mut VariableSortOrder,
+        option_sort_order: &mut VariableSortOrder,
         expand_all: &mut Option<bool>,
         show_new_variable_button: bool,
     ) -> bool {
@@ -103,23 +104,47 @@ impl VariableList {
             // Spacer to push remaining buttons to the right
             flex.add_ui(FlexItem::default().grow(1.0), |_ui| {});
 
-            // Sort button - cycles through None -> Ascending -> Descending -> None
+            // Variable sort button - cycles through None -> Ascending -> Descending -> None
             flex.add_ui(FlexItem::default(), |ui| {
                 let (icon, tooltip) = match sort_order {
                     VariableSortOrder::None => {
-                        (ICON_SORT_BY_ALPHA.to_string(), "Sort alphabetically")
+                        (ICON_SORT_BY_ALPHA.to_string(), "Sort variables A-Z")
                     }
                     VariableSortOrder::Ascending => (
                         format!("{}{}", ICON_SORT_BY_ALPHA, ICON_ARROW_UPWARD),
-                        "Sort Z-A",
+                        "Sort variables Z-A",
                     ),
                     VariableSortOrder::Descending => (
                         format!("{}{}", ICON_SORT_BY_ALPHA, ICON_ARROW_DOWNWARD),
-                        "Clear sort",
+                        "Clear variable sort",
                     ),
                 };
                 if ui.small_button(&icon).on_hover_text(tooltip).clicked() {
                     *sort_order = match sort_order {
+                        VariableSortOrder::None => VariableSortOrder::Ascending,
+                        VariableSortOrder::Ascending => VariableSortOrder::Descending,
+                        VariableSortOrder::Descending => VariableSortOrder::None,
+                    };
+                }
+            });
+
+            // Option sort button - cycles through None -> Ascending -> Descending -> None
+            flex.add_ui(FlexItem::default(), |ui| {
+                let (icon, tooltip) = match option_sort_order {
+                    VariableSortOrder::None => {
+                        (format!("{}{}", ICON_MENU, ICON_SORT_BY_ALPHA), "Sort options A-Z")
+                    }
+                    VariableSortOrder::Ascending => (
+                        format!("{}{}{}", ICON_MENU, ICON_SORT_BY_ALPHA, ICON_ARROW_UPWARD),
+                        "Sort options Z-A",
+                    ),
+                    VariableSortOrder::Descending => (
+                        format!("{}{}{}", ICON_MENU, ICON_SORT_BY_ALPHA, ICON_ARROW_DOWNWARD),
+                        "Clear option sort",
+                    ),
+                };
+                if ui.small_button(&icon).on_hover_text(tooltip).clicked() {
+                    *option_sort_order = match option_sort_order {
                         VariableSortOrder::None => VariableSortOrder::Ascending,
                         VariableSortOrder::Ascending => VariableSortOrder::Descending,
                         VariableSortOrder::Descending => VariableSortOrder::None,
@@ -159,7 +184,8 @@ impl VariableList {
     /// * `ui` - The egui UI context
     /// * `groups` - The option groups to display
     /// * `search_query` - Current search query (for filtering and highlighting)
-    /// * `sort_order` - Current sort order
+    /// * `sort_order` - Current sort order for variable groups
+    /// * `option_sort_order` - Current sort order for options within groups
     /// * `expand_all` - If Some, expand or collapse all groups
     /// * `config` - Configuration for the component
     /// * `library` - The library for search functionality (optional, for variable search)
@@ -168,6 +194,7 @@ impl VariableList {
         groups: &[OptionGroup],
         search_query: &str,
         sort_order: VariableSortOrder,
+        option_sort_order: VariableSortOrder,
         expand_all: Option<bool>,
         config: &VariableListConfig<'_>,
         library: Option<&promptgen_core::Library>,
@@ -185,7 +212,7 @@ impl VariableList {
         // Build display data with search filtering
         let groups_display = Self::build_display_data(groups, search_query, library);
 
-        // Apply sorting
+        // Apply group sorting
         let mut groups_display = groups_display;
         match sort_order {
             VariableSortOrder::None => {} // Keep original order
@@ -194,6 +221,33 @@ impl VariableList {
             }
             VariableSortOrder::Descending => {
                 groups_display.sort_by(|a, b| b.name.to_lowercase().cmp(&a.name.to_lowercase()));
+            }
+        }
+
+        // Apply option sorting within each group
+        if option_sort_order != VariableSortOrder::None {
+            for group in &mut groups_display {
+                match option_sort_order {
+                    VariableSortOrder::None => {} // Keep original order
+                    VariableSortOrder::Ascending => {
+                        group
+                            .options
+                            .sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+                        // Also sort option_matches if present
+                        group
+                            .option_matches
+                            .sort_by(|(a, _), (b, _)| a.to_lowercase().cmp(&b.to_lowercase()));
+                    }
+                    VariableSortOrder::Descending => {
+                        group
+                            .options
+                            .sort_by(|a, b| b.to_lowercase().cmp(&a.to_lowercase()));
+                        // Also sort option_matches if present
+                        group
+                            .option_matches
+                            .sort_by(|(a, _), (b, _)| b.to_lowercase().cmp(&a.to_lowercase()));
+                    }
+                }
             }
         }
 
@@ -269,21 +323,21 @@ impl VariableList {
             // Body content (only shown when expanded)
             collapsing_state.show_body_unindented(ui, |ui| {
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
-                    let options_to_show: Vec<(&str, Vec<usize>)> =
-                        if group_display.is_option_search && !group_display.option_matches.is_empty()
-                        {
-                            group_display
-                                .option_matches
-                                .iter()
-                                .map(|(text, indices)| (text.as_str(), indices.clone()))
-                                .collect()
-                        } else {
-                            group_display
-                                .options
-                                .iter()
-                                .map(|opt| (opt.as_str(), vec![]))
-                                .collect()
-                        };
+                    let options_to_show: Vec<(&str, Vec<usize>)> = if group_display.is_option_search
+                        && !group_display.option_matches.is_empty()
+                    {
+                        group_display
+                            .option_matches
+                            .iter()
+                            .map(|(text, indices)| (text.as_str(), indices.clone()))
+                            .collect()
+                    } else {
+                        group_display
+                            .options
+                            .iter()
+                            .map(|opt| (opt.as_str(), vec![]))
+                            .collect()
+                    };
 
                     for (option_text, match_indices) in options_to_show {
                         let is_selected = config.selected_values.contains(&option_text.to_string());
@@ -315,8 +369,7 @@ impl VariableList {
                             egui::Color32::TRANSPARENT
                         };
 
-                        let response =
-                            ui.add(egui::Button::new(button_content).fill(fill).wrap());
+                        let response = ui.add(egui::Button::new(button_content).fill(fill).wrap());
 
                         // Hover text
                         if config.selectable {
@@ -514,8 +567,8 @@ impl VariableList {
         match_indices: &[usize],
         default_color: egui::Color32,
     ) -> egui::text::LayoutJob {
-        use egui::text::{LayoutJob, TextFormat};
         use egui::FontId;
+        use egui::text::{LayoutJob, TextFormat};
 
         let mut job = LayoutJob::default();
 
@@ -549,8 +602,8 @@ impl VariableList {
         match_indices: &[usize],
         default_color: egui::Color32,
     ) -> egui::text::LayoutJob {
-        use egui::text::{LayoutJob, TextFormat};
         use egui::FontId;
+        use egui::text::{LayoutJob, TextFormat};
 
         let highlight_color = egui::Color32::from_rgb(166, 227, 161); // Catppuccin green
         let mut job = LayoutJob::default();

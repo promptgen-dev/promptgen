@@ -137,6 +137,7 @@ impl SidebarPanel {
                 let new_var_clicked = VariableList::show_toolbar(
                     ui,
                     &mut state.variable_sort_order,
+                    &mut state.option_sort_order,
                     &mut state.expand_all_variables,
                     true, // show new variable button
                 );
@@ -337,6 +338,7 @@ impl SidebarPanel {
             &groups,
             &state.search_query,
             state.variable_sort_order,
+            state.option_sort_order,
             expand_all,
             &config,
             Some(&state.library),
@@ -394,6 +396,7 @@ impl SidebarPanel {
         VariableList::show_toolbar(
             ui,
             &mut state.variable_sort_order,
+            &mut state.option_sort_order,
             &mut state.expand_all_variables,
             false, // don't show new variable button
         );
@@ -435,6 +438,7 @@ impl SidebarPanel {
                     &groups,
                     &state.slot_picker_search_query,
                     state.variable_sort_order,
+                    state.option_sort_order,
                     expand_all,
                     &config,
                     Some(&state.library),
