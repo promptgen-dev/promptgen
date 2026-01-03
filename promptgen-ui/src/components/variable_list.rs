@@ -254,10 +254,7 @@ impl VariableList {
                 match option_sort_order {
                     VariableSortOrder::None => {} // Keep original order
                     VariableSortOrder::Ascending => {
-                        group
-                            .options
-                            .sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
-                        // Also sort option_matches if present
+                        group.options.sort_by_key(|a| a.to_lowercase());
                         group
                             .option_matches
                             .sort_by(|(a, _), (b, _)| a.to_lowercase().cmp(&b.to_lowercase()));
@@ -265,7 +262,7 @@ impl VariableList {
                     VariableSortOrder::Descending => {
                         group
                             .options
-                            .sort_by(|a, b| b.to_lowercase().cmp(&a.to_lowercase()));
+                            .sort_by_key(|b| std::cmp::Reverse(b.to_lowercase()));
                         // Also sort option_matches if present
                         group
                             .option_matches

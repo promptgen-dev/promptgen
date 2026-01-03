@@ -651,8 +651,8 @@ impl AppState {
         separator: &str,
         is_single_select: bool,
     ) {
-        if self.slot_manual_edit.remove(slot_label) {
-            if let Some(text) = self.slot_manual_edit_text.remove(slot_label) {
+        if self.slot_manual_edit.remove(slot_label)
+            && let Some(text) = self.slot_manual_edit_text.remove(slot_label) {
                 let new_values = if is_single_select {
                     // For single-select, just use the trimmed text as one value
                     let trimmed = text.trim();
@@ -678,7 +678,6 @@ impl AppState {
                 self.mark_active_tab_dirty();
                 self.request_render();
             }
-        }
     }
 
     // ==================== Variable Editor Methods ====================
