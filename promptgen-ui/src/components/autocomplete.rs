@@ -161,6 +161,8 @@ impl AutocompletePopup {
         editor_id: &str,
         editor_response: &egui::Response,
         completions: &[CompletionItem],
+        _content: &str,
+        _cursor_pos: usize,
     ) -> AutocompletePopupResult {
         if !state.is_autocomplete_active(editor_id) || completions.is_empty() {
             return AutocompletePopupResult {
@@ -183,11 +185,31 @@ impl AutocompletePopup {
         // NOTE: Keyboard handling is done in handle_autocomplete_keyboard() which must be
         // called BEFORE the TextEdit widget. This function only handles mouse clicks.
 
-        // Position the popup below the editor
-        let popup_pos = editor_response.rect.left_bottom() + egui::vec2(0.0, 4.0);
+        // Position popup just below the editor
+        let popup_height = 250.0; // max_height of the popup scroll area
+        let popup_margin = 4.0;
+        let screen_rect = ui.ctx().screen_rect();
+
+        // Space available below and above the editor
+        let space_below = screen_rect.bottom() - editor_response.rect.bottom() - popup_margin;
+        let space_above = editor_response.rect.top() - screen_rect.top() - popup_margin;
+
+        // Determine popup position: below if enough space, otherwise above
+        let popup_pos = if space_below >= popup_height || space_below >= space_above {
+            // Position below the editor
+            editor_response.rect.left_bottom() + egui::vec2(0.0, popup_margin)
+        } else {
+            // Position above the editor
+            egui::pos2(
+                editor_response.rect.left(),
+                editor_response.rect.top() - popup_height - popup_margin,
+            )
+        };
+
         let area_id = egui::Id::new(format!("autocomplete_area_{}", editor_id));
 
         // Use Area instead of popup_below_widget to have full control over click handling
+        // NOTE: We intentionally don't use constrain_to() to avoid potential scroll interactions
         egui::Area::new(area_id)
             .order(egui::Order::Foreground)
             .fixed_pos(popup_pos)
@@ -356,7 +378,8 @@ pub fn handle_autocomplete_keyboard(
     });
 
     if escape {
-        state.deactivate_autocomplete(editor_id);
+        // Dismiss autocomplete and remember the trigger position so we don't auto-reactivate
+        state.deactivate_autocomplete_escaped(editor_id);
         return None;
     }
 
@@ -573,6 +596,7 @@ pub fn autocomplete_before_editor(
 ///
 /// This handles:
 /// - Activating autocomplete when @ is typed or cursor moves into @ context
+/// - Force-activating via Ctrl+Space even after Escape dismissal
 /// - Updating the autocomplete query based on cursor position
 /// - Showing the popup and handling mouse clicks
 /// - Deactivating autocomplete when editor loses focus (unless hovering popup)
@@ -587,21 +611,46 @@ pub fn autocomplete_after_editor(
     response: &egui::Response,
     cursor_pos: usize,
 ) -> Option<String> {
+    // Check for Ctrl+Space (or Cmd+Space on Mac) to force-activate autocomplete
+    let ctrl_space = ui.ctx().input_mut(|i| {
+        i.consume_shortcut(&egui::KeyboardShortcut::new(
+            egui::Modifiers::COMMAND,
+            Key::Space,
+        ))
+    });
+
+    // Find the current @ context (if any)
+    let trigger_pos = check_autocomplete_trigger(content, cursor_pos)
+        .or_else(|| find_autocomplete_context(content, cursor_pos));
+
     // Handle autocomplete activation/update based on cursor position
     if !state.is_autocomplete_active(editor_id) {
-        // Check if we're in an autocomplete context (either just typed @ or cursor is after @)
-        if let Some(trigger_pos) = check_autocomplete_trigger(content, cursor_pos)
-            .or_else(|| find_autocomplete_context(content, cursor_pos))
-        {
-            state.activate_autocomplete(editor_id, trigger_pos);
-            // Deactivate autocomplete in other editors
-            state.deactivate_autocomplete_except(editor_id);
-            // Update the query immediately
-            state.update_autocomplete_query(editor_id, content, cursor_pos);
+        if let Some(trigger_pos) = trigger_pos {
+            if ctrl_space {
+                // Ctrl+Space: force-activate even if previously dismissed
+                state.force_activate_autocomplete(editor_id, trigger_pos);
+                state.deactivate_autocomplete_except(editor_id);
+                state.update_autocomplete_query(editor_id, content, cursor_pos);
+            } else {
+                // Try to activate (will fail if this position was dismissed via Escape)
+                if state.try_activate_autocomplete(editor_id, trigger_pos) {
+                    state.deactivate_autocomplete_except(editor_id);
+                    state.update_autocomplete_query(editor_id, content, cursor_pos);
+                }
+            }
+        } else {
+            // Cursor is not in an @ context - clear any dismissed state
+            state.clear_dismissed_autocomplete(editor_id);
         }
     } else {
         // Autocomplete is active, update the query with actual cursor position
         state.update_autocomplete_query(editor_id, content, cursor_pos);
+    }
+
+    // Request focus back if Escape was pressed to dismiss autocomplete
+    // (counters egui's TextEdit default behavior of losing focus on Escape)
+    if state.take_autocomplete_needs_refocus(editor_id) {
+        response.request_focus();
     }
 
     // Show autocomplete popup if active
@@ -619,7 +668,8 @@ pub fn autocomplete_after_editor(
     }
 
     // Show popup and handle mouse clicks
-    let popup_result = AutocompletePopup::show(ui, state, editor_id, response, &completions);
+    let popup_result =
+        AutocompletePopup::show(ui, state, editor_id, response, &completions, content, cursor_pos);
 
     let new_content = popup_result
         .selected

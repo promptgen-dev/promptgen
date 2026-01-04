@@ -118,6 +118,9 @@ impl SlotPanel {
 
             ui.add_space(4.0);
         }
+
+        // Add scroll padding at the bottom so autocomplete popups have room to display
+        ui.add_space(300.0);
     }
 
     /// Render a textarea slot.
@@ -236,14 +239,12 @@ impl SlotPanel {
         let sep_owned = sep.to_string();
 
         // Apply pending completion from keyboard handling (only in manual edit mode)
-        if is_manual_edit
-            && let Some(completion_text) = pending_completion {
-                let current_value = state.get_slot_manual_edit_text(&label_owned);
-                let new_value =
-                    apply_completion(state, &current_value, &editor_id, &completion_text);
-                state.set_slot_manual_edit_text(&label_owned, new_value);
-                state.request_render();
-            }
+        if is_manual_edit && let Some(completion_text) = pending_completion {
+            let current_value = state.get_slot_manual_edit_text(&label_owned);
+            let new_value = apply_completion(state, &current_value, &editor_id, &completion_text);
+            state.set_slot_manual_edit_text(&label_owned, new_value);
+            state.request_render();
+        }
 
         // Get the editor background color from the current theme
         let editor_bg = ui.visuals().extreme_bg_color;

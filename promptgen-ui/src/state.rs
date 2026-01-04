@@ -115,6 +115,12 @@ pub struct AutocompleteState {
     pub editor_response_id: Option<egui::Id>,
     /// Flag to scroll to selection (set on keyboard nav, cleared after scroll)
     pub scroll_to_automcomplete_selection: bool,
+    /// Trigger position where autocomplete was dismissed via Escape.
+    /// Don't auto-reactivate at this position until cursor moves away or Ctrl+Space is pressed.
+    pub dismissed_trigger_position: Option<usize>,
+    /// Flag indicating the editor should be refocused after Escape dismissal.
+    /// This counters egui's TextEdit default behavior of losing focus on Escape.
+    pub needs_refocus: bool,
 }
 
 // ==================== Tab State ====================
@@ -898,14 +904,33 @@ impl AppState {
             .is_some_and(|s| s.active)
     }
 
-    /// Activate autocomplete with the given trigger position for a specific editor
-    pub fn activate_autocomplete(&mut self, editor_id: &str, trigger_position: usize) {
+    /// Try to activate autocomplete at the given trigger position.
+    /// Won't activate if this trigger position was previously dismissed via Escape.
+    /// Returns true if activation succeeded.
+    pub fn try_activate_autocomplete(&mut self, editor_id: &str, trigger_position: usize) -> bool {
+        let state = self.get_autocomplete_mut(editor_id);
+        // Don't re-activate if this trigger position was dismissed via Escape
+        if state.dismissed_trigger_position == Some(trigger_position) {
+            return false;
+        }
+        state.active = true;
+        state.trigger_position = trigger_position;
+        state.query.clear();
+        state.mode = Some(AutocompleteMode::Variables);
+        state.selected_index = 0;
+        state.dismissed_trigger_position = None;
+        true
+    }
+
+    /// Force-activate autocomplete (via Ctrl+Space), clearing any dismissed state.
+    pub fn force_activate_autocomplete(&mut self, editor_id: &str, trigger_position: usize) {
         let state = self.get_autocomplete_mut(editor_id);
         state.active = true;
         state.trigger_position = trigger_position;
         state.query.clear();
         state.mode = Some(AutocompleteMode::Variables);
         state.selected_index = 0;
+        state.dismissed_trigger_position = None;
     }
 
     /// Deactivate autocomplete for a specific editor
@@ -917,6 +942,44 @@ impl AppState {
             state.selected_index = 0;
             state.trigger_position = 0;
             state.editor_response_id = None;
+            // Note: we don't clear dismissed_trigger_position here so focus loss
+            // doesn't reset it - only Escape sets it
+        }
+    }
+
+    /// Deactivate autocomplete via Escape, remembering the trigger position.
+    /// Autocomplete won't auto-reactivate at this position until cursor moves away
+    /// or user presses Ctrl+Space.
+    pub fn deactivate_autocomplete_escaped(&mut self, editor_id: &str) {
+        if let Some(state) = self.autocomplete_states.get_mut(editor_id) {
+            let trigger_pos = state.trigger_position;
+            state.active = false;
+            state.query.clear();
+            state.mode = None;
+            state.selected_index = 0;
+            state.trigger_position = 0;
+            state.editor_response_id = None;
+            state.dismissed_trigger_position = Some(trigger_pos);
+            state.needs_refocus = true;
+        }
+    }
+
+    /// Take the needs_refocus flag for an editor (returns true once, then clears).
+    pub fn take_autocomplete_needs_refocus(&mut self, editor_id: &str) -> bool {
+        if let Some(state) = self.autocomplete_states.get_mut(editor_id) {
+            let needs = state.needs_refocus;
+            state.needs_refocus = false;
+            needs
+        } else {
+            false
+        }
+    }
+
+    /// Clear the dismissed trigger position for an editor.
+    /// Called when cursor moves away from the dismissed context.
+    pub fn clear_dismissed_autocomplete(&mut self, editor_id: &str) {
+        if let Some(state) = self.autocomplete_states.get_mut(editor_id) {
+            state.dismissed_trigger_position = None;
         }
     }
 

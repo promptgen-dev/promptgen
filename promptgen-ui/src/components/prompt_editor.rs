@@ -2,9 +2,7 @@
 
 use egui::TextBuffer;
 
-use crate::components::autocomplete::{
-    autocomplete_after_editor, autocomplete_before_editor,
-};
+use crate::components::autocomplete::{autocomplete_after_editor, autocomplete_before_editor};
 use crate::highlighting::highlight_prompt;
 use crate::state::AppState;
 use crate::theme;

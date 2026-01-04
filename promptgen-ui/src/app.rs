@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::components::{
-    dialogs, EditorPanel, PreviewPanel, SidebarPanel, SlotPanel, TabBarPanel, VariableEditorPanel,
+    EditorPanel, PreviewPanel, SidebarPanel, SlotPanel, TabBarPanel, VariableEditorPanel, dialogs,
 };
 use crate::state::{AppState, EditorMode, PromptTab, VariableSortOrder};
 use crate::theme;
@@ -120,14 +120,14 @@ impl PromptGenApp {
 
             // Sync editor content with active tab
             if let Some(idx) = self.state.active_tab_index
-                && let Some(tab) = self.state.prompt_tabs.get(idx) {
-                    self.state.editor_content = tab.content.clone();
-                    self.state.slot_values =
-                        crate::state::AppState::slot_values_to_vec_map(&tab.slots);
-                    self.state.update_parse_result();
-                    // Render immediately so preview is populated on app launch
-                    self.state.request_render();
-                }
+                && let Some(tab) = self.state.prompt_tabs.get(idx)
+            {
+                self.state.editor_content = tab.content.clone();
+                self.state.slot_values = crate::state::AppState::slot_values_to_vec_map(&tab.slots);
+                self.state.update_parse_result();
+                // Render immediately so preview is populated on app launch
+                self.state.request_render();
+            }
         }
         // If no persisted tabs, the AppState default already creates "Prompt 1"
     }
@@ -206,7 +206,6 @@ impl PromptGenApp {
     /// Create a new library file
     #[cfg(not(target_arch = "wasm32"))]
     fn create_library(&mut self, name: String, path: PathBuf) {
-
         // TODO: Check if current library has unsaved changes and prompt user
 
         // Create empty library
@@ -410,9 +409,10 @@ impl PromptGenApp {
                 // Persist library to disk
                 #[cfg(not(target_arch = "wasm32"))]
                 if let Some(path) = &self.state.library_path
-                    && let Err(e) = promptgen_core::save_library(&self.state.library, path) {
-                        log::error!("Failed to save library: {}", e);
-                    }
+                    && let Err(e) = promptgen_core::save_library(&self.state.library, path)
+                {
+                    log::error!("Failed to save library: {}", e);
+                }
 
                 // Now close the tab (it's clean now)
                 self.state.close_tab_force(tab_index);
@@ -566,10 +566,10 @@ impl eframe::App for PromptGenApp {
                     #[cfg(not(target_arch = "wasm32"))]
                     if tab_result.library_modified
                         && let Some(path) = &self.state.library_path
-                            && let Err(e) = promptgen_core::save_library(&self.state.library, path)
-                            {
-                                log::error!("Failed to save library: {}", e);
-                            }
+                        && let Err(e) = promptgen_core::save_library(&self.state.library, path)
+                    {
+                        log::error!("Failed to save library: {}", e);
+                    }
 
                     #[cfg(target_arch = "wasm32")]
                     let _ = tab_result;
@@ -595,15 +595,16 @@ impl eframe::App for PromptGenApp {
                                     ui.add_space(16.0);
 
                                     // Get current defaults from active tab
-                                    let (mut sep, mut suffix) =
-                                        if let Some(tab) = self.state.get_active_tab() {
-                                            (
-                                                tab.slot_defaults.sep.clone().unwrap_or_default(),
-                                                tab.slot_defaults.suffix.clone().unwrap_or_default(),
-                                            )
-                                        } else {
-                                            (String::new(), String::new())
-                                        };
+                                    let (mut sep, mut suffix) = if let Some(tab) =
+                                        self.state.get_active_tab()
+                                    {
+                                        (
+                                            tab.slot_defaults.sep.clone().unwrap_or_default(),
+                                            tab.slot_defaults.suffix.clone().unwrap_or_default(),
+                                        )
+                                    } else {
+                                        (String::new(), String::new())
+                                    };
 
                                     ui.label("Default Separator:");
                                     let sep_response = ui.add(
@@ -625,8 +626,11 @@ impl eframe::App for PromptGenApp {
                                         if let Some(tab) = self.state.get_active_tab_mut() {
                                             tab.slot_defaults.sep =
                                                 if sep.is_empty() { None } else { Some(sep) };
-                                            tab.slot_defaults.suffix =
-                                                if suffix.is_empty() { None } else { Some(suffix) };
+                                            tab.slot_defaults.suffix = if suffix.is_empty() {
+                                                None
+                                            } else {
+                                                Some(suffix)
+                                            };
                                             tab.dirty = true;
                                         }
                                         self.state.request_render();
@@ -639,6 +643,8 @@ impl eframe::App for PromptGenApp {
                                 });
 
                                 SlotPanel::show(ui, &mut self.state);
+                            } else {
+                                ui.add_space(300.0);
                             }
                         });
                 }
