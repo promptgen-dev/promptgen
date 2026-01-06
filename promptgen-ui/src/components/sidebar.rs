@@ -437,6 +437,19 @@ impl SidebarPanel {
                     state.request_render();
                 }
 
+                // Handle group name clicks - insert dynamic option @"GroupName"
+                if let Some(group_name) = result.group_name_clicked {
+                    let dynamic_option = format!("@\"{}\"", group_name);
+                    // Check if already selected
+                    let is_selected = selected_values.contains(&dynamic_option);
+                    if is_selected {
+                        state.remove_slot_value(&slot_label, &dynamic_option);
+                    } else if can_add {
+                        state.add_slot_value(&slot_label, dynamic_option);
+                    }
+                    state.request_render();
+                }
+
                 // Handle edit button clicks - navigate to variable editor
                 if let Some(name) = result.edit_clicked {
                     state.enter_variable_editor(&name);

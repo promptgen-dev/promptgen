@@ -45,6 +45,8 @@ pub struct VariableListResult {
     pub option_clicked: Option<String>,
     /// Edit button clicked for a group (group_name)
     pub edit_clicked: Option<String>,
+    /// Group name header clicked (for inserting dynamic option @"GroupName")
+    pub group_name_clicked: Option<String>,
 }
 
 /// Internal display data for a group after search filtering
@@ -334,7 +336,7 @@ impl VariableList {
                     }
                 });
 
-                // Group name label (shrinks to fit, truncates text)
+                // Group name - clickable for editable groups, styled like options
                 let header_text = Self::build_header_text(
                     &group_display.name,
                     group_display.options.len(),
@@ -342,13 +344,42 @@ impl VariableList {
                     group_display.is_editable,
                 );
                 let group_name = group_display.name.clone();
+                let is_editable = group_display.is_editable;
                 flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
-                    ui.set_width(ui.available_width());
-                    let label = egui::Label::new(&header_text).truncate();
-                    let response = ui.add(label);
-                    if group_display.is_editable {
-                        response.on_hover_text(format!("@{}", group_name));
-                    }
+                    // Use justified layout to make button fill width (like option buttons)
+                    ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                        // Editable groups get a clickable button styled like options
+                        if is_editable {
+                            // Full-width button with transparent fill (like option buttons)
+                            let button = egui::Button::new(&header_text)
+                                .fill(egui::Color32::TRANSPARENT)
+                                .wrap();
+                            let response = ui.add(button);
+
+                            // Hover text depends on mode
+                            let hover_text = if config.selectable {
+                                format!("Click to insert @\"{}\"", group_name)
+                            } else {
+                                format!("Click to copy @\"{}\"", group_name)
+                            };
+                            response.clone().on_hover_text(&hover_text);
+
+                            // Handle click
+                            if response.clicked() {
+                                if config.selectable {
+                                    // In slot picker mode, signal to insert as dynamic option
+                                    result.group_name_clicked = Some(group_name.clone());
+                                } else {
+                                    // In variables list mode, copy to clipboard
+                                    let copy_text = format!("@\"{}\"", group_name);
+                                    ui.ctx().copy_text(copy_text);
+                                }
+                            }
+                        } else {
+                            // Non-editable groups just show a label
+                            ui.add(egui::Label::new(&header_text).truncate());
+                        }
+                    });
                 });
 
                 // Edit button (only for editable groups)
