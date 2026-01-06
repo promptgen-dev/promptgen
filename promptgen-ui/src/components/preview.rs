@@ -107,7 +107,7 @@ impl PreviewPanel {
         ui.separator();
         ui.label("Output:");
         egui::ScrollArea::vertical()
-            .max_height(300.0)
+            .auto_shrink([false, false])
             .show(ui, |ui| {
                 if state.preview_output.is_empty() {
                     ui.label(
