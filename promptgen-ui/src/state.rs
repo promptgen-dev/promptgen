@@ -227,6 +227,7 @@ pub struct AppState {
     pub slot_values: HashMap<String, Vec<String>>,
     pub auto_randomize_seed: bool,
     pub auto_render: bool,
+    pub auto_copy: bool,
     pub preview_dirty: bool,
 
     // UI State
@@ -278,6 +279,7 @@ impl Default for AppState {
             slot_values: HashMap::new(),
             auto_randomize_seed: true,
             auto_render: true,
+            auto_copy: false,
             preview_dirty: false,
             sidebar_view_mode: SidebarViewMode::default(),
             variable_sort_order: VariableSortOrder::default(),

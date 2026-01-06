@@ -8,8 +8,17 @@ pub struct PreviewPanel;
 impl PreviewPanel {
     /// Render the preview panel.
     pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
+        // Capture output before processing render
+        let output_before = state.preview_output.clone();
+
         // Process any pending render requests from other components
         state.process_pending_render();
+
+        // Auto-copy if enabled and output changed
+        if state.auto_copy && state.preview_output != output_before && !state.preview_output.is_empty()
+        {
+            ui.ctx().copy_text(state.preview_output.clone());
+        }
 
         ui.heading("Preview");
         ui.separator();
@@ -50,6 +59,10 @@ impl PreviewPanel {
         ui.checkbox(&mut state.auto_randomize_seed, "Randomize seed")
             .on_hover_text("Generate a new random seed on edit and when clicking Render");
 
+        // Auto-copy checkbox
+        ui.checkbox(&mut state.auto_copy, "Auto copy")
+            .on_hover_text("Automatically copy output to clipboard when it changes");
+
         ui.add_space(8.0);
 
         // Render and copy buttons - always visible
@@ -69,6 +82,9 @@ impl PreviewPanel {
                 }
                 if let Err(e) = state.render_prompt() {
                     state.preview_output = format!("Error: {}", e);
+                } else if state.auto_copy && !state.preview_output.is_empty() {
+                    // Auto-copy on manual render
+                    ui.ctx().copy_text(state.preview_output.clone());
                 }
             }
 

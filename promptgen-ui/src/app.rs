@@ -28,6 +28,10 @@ pub struct PromptGenApp {
     #[serde(default)]
     variable_sort_order: VariableSortOrder,
 
+    /// Persisted auto-copy setting
+    #[serde(default)]
+    auto_copy: bool,
+
     #[serde(skip)]
     state: AppState,
 
@@ -98,8 +102,9 @@ impl PromptGenApp {
 
     /// Restore tabs from persisted data into AppState
     fn restore_tabs(&mut self) {
-        // Restore variable sort order
+        // Restore persisted settings
         self.state.variable_sort_order = self.variable_sort_order;
+        self.state.auto_copy = self.auto_copy;
 
         // If we have persisted tabs, restore them
         if !self.prompt_tabs.is_empty() {
@@ -140,6 +145,7 @@ impl PromptGenApp {
         self.prompt_tabs = self.state.prompt_tabs.clone();
         self.active_tab_index = self.state.active_tab_index;
         self.variable_sort_order = self.state.variable_sort_order;
+        self.auto_copy = self.state.auto_copy;
     }
 
     /// Open a file picker dialog and load the selected library
