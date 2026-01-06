@@ -4,8 +4,9 @@
 
 use egui_flex::{Flex, FlexItem};
 use egui_material_icons::icons::{
-    ICON_ADD, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHEVRON_RIGHT, ICON_COLLAPSE_ALL,
-    ICON_EDIT, ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_MENU, ICON_SEARCH, ICON_SORT_BY_ALPHA,
+    ICON_ADD, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHEVRON_RIGHT, ICON_CLOSE,
+    ICON_COLLAPSE_ALL, ICON_EDIT, ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_MENU, ICON_SEARCH,
+    ICON_SORT_BY_ALPHA,
 };
 
 use crate::state::{OptionGroup, VariableSortOrder};
@@ -63,15 +64,38 @@ struct GroupDisplay {
 pub struct VariableList;
 
 impl VariableList {
-    /// Render the search bar.
+    /// Render the search bar with clear button.
     pub fn show_search_bar(ui: &mut egui::Ui, search_query: &mut String) {
-        ui.horizontal(|ui| {
-            ui.label(ICON_SEARCH);
-            ui.add(
-                egui::TextEdit::singleline(search_query)
-                    .hint_text("Search...")
-                    .desired_width(f32::INFINITY),
-            );
+        let has_query = !search_query.is_empty();
+
+        Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
+            // Search icon
+            flex.add_ui(FlexItem::default(), |ui| {
+                ui.label(ICON_SEARCH);
+            });
+
+            // Text input - grows to fill space but shrinks to prevent overflow
+            flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
+                ui.set_width(ui.available_width());
+                ui.add(
+                    egui::TextEdit::singleline(search_query)
+                        .hint_text("@var or text")
+                        .desired_width(ui.available_width()),
+                );
+            });
+
+            // Clear button (only shown when there's a query)
+            if has_query {
+                flex.add_ui(FlexItem::default(), |ui| {
+                    if ui
+                        .small_button(ICON_CLOSE)
+                        .on_hover_text("Clear search")
+                        .clicked()
+                    {
+                        search_query.clear();
+                    }
+                });
+            }
         });
     }
 

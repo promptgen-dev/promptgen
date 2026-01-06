@@ -5,9 +5,7 @@ use std::path::PathBuf;
 use egui_flex::{Flex, FlexItem};
 use promptgen_core::Cardinality;
 
-use egui_material_icons::icons::{
-    ICON_CLOSE, ICON_DELETE, ICON_DESCRIPTION, ICON_MORE_VERT, ICON_SEARCH,
-};
+use egui_material_icons::icons::{ICON_CLOSE, ICON_DELETE, ICON_DESCRIPTION, ICON_MORE_VERT};
 
 use super::variable_list::{VariableList, VariableListConfig};
 use crate::state::{AppState, OptionGroup, SidebarMode, SidebarViewMode};
@@ -113,24 +111,8 @@ impl SidebarPanel {
 
             ui.add_space(4.0);
 
-            // Search input - icon changes to clear button when text exists
-            ui.horizontal(|ui| {
-                if state.search_query.is_empty() {
-                    ui.label(ICON_SEARCH);
-                } else if ui
-                    .small_button(ICON_CLOSE)
-                    .on_hover_text("Clear search")
-                    .clicked()
-                {
-                    state.search_query.clear();
-                }
-
-                ui.add(
-                    egui::TextEdit::singleline(&mut state.search_query)
-                        .hint_text("Search...")
-                        .desired_width(f32::INFINITY),
-                );
-            });
+            // Search input with clear button
+            VariableList::show_search_bar(ui, &mut state.search_query);
 
             // Toolbar (only in Variables view) - includes new variable button
             if state.sidebar_view_mode == SidebarViewMode::Variables {
