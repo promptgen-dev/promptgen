@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::components::{
     EditorPanel, PreviewPanel, SidebarPanel, SlotPanel, TabBarPanel, VariableEditorPanel, dialogs,
 };
-use crate::state::{AppState, EditorMode, PromptTab, VariableSortOrder};
+use crate::state::{AppState, EditorMode, PromptTab, SidebarViewMode, VariableSortOrder};
 use crate::theme;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -31,6 +31,18 @@ pub struct PromptGenApp {
     /// Persisted auto-copy setting
     #[serde(default)]
     auto_copy: bool,
+
+    /// Persisted sidebar view mode (Prompts vs Variables)
+    #[serde(default)]
+    sidebar_view_mode: SidebarViewMode,
+
+    /// Persisted slot picker sort order (separate from sidebar variable sort)
+    #[serde(default)]
+    slot_picker_sort_order: VariableSortOrder,
+
+    /// Persisted slot picker option sort order (separate from sidebar option sort)
+    #[serde(default)]
+    slot_picker_option_sort_order: VariableSortOrder,
 
     #[serde(skip)]
     state: AppState,
@@ -105,6 +117,9 @@ impl PromptGenApp {
         // Restore persisted settings
         self.state.variable_sort_order = self.variable_sort_order;
         self.state.auto_copy = self.auto_copy;
+        self.state.sidebar_view_mode = self.sidebar_view_mode;
+        self.state.slot_picker_sort_order = self.slot_picker_sort_order;
+        self.state.slot_picker_option_sort_order = self.slot_picker_option_sort_order;
 
         // If we have persisted tabs, restore them
         if !self.prompt_tabs.is_empty() {
@@ -146,6 +161,9 @@ impl PromptGenApp {
         self.active_tab_index = self.state.active_tab_index;
         self.variable_sort_order = self.state.variable_sort_order;
         self.auto_copy = self.state.auto_copy;
+        self.sidebar_view_mode = self.state.sidebar_view_mode;
+        self.slot_picker_sort_order = self.state.slot_picker_sort_order;
+        self.slot_picker_option_sort_order = self.state.slot_picker_option_sort_order;
     }
 
     /// Open a file picker dialog and load the selected library

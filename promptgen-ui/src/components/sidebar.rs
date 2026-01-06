@@ -395,8 +395,8 @@ impl SidebarPanel {
         // Toolbar (sort, expand/collapse) - no new variable button in slot picker
         VariableList::show_toolbar(
             ui,
-            &mut state.variable_sort_order,
-            &mut state.option_sort_order,
+            &mut state.slot_picker_sort_order,
+            &mut state.slot_picker_option_sort_order,
             &mut state.expand_all_variables,
             false, // don't show new variable button
         );
@@ -437,8 +437,8 @@ impl SidebarPanel {
                     ui,
                     &groups,
                     &state.slot_picker_search_query,
-                    state.variable_sort_order,
-                    state.option_sort_order,
+                    state.slot_picker_sort_order,
+                    state.slot_picker_option_sort_order,
                     expand_all,
                     &config,
                     Some(&state.library),
