@@ -44,6 +44,14 @@ pub struct PromptGenApp {
     #[serde(default)]
     slot_picker_option_sort_order: VariableSortOrder,
 
+    /// Persisted option sort order (for variable options in sidebar)
+    #[serde(default)]
+    option_sort_order: VariableSortOrder,
+
+    /// Persisted prompt sort order
+    #[serde(default)]
+    prompt_sort_order: VariableSortOrder,
+
     #[serde(skip)]
     state: AppState,
 
@@ -120,6 +128,8 @@ impl PromptGenApp {
         self.state.sidebar_view_mode = self.sidebar_view_mode;
         self.state.slot_picker_sort_order = self.slot_picker_sort_order;
         self.state.slot_picker_option_sort_order = self.slot_picker_option_sort_order;
+        self.state.option_sort_order = self.option_sort_order;
+        self.state.prompt_sort_order = self.prompt_sort_order;
 
         // If we have persisted tabs, restore them
         if !self.prompt_tabs.is_empty() {
@@ -164,6 +174,8 @@ impl PromptGenApp {
         self.sidebar_view_mode = self.state.sidebar_view_mode;
         self.slot_picker_sort_order = self.state.slot_picker_sort_order;
         self.slot_picker_option_sort_order = self.state.slot_picker_option_sort_order;
+        self.option_sort_order = self.state.option_sort_order;
+        self.prompt_sort_order = self.state.prompt_sort_order;
     }
 
     /// Open a file picker dialog and load the selected library

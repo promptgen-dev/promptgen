@@ -5,14 +5,16 @@ use std::path::PathBuf;
 use egui_flex::{Flex, FlexItem};
 use promptgen_core::Cardinality;
 
-use egui_material_icons::icons::{ICON_CLOSE, ICON_DESCRIPTION};
+use egui_material_icons::icons::{
+    ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CLOSE, ICON_DESCRIPTION, ICON_SORT_BY_ALPHA,
+};
 
 use super::prompt_export_list::{PromptExportAction, PromptExportList};
 use super::prompt_menu::{PromptMenu, PromptMenuAction};
 use super::prompts_menu::{PromptsMenu, PromptsMenuAction};
 use super::variable_export_list::{VariableExportAction, VariableExportList};
 use super::variable_list::{VariableList, VariableListConfig};
-use crate::state::{AppState, OptionGroup, SidebarMode, SidebarViewMode};
+use crate::state::{AppState, OptionGroup, SidebarMode, SidebarViewMode, VariableSortOrder};
 use crate::theme;
 
 /// Sidebar panel for navigating libraries, prompts, and variables.
@@ -190,15 +192,27 @@ impl SidebarPanel {
     /// Render the prompt list.
     fn render_prompt_list(ui: &mut egui::Ui, state: &mut AppState) {
         let search_query = state.search_query.to_lowercase();
+        let sort_order = state.prompt_sort_order;
 
         // Collect prompt info we need
-        let prompts: Vec<_> = state
+        let mut prompts: Vec<_> = state
             .library
             .prompts
             .iter()
             .filter(|p| search_query.is_empty() || p.name.to_lowercase().contains(&search_query))
             .map(|p| p.name.clone())
             .collect();
+
+        // Apply sorting
+        match sort_order {
+            VariableSortOrder::None => {}
+            VariableSortOrder::Ascending => {
+                prompts.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+            }
+            VariableSortOrder::Descending => {
+                prompts.sort_by(|a, b| b.to_lowercase().cmp(&a.to_lowercase()));
+            }
+        }
 
         if prompts.is_empty() {
             if search_query.is_empty() {
@@ -499,7 +513,7 @@ impl SidebarPanel {
             });
     }
 
-    /// Render the prompts toolbar with Import/Export menu.
+    /// Render the prompts toolbar with Import/Export menu and sort button.
     fn show_prompts_toolbar(ui: &mut egui::Ui, state: &mut AppState) {
         ui.add_space(4.0);
         Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
@@ -519,6 +533,41 @@ impl SidebarPanel {
 
             // Spacer to push remaining buttons to the right
             flex.add_ui(FlexItem::default().grow(1.0), |_ui| {});
+
+            // Sort button - cycles through None -> Ascending -> Descending -> None
+            flex.add_ui(FlexItem::default(), |ui| {
+                let current_theme = theme::current(ui.ctx());
+                let is_active = state.prompt_sort_order != VariableSortOrder::None;
+                let (icon, tooltip) = match state.prompt_sort_order {
+                    VariableSortOrder::None => {
+                        (ICON_SORT_BY_ALPHA.to_string(), "Sort prompts A-Z")
+                    }
+                    VariableSortOrder::Ascending => (
+                        format!("{}{}", ICON_SORT_BY_ALPHA, ICON_ARROW_UPWARD),
+                        "Sort prompts Z-A",
+                    ),
+                    VariableSortOrder::Descending => (
+                        format!("{}{}", ICON_SORT_BY_ALPHA, ICON_ARROW_DOWNWARD),
+                        "Clear sort",
+                    ),
+                };
+                let fill = if is_active {
+                    current_theme.active_selected_bg()
+                } else {
+                    egui::Color32::TRANSPARENT
+                };
+                if ui
+                    .add(egui::Button::new(&icon).small().fill(fill))
+                    .on_hover_text(tooltip)
+                    .clicked()
+                {
+                    state.prompt_sort_order = match state.prompt_sort_order {
+                        VariableSortOrder::None => VariableSortOrder::Ascending,
+                        VariableSortOrder::Ascending => VariableSortOrder::Descending,
+                        VariableSortOrder::Descending => VariableSortOrder::None,
+                    };
+                }
+            });
         });
     }
 

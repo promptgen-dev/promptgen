@@ -298,6 +298,9 @@ pub struct AppState {
     pub import_parsed_variables: Vec<ImportedVariable>,
     pub import_parse_error: Option<String>,
 
+    // Prompt List State
+    pub prompt_sort_order: VariableSortOrder,
+
     // Prompt Export Mode State
     pub prompt_export_mode_active: bool,
     pub prompt_export_selected: HashSet<String>,
@@ -358,6 +361,7 @@ impl Default for AppState {
             import_yaml_text: String::new(),
             import_parsed_variables: Vec::new(),
             import_parse_error: None,
+            prompt_sort_order: VariableSortOrder::default(),
             prompt_export_mode_active: false,
             prompt_export_selected: HashSet::new(),
             prompt_export_search_query: String::new(),
