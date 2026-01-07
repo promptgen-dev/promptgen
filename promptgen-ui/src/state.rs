@@ -37,6 +37,17 @@ pub enum VariableSortOrder {
     Descending,
 }
 
+/// An imported variable with its original name, renamed name, and options
+#[derive(Debug, Clone)]
+pub struct ImportedVariable {
+    /// Original name from the YAML
+    pub original_name: String,
+    /// Renamed name (editable by user to resolve conflicts)
+    pub renamed_name: String,
+    /// The options for this variable
+    pub options: Vec<String>,
+}
+
 /// Sidebar mode - normal navigation vs slot picker overlay
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SidebarMode {
@@ -267,6 +278,12 @@ pub struct AppState {
     pub export_selected_variables: HashSet<String>,
     pub export_search_query: String,
     pub export_sort_order: VariableSortOrder,
+
+    // Variable Import Dialog State
+    pub import_dialog_open: bool,
+    pub import_yaml_text: String,
+    pub import_parsed_variables: Vec<ImportedVariable>,
+    pub import_parse_error: Option<String>,
 }
 
 impl Default for AppState {
@@ -313,6 +330,10 @@ impl Default for AppState {
             export_selected_variables: HashSet::new(),
             export_search_query: String::new(),
             export_sort_order: VariableSortOrder::default(),
+            import_dialog_open: false,
+            import_yaml_text: String::new(),
+            import_parsed_variables: Vec::new(),
+            import_parse_error: None,
         }
     }
 }
@@ -1666,5 +1687,147 @@ impl AppState {
         };
 
         serde_yaml::to_string(&export).ok()
+    }
+
+    // ==================== Variable Import ====================
+
+    /// Open the import dialog
+    pub fn open_import_dialog(&mut self) {
+        self.import_dialog_open = true;
+        self.import_yaml_text.clear();
+        self.import_parsed_variables.clear();
+        self.import_parse_error = None;
+    }
+
+    /// Close the import dialog
+    pub fn close_import_dialog(&mut self) {
+        self.import_dialog_open = false;
+        self.import_yaml_text.clear();
+        self.import_parsed_variables.clear();
+        self.import_parse_error = None;
+    }
+
+    /// Parse the import YAML text and update parsed variables
+    pub fn parse_import_yaml(&mut self) {
+        if self.import_yaml_text.trim().is_empty() {
+            self.import_parsed_variables.clear();
+            self.import_parse_error = None;
+            return;
+        }
+
+        // DTO struct for parsing
+        #[derive(serde::Deserialize)]
+        struct VariableDto {
+            name: String,
+            #[serde(default)]
+            options: Vec<String>,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct VariablesImport {
+            #[serde(default)]
+            variables: Vec<VariableDto>,
+        }
+
+        match serde_yaml::from_str::<VariablesImport>(&self.import_yaml_text) {
+            Ok(import) => {
+                self.import_parse_error = None;
+                self.import_parsed_variables = import
+                    .variables
+                    .into_iter()
+                    .map(|v| ImportedVariable {
+                        original_name: v.name.clone(),
+                        renamed_name: v.name,
+                        options: v.options,
+                    })
+                    .collect();
+            }
+            Err(e) => {
+                self.import_parse_error = Some(format!("Parse error: {}", e));
+                self.import_parsed_variables.clear();
+            }
+        }
+    }
+
+    /// Check if a specific imported variable originally had a conflict
+    /// (original_name matches an existing library variable)
+    pub fn is_import_originally_conflicting(&self, index: usize) -> bool {
+        let Some(var) = self.import_parsed_variables.get(index) else {
+            return false;
+        };
+
+        // Check if original_name matches any existing library variable
+        self.library
+            .variables
+            .iter()
+            .any(|v| v.name == var.original_name)
+    }
+
+    /// Check if a specific imported variable has a conflict
+    /// (matches existing name OR duplicates another imported variable's renamed name)
+    pub fn is_import_name_conflicting(&self, index: usize) -> bool {
+        let Some(var) = self.import_parsed_variables.get(index) else {
+            return false;
+        };
+
+        let name = &var.renamed_name;
+
+        // Check if empty
+        if name.trim().is_empty() {
+            return true;
+        }
+
+        // Check against existing library variables
+        if self.library.variables.iter().any(|v| &v.name == name) {
+            return true;
+        }
+
+        // Check against other imported variables (duplicate renamed names)
+        for (i, other) in self.import_parsed_variables.iter().enumerate() {
+            if i != index && other.renamed_name == *name {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Check if import can proceed (no conflicts, at least one variable)
+    pub fn can_import(&self) -> bool {
+        if self.import_parsed_variables.is_empty() {
+            return false;
+        }
+
+        // Check all imported variables for conflicts
+        for idx in 0..self.import_parsed_variables.len() {
+            if self.is_import_name_conflicting(idx) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Perform the import - add all parsed variables to the library
+    pub fn perform_import(&mut self) {
+        if !self.can_import() {
+            return;
+        }
+
+        for var in &self.import_parsed_variables {
+            self.library.variables.push(promptgen_core::PromptVariable {
+                name: var.renamed_name.clone(),
+                options: var.options.clone(),
+            });
+        }
+
+        self.close_import_dialog();
+    }
+
+    /// Update the renamed name for an imported variable
+    pub fn update_import_renamed_name(&mut self, index: usize, new_name: String) {
+        if let Some(var) = self.import_parsed_variables.get_mut(index) {
+            var.renamed_name = new_name;
+        }
     }
 }

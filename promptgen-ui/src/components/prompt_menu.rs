@@ -38,10 +38,10 @@ impl PromptMenu {
                             .color(egui::Color32::from_rgb(243, 139, 168)), // Catppuccin red
                     )
                     .clicked()
-                {
-                    action = PromptMenuAction::Delete;
-                    ui.close();
-                }
+            {
+                action = PromptMenuAction::Delete;
+                ui.close();
+            }
         })
         .response
         .on_hover_text("More options");

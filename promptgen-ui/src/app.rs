@@ -532,6 +532,63 @@ impl PromptGenApp {
             RenamePromptAction::None => {}
         }
     }
+
+    /// Render the import variables dialog and handle actions
+    fn render_import_variables_dialog(&mut self, ctx: &egui::Context) {
+        use dialogs::ImportVariablesAction;
+
+        if !self.state.import_dialog_open {
+            return;
+        }
+
+        let can_import = self.state.can_import();
+
+        // Pre-compute flags for each imported variable
+        let originally_conflicting: Vec<bool> = (0..self.state.import_parsed_variables.len())
+            .map(|idx| self.state.is_import_originally_conflicting(idx))
+            .collect();
+
+        let currently_conflicting: Vec<bool> = (0..self.state.import_parsed_variables.len())
+            .map(|idx| self.state.is_import_name_conflicting(idx))
+            .collect();
+
+        let action = dialogs::render_import_variables_dialog(
+            ctx,
+            &mut self.state.import_yaml_text,
+            &self.state.import_parsed_variables,
+            self.state.import_parse_error.as_deref(),
+            can_import,
+            &originally_conflicting,
+            &currently_conflicting,
+        );
+
+        match action {
+            ImportVariablesAction::Import => {
+                // Perform the import
+                self.state.perform_import();
+
+                // Persist library to disk
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(path) = &self.state.library_path
+                    && let Err(e) = promptgen_core::save_library(&self.state.library, path)
+                {
+                    log::error!("Failed to save library after import: {}", e);
+                }
+
+                self.state.close_import_dialog();
+            }
+            ImportVariablesAction::Cancel => {
+                self.state.close_import_dialog();
+            }
+            ImportVariablesAction::YamlChanged => {
+                self.state.parse_import_yaml();
+            }
+            ImportVariablesAction::RenamedChanged { index, new_name } => {
+                self.state.update_import_renamed_name(index, new_name);
+            }
+            ImportVariablesAction::None => {}
+        }
+    }
 }
 
 impl eframe::App for PromptGenApp {
@@ -612,8 +669,8 @@ impl eframe::App for PromptGenApp {
         // Right preview panel
         egui::SidePanel::right("preview")
             .resizable(true)
-            .default_width(300.0)
-            .width_range(200.0..=500.0)
+            .default_width(400.0)
+            .width_range(400.0..=500.0)
             .show(ctx, |ui| {
                 PreviewPanel::show(ui, &mut self.state);
             });
@@ -749,5 +806,8 @@ impl eframe::App for PromptGenApp {
 
         // Render rename prompt dialog (if active)
         self.render_rename_prompt_dialog(ctx);
+
+        // Render import variables dialog (if active)
+        self.render_import_variables_dialog(ctx);
     }
 }

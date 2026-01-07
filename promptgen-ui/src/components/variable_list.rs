@@ -5,10 +5,11 @@
 use egui_flex::{Flex, FlexItem};
 use egui_material_icons::icons::{
     ICON_ADD, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHEVRON_RIGHT, ICON_CLOSE,
-    ICON_COLLAPSE_ALL, ICON_EDIT, ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_FILE_UPLOAD, ICON_MENU,
-    ICON_SEARCH, ICON_SORT_BY_ALPHA,
+    ICON_COLLAPSE_ALL, ICON_EDIT, ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_MENU, ICON_SEARCH,
+    ICON_SORT_BY_ALPHA,
 };
 
+use super::variable_menu::{VariableMenu, VariableMenuAction};
 use crate::state::{OptionGroup, VariableSortOrder};
 use crate::theme;
 
@@ -43,8 +44,10 @@ impl Default for VariableListConfig<'_> {
 pub struct ToolbarResult {
     /// Whether the new variable button was clicked
     pub new_variable_clicked: bool,
-    /// Whether the export button was clicked
+    /// Whether the export menu item was clicked
     pub export_clicked: bool,
+    /// Whether the import menu item was clicked
+    pub import_clicked: bool,
 }
 
 /// Result from rendering the variable list.
@@ -110,15 +113,15 @@ impl VariableList {
         });
     }
 
-    /// Render the toolbar with optional new variable and export buttons, sort, and expand/collapse buttons.
-    /// Returns a ToolbarResult indicating which buttons were clicked.
+    /// Render the toolbar with optional new variable button, import/export menu, sort, and expand/collapse buttons.
+    /// Returns a ToolbarResult indicating which buttons/menu items were clicked.
     pub fn show_toolbar(
         ui: &mut egui::Ui,
         sort_order: &mut VariableSortOrder,
         option_sort_order: &mut VariableSortOrder,
         expand_all: &mut Option<bool>,
         show_new_variable_button: bool,
-        show_export_button: bool,
+        show_import_export_menu: bool,
     ) -> ToolbarResult {
         let mut result = ToolbarResult::default();
 
@@ -137,15 +140,18 @@ impl VariableList {
                 });
             }
 
-            // Export button (left-aligned, next to Add)
-            if show_export_button {
+            // Import/Export menu (left-aligned, next to Add)
+            if show_import_export_menu {
                 flex.add_ui(FlexItem::default(), |ui| {
-                    if ui
-                        .small_button(format!("{} Export", ICON_FILE_UPLOAD))
-                        .on_hover_text("Export variables to clipboard")
-                        .clicked()
-                    {
-                        result.export_clicked = true;
+                    let menu_action = VariableMenu::show(ui);
+                    match menu_action {
+                        VariableMenuAction::Export => {
+                            result.export_clicked = true;
+                        }
+                        VariableMenuAction::Import => {
+                            result.import_clicked = true;
+                        }
+                        VariableMenuAction::None => {}
                     }
                 });
             }

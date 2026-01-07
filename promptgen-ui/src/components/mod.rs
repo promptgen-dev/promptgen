@@ -11,6 +11,7 @@ mod tab_bar;
 mod variable_editor;
 mod variable_export_list;
 mod variable_list;
+mod variable_menu;
 
 pub use editor::EditorPanel;
 pub use preview::PreviewPanel;

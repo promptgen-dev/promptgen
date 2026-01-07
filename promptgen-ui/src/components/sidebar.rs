@@ -122,7 +122,7 @@ impl SidebarPanel {
             // Search input with clear button
             VariableList::show_search_bar(ui, &mut state.search_query);
 
-            // Toolbar (only in Variables view) - includes new variable and export buttons
+            // Toolbar (only in Variables view) - includes new variable button and import/export menu
             if state.sidebar_view_mode == SidebarViewMode::Variables {
                 let toolbar_result = VariableList::show_toolbar(
                     ui,
@@ -130,13 +130,16 @@ impl SidebarPanel {
                     &mut state.option_sort_order,
                     &mut state.expand_all_variables,
                     true,  // show new variable button
-                    true,  // show export button
+                    true,  // show import/export menu
                 );
                 if toolbar_result.new_variable_clicked {
                     state.enter_new_variable_editor();
                 }
                 if toolbar_result.export_clicked {
                     state.enter_export_mode();
+                }
+                if toolbar_result.import_clicked {
+                    state.open_import_dialog();
                 }
             }
 

@@ -44,6 +44,16 @@ impl VariableEditorPanel {
                     should_close = true;
                 }
 
+                // Delete button (only for existing variables)
+                if let Some(original_name) = state.variable_editor_original_name.clone() {
+                    if ui
+                        .button(RichText::new("Delete").color(theme::current(ui.ctx()).syntax_error()))
+                        .clicked()
+                    {
+                        state.request_delete_variable(&original_name);
+                    }
+                }
+
                 // Dirty indicator
                 if state.variable_editor_dirty {
                     ui.label(RichText::new("•").color(Color32::from_rgb(249, 226, 175))); // Yellow dot
@@ -100,19 +110,6 @@ impl VariableEditorPanel {
         Self::show_option_errors(ui, state);
 
         ui.add_space(16.0);
-
-        // Delete button (only for existing variables)
-        if let Some(original_name) = state.variable_editor_original_name.clone() {
-            ui.separator();
-            ui.add_space(8.0);
-
-            if ui
-                .button(RichText::new("Delete Variable").color(theme::current(ui.ctx()).syntax_error()))
-                .clicked()
-            {
-                state.request_delete_variable(&original_name);
-            }
-        }
 
         // Handle confirmation dialogs
         Self::show_confirmation_dialogs(ui, state, &mut should_close);

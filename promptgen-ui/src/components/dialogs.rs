@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use egui_material_icons::icons::ICON_CLOSE;
+
 /// Actions that can result from the Create Library dialog
 pub enum CreateLibraryAction {
     None,
@@ -213,10 +215,7 @@ pub fn render_close_unsaved_tab_dialog(
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
-            ui.label(format!(
-                "\"{}\" has unsaved changes.",
-                tab_name
-            ));
+            ui.label(format!("\"{}\" has unsaved changes.", tab_name));
             ui.label("Do you want to save before closing?");
 
             ui.add_space(8.0);
@@ -262,8 +261,7 @@ pub fn render_delete_prompt_dialog(ctx: &egui::Context, prompt_name: &str) -> De
 
                 if ui
                     .button(
-                        egui::RichText::new("Delete")
-                            .color(egui::Color32::from_rgb(243, 139, 168)), // Catppuccin red
+                        egui::RichText::new("Delete").color(egui::Color32::from_rgb(243, 139, 168)), // Catppuccin red
                     )
                     .clicked()
                 {
@@ -360,6 +358,219 @@ pub fn render_rename_prompt_dialog(
             // Handle Escape to cancel
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 action = RenamePromptAction::Cancel;
+            }
+        });
+
+    action
+}
+
+/// Actions that can result from the Import Variables dialog
+pub enum ImportVariablesAction {
+    None,
+    Import,
+    Cancel,
+    /// YAML text changed - needs reparsing
+    YamlChanged,
+    /// Renamed name changed for a specific variable
+    RenamedChanged {
+        index: usize,
+        new_name: String,
+    },
+}
+
+/// Render the Import Variables dialog
+pub fn render_import_variables_dialog(
+    ctx: &egui::Context,
+    yaml_text: &mut String,
+    parsed_variables: &[crate::state::ImportedVariable],
+    parse_error: Option<&str>,
+    can_import: bool,
+    originally_conflicting: &[bool],
+    currently_conflicting: &[bool],
+) -> ImportVariablesAction {
+    let mut action = ImportVariablesAction::None;
+
+    egui::Window::new("Import Variables")
+        .collapsible(false)
+        .resizable(true)
+        .default_width(450.0)
+        .default_height(400.0)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            // Header with Import and Close buttons
+            ui.horizontal(|ui| {
+                ui.heading("Import Variables");
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Close button
+                    if ui.button(ICON_CLOSE).on_hover_text("Close").clicked() {
+                        action = ImportVariablesAction::Cancel;
+                    }
+
+                    // Import button
+                    if ui
+                        .add_enabled(can_import, egui::Button::new("Import"))
+                        .on_hover_text(if can_import {
+                            "Import variables"
+                        } else {
+                            "Resolve all conflicts first"
+                        })
+                        .clicked()
+                    {
+                        action = ImportVariablesAction::Import;
+                    }
+                });
+            });
+
+            ui.add_space(8.0);
+
+            // Conflicts section - show variables that originally had conflicts
+            // (keep visible until Import, even if renamed to resolve)
+            let conflicts: Vec<_> = parsed_variables
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| originally_conflicting.get(*idx).copied().unwrap_or(false))
+                .collect();
+
+            // Status header (replaces static "Conflicts" label)
+            if parse_error.is_none() && !parsed_variables.is_empty() {
+                let unresolved_count = currently_conflicting.iter().filter(|&&c| c).count();
+                let total = parsed_variables.len();
+                let error_color = egui::Color32::from_rgb(243, 139, 168);
+                let success_color = egui::Color32::from_rgb(166, 227, 161);
+
+                if unresolved_count > 0 {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} conflict{} remaining",
+                            unresolved_count,
+                            if unresolved_count == 1 { "" } else { "s" }
+                        ))
+                        .strong()
+                        .color(error_color),
+                    );
+                } else {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} variable{} ready to import",
+                            total,
+                            if total == 1 { "" } else { "s" }
+                        ))
+                        .strong()
+                        .color(success_color),
+                    );
+                }
+                ui.add_space(4.0);
+            }
+
+            if !conflicts.is_empty() {
+
+                for (idx, var) in &conflicts {
+                    let is_still_conflicting =
+                        currently_conflicting.get(*idx).copied().unwrap_or(false);
+                    let error_color = egui::Color32::from_rgb(243, 139, 168);
+                    let success_color = egui::Color32::from_rgb(166, 227, 161); // Catppuccin green
+
+                    // Vertical stack: Ours on top, Imported below
+                    egui::Frame::new()
+                        .fill(ui.visuals().faint_bg_color)
+                        .corner_radius(4.0)
+                        .inner_margin(8.0)
+                        .show(ui, |ui| {
+                            // Ours row
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("Ours:")
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                                ui.label(&var.original_name);
+                            });
+
+                            ui.add_space(4.0);
+
+                            // Imported row with editable field
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("Import as:")
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+
+                                let mut renamed = var.renamed_name.clone();
+
+                                // Style based on current conflict status
+                                let text_edit = if is_still_conflicting {
+                                    egui::TextEdit::singleline(&mut renamed)
+                                        .desired_width(200.0)
+                                        .text_color(error_color)
+                                } else {
+                                    egui::TextEdit::singleline(&mut renamed)
+                                        .desired_width(200.0)
+                                        .text_color(success_color)
+                                };
+
+                                let stroke_color = if is_still_conflicting {
+                                    error_color
+                                } else {
+                                    success_color
+                                };
+
+                                let response = egui::Frame::new()
+                                    .stroke(egui::Stroke::new(1.0, stroke_color))
+                                    .corner_radius(4.0)
+                                    .show(ui, |ui| ui.add(text_edit))
+                                    .inner;
+
+                                if response.changed() {
+                                    action = ImportVariablesAction::RenamedChanged {
+                                        index: *idx,
+                                        new_name: renamed,
+                                    };
+                                }
+                            });
+                        });
+
+                    ui.add_space(4.0);
+                }
+
+                ui.add_space(4.0);
+            }
+
+            // Parse error display
+            if let Some(error) = parse_error {
+                ui.label(
+                    egui::RichText::new(error)
+                        .small()
+                        .color(egui::Color32::from_rgb(243, 139, 168)),
+                );
+                ui.add_space(4.0);
+            }
+
+            // Paste Variables section
+            ui.label(egui::RichText::new("Paste Variables").strong());
+            ui.add_space(4.0);
+
+            // YAML textarea
+            egui::ScrollArea::vertical()
+                .max_height(200.0)
+                .show(ui, |ui| {
+                    let response = ui.add(
+                        egui::TextEdit::multiline(yaml_text)
+                            .desired_width(f32::INFINITY)
+                            .desired_rows(10)
+                            .font(egui::TextStyle::Monospace)
+                            .hint_text("Paste exported variables YAML here..."),
+                    );
+
+                    if response.changed() {
+                        action = ImportVariablesAction::YamlChanged;
+                    }
+                });
+
+            // Handle Escape to cancel
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                action = ImportVariablesAction::Cancel;
             }
         });
 
