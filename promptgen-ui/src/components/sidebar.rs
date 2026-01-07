@@ -5,8 +5,10 @@ use std::path::PathBuf;
 use egui_flex::{Flex, FlexItem};
 use promptgen_core::Cardinality;
 
-use egui_material_icons::icons::{ICON_CLOSE, ICON_DELETE, ICON_DESCRIPTION, ICON_MORE_VERT};
+use egui_material_icons::icons::{ICON_CLOSE, ICON_DESCRIPTION};
 
+use super::prompt_menu::{PromptMenu, PromptMenuAction};
+use super::variable_export_list::{VariableExportAction, VariableExportList};
 use super::variable_list::{VariableList, VariableListConfig};
 use crate::state::{AppState, OptionGroup, SidebarMode, SidebarViewMode};
 use crate::theme;
@@ -58,6 +60,12 @@ impl SidebarPanel {
         // Check if we're in slot picker mode
         if let SidebarMode::SlotPicker { slot_label } = &state.sidebar_mode {
             Self::render_slot_picker(ui, state, slot_label.clone());
+            return;
+        }
+
+        // Check if we're in variable export mode
+        if state.export_mode_active {
+            Self::render_export_mode(ui, state);
             return;
         }
 
@@ -114,17 +122,21 @@ impl SidebarPanel {
             // Search input with clear button
             VariableList::show_search_bar(ui, &mut state.search_query);
 
-            // Toolbar (only in Variables view) - includes new variable button
+            // Toolbar (only in Variables view) - includes new variable and export buttons
             if state.sidebar_view_mode == SidebarViewMode::Variables {
-                let new_var_clicked = VariableList::show_toolbar(
+                let toolbar_result = VariableList::show_toolbar(
                     ui,
                     &mut state.variable_sort_order,
                     &mut state.option_sort_order,
                     &mut state.expand_all_variables,
-                    true, // show new variable button
+                    true,  // show new variable button
+                    true,  // show export button
                 );
-                if new_var_clicked {
+                if toolbar_result.new_variable_clicked {
                     state.enter_new_variable_editor();
+                }
+                if toolbar_result.export_clicked {
+                    state.enter_export_mode();
                 }
             }
 
@@ -183,6 +195,7 @@ impl SidebarPanel {
 
         let mut prompt_to_open: Option<String> = None;
         let mut prompt_to_delete: Option<String> = None;
+        let mut prompt_to_rename: Option<String> = None;
 
         // Get active tab info for highlighting
         let active_tab_name = state
@@ -260,17 +273,18 @@ impl SidebarPanel {
                         });
 
                         // Menu button (fixed size)
-                        let prompt_name_for_delete = name.clone();
+                        let prompt_name_for_menu = name.clone();
                         flex.add_ui(FlexItem::default(), |ui| {
-                            ui.menu_button(ICON_MORE_VERT, |ui| {
-                                ui.set_min_width(120.0);
-                                if ui.button(format!("{} Delete", ICON_DELETE)).clicked() {
-                                    prompt_to_delete = Some(prompt_name_for_delete.clone());
-                                    ui.close();
+                            let menu_action = PromptMenu::show(ui, true);
+                            match menu_action {
+                                PromptMenuAction::Rename => {
+                                    prompt_to_rename = Some(prompt_name_for_menu.clone());
                                 }
-                            })
-                            .response
-                            .on_hover_text("More options");
+                                PromptMenuAction::Delete => {
+                                    prompt_to_delete = Some(prompt_name_for_menu.clone());
+                                }
+                                PromptMenuAction::None => {}
+                            }
                         });
                     });
                 });
@@ -286,6 +300,17 @@ impl SidebarPanel {
         // Request delete confirmation
         if let Some(name) = prompt_to_delete {
             state.request_delete_prompt(&name);
+        }
+
+        // Start rename (opens the prompt first, then starts rename)
+        if let Some(name) = prompt_to_rename {
+            // Open the prompt in a tab if not already open
+            state.open_library_prompt(&name);
+            state.editor_mode = crate::state::EditorMode::Prompt;
+            // Find the tab index for this prompt and start rename
+            if let Some(idx) = state.find_tab_by_library_prompt(&name) {
+                state.start_tab_rename(idx);
+            }
         }
     }
 
@@ -374,13 +399,14 @@ impl SidebarPanel {
         // Search bar
         VariableList::show_search_bar(ui, &mut state.slot_picker_search_query);
 
-        // Toolbar (sort, expand/collapse) - no new variable button in slot picker
+        // Toolbar (sort, expand/collapse) - no new variable or export button in slot picker
         VariableList::show_toolbar(
             ui,
             &mut state.slot_picker_sort_order,
             &mut state.slot_picker_option_sort_order,
             &mut state.expand_all_variables,
             false, // don't show new variable button
+            false, // don't show export button
         );
 
         ui.separator();
@@ -455,5 +481,24 @@ impl SidebarPanel {
                     state.enter_variable_editor(&name);
                 }
             });
+    }
+
+    /// Render the variable export mode UI.
+    fn render_export_mode(ui: &mut egui::Ui, state: &mut AppState) {
+        let action = VariableExportList::show(ui, state);
+
+        match action {
+            VariableExportAction::Cancel => {
+                state.exit_export_mode();
+            }
+            VariableExportAction::Export => {
+                // Export to clipboard
+                if let Some(yaml) = state.export_selected_variables_to_yaml() {
+                    ui.ctx().copy_text(yaml);
+                }
+                state.exit_export_mode();
+            }
+            VariableExportAction::None => {}
+        }
     }
 }

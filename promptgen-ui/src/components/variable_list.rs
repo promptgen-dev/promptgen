@@ -5,8 +5,8 @@
 use egui_flex::{Flex, FlexItem};
 use egui_material_icons::icons::{
     ICON_ADD, ICON_ARROW_DOWNWARD, ICON_ARROW_UPWARD, ICON_CHEVRON_RIGHT, ICON_CLOSE,
-    ICON_COLLAPSE_ALL, ICON_EDIT, ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_MENU, ICON_SEARCH,
-    ICON_SORT_BY_ALPHA,
+    ICON_COLLAPSE_ALL, ICON_EDIT, ICON_EXPAND_ALL, ICON_EXPAND_MORE, ICON_FILE_UPLOAD, ICON_MENU,
+    ICON_SEARCH, ICON_SORT_BY_ALPHA,
 };
 
 use crate::state::{OptionGroup, VariableSortOrder};
@@ -36,6 +36,15 @@ impl Default for VariableListConfig<'_> {
             show_edit_buttons: true,
         }
     }
+}
+
+/// Result from rendering the toolbar.
+#[derive(Default)]
+pub struct ToolbarResult {
+    /// Whether the new variable button was clicked
+    pub new_variable_clicked: bool,
+    /// Whether the export button was clicked
+    pub export_clicked: bool,
 }
 
 /// Result from rendering the variable list.
@@ -101,16 +110,17 @@ impl VariableList {
         });
     }
 
-    /// Render the toolbar with optional new variable button, sort, and expand/collapse buttons.
-    /// Returns true if the new variable button was clicked.
+    /// Render the toolbar with optional new variable and export buttons, sort, and expand/collapse buttons.
+    /// Returns a ToolbarResult indicating which buttons were clicked.
     pub fn show_toolbar(
         ui: &mut egui::Ui,
         sort_order: &mut VariableSortOrder,
         option_sort_order: &mut VariableSortOrder,
         expand_all: &mut Option<bool>,
         show_new_variable_button: bool,
-    ) -> bool {
-        let mut new_variable_clicked = false;
+        show_export_button: bool,
+    ) -> ToolbarResult {
+        let mut result = ToolbarResult::default();
 
         ui.add_space(4.0);
         Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
@@ -122,7 +132,20 @@ impl VariableList {
                         .on_hover_text("New variable")
                         .clicked()
                     {
-                        new_variable_clicked = true;
+                        result.new_variable_clicked = true;
+                    }
+                });
+            }
+
+            // Export button (left-aligned, next to Add)
+            if show_export_button {
+                flex.add_ui(FlexItem::default(), |ui| {
+                    if ui
+                        .small_button(format!("{} Export", ICON_FILE_UPLOAD))
+                        .on_hover_text("Export variables to clipboard")
+                        .clicked()
+                    {
+                        result.export_clicked = true;
                     }
                 });
             }
@@ -224,7 +247,7 @@ impl VariableList {
             });
         });
 
-        new_variable_clicked
+        result
     }
 
     /// Render the variable/option group list.

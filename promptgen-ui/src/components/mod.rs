@@ -4,10 +4,12 @@ mod editor;
 mod focusable_frame;
 mod preview;
 pub mod prompt_editor;
+mod prompt_menu;
 mod sidebar;
 mod slots;
 mod tab_bar;
 mod variable_editor;
+mod variable_export_list;
 mod variable_list;
 
 pub use editor::EditorPanel;

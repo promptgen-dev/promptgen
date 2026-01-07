@@ -1,9 +1,10 @@
 //! Tab bar component for multi-tab prompt editing
 
+use super::prompt_menu::{PromptMenu, PromptMenuAction};
 use crate::state::AppState;
 use crate::theme;
 use egui_dnd::dnd;
-use egui_material_icons::icons::{ICON_ADD, ICON_CHECK, ICON_CLOSE, ICON_SAVE};
+use egui_material_icons::icons::{ICON_ADD, ICON_CLOSE, ICON_SAVE};
 
 /// Actions that can be triggered by the tab bar
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,7 +81,6 @@ impl TabBarPanel {
                                 |ui, original_idx, handle, _dragging| {
                                     let i = *original_idx;
                                     let is_active = active_index == Some(i);
-                                    let is_renaming = state.is_tab_renaming(i);
 
                                     // Tab styling - use theme selection colors
                                     let theme = theme::current(ui.ctx());
@@ -103,116 +103,47 @@ impl TabBarPanel {
                                         .inner_margin(egui::Margin::symmetric(6, 2))
                                         .show(ui, |ui| {
                                             ui.horizontal(|ui| {
-                                                if is_renaming {
-                                                    // Validate current rename text
-                                                    let is_valid = state.is_tab_rename_valid();
+                                                let tab = &state.prompt_tabs[i];
 
-                                                    // Inline text edit for renaming
-                                                    let mut text_edit = egui::TextEdit::singleline(
-                                                        &mut state.tab_rename_text,
-                                                    )
-                                                    .desired_width(100.0)
-                                                    .id(egui::Id::new(("tab_rename", i)));
-
-                                                    // Add red text color if invalid
-                                                    if !is_valid {
-                                                        text_edit = text_edit.text_color(
-                                                            egui::Color32::from_rgb(243, 139, 168),
-                                                        );
-                                                    }
-
-                                                    // Wrap in error frame if invalid
-                                                    let response = if !is_valid {
-                                                        egui::Frame::new()
-                                                            .stroke(egui::Stroke::new(
-                                                                1.0,
-                                                                egui::Color32::from_rgb(243, 139, 168),
-                                                            ))
-                                                            .corner_radius(4.0)
-                                                            .show(ui, |ui| ui.add(text_edit))
-                                                            .inner
-                                                    } else {
-                                                        ui.add(text_edit)
-                                                    };
-
-                                                    // Request focus on first frame
-                                                    if response.gained_focus() || !response.has_focus()
-                                                    {
-                                                        response.request_focus();
-                                                    }
-
-                                                    // Checkmark button to save
-                                                    let check_response = ui
-                                                        .add_enabled(
-                                                            is_valid,
-                                                            egui::Button::new(ICON_CHECK).small(),
-                                                        )
-                                                        .on_hover_text(if is_valid {
-                                                            "Save name"
-                                                        } else {
-                                                            "Name already exists or is empty"
-                                                        });
-                                                    if check_response.clicked() {
-                                                        state.commit_tab_rename();
-                                                    }
-
-                                                    // Handle Enter to commit
-                                                    if ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                                        && is_valid
-                                                    {
-                                                        state.commit_tab_rename();
-                                                    }
-
-                                                    // Handle Escape to cancel
-                                                    if ui.input(|i| i.key_pressed(egui::Key::Escape))
-                                                    {
-                                                        state.cancel_tab_rename();
-                                                    }
-
-                                                    // Handle clicking away - cancel
-                                                    if response.lost_focus()
-                                                        && !ui
-                                                            .input(|i| i.key_pressed(egui::Key::Escape))
-                                                        && !check_response.clicked()
-                                                    {
-                                                        state.cancel_tab_rename();
-                                                    }
+                                                // Build tab label (name + dirty indicator)
+                                                let label = if tab.dirty {
+                                                    format!("{}*", tab.name)
                                                 } else {
-                                                    let tab = &state.prompt_tabs[i];
+                                                    tab.name.clone()
+                                                };
 
-                                                    // Build tab label (name + dirty indicator)
-                                                    let label = if tab.dirty {
-                                                        format!("{}*", tab.name)
-                                                    } else {
-                                                        tab.name.clone()
-                                                    };
+                                                // Drag handle wraps the clickable label
+                                                handle.ui(ui, |ui| {
+                                                    let response = ui.add(
+                                                        egui::Label::new(&label)
+                                                            .selectable(false)
+                                                            .sense(egui::Sense::click()),
+                                                    );
 
-                                                    // Drag handle wraps the clickable label
-                                                    handle.ui(ui, |ui| {
-                                                        let response = ui.add(
-                                                            egui::Label::new(&label)
-                                                                .selectable(false)
-                                                                .sense(egui::Sense::click()),
-                                                        );
+                                                    if response.clicked() && !is_active {
+                                                        action = TabBarAction::SwitchTab(i);
+                                                    }
+                                                });
 
-                                                        if response.clicked() && !is_active {
-                                                            action = TabBarAction::SwitchTab(i);
-                                                        }
+                                                // Menu button
+                                                let menu_action = PromptMenu::show(ui, tab_count > 1);
+                                                match menu_action {
+                                                    PromptMenuAction::Rename => {
+                                                        action = TabBarAction::StartRename(i);
+                                                    }
+                                                    PromptMenuAction::Delete => {
+                                                        action = TabBarAction::CloseTab(i);
+                                                    }
+                                                    PromptMenuAction::None => {}
+                                                }
 
-                                                        // Double-click to rename
-                                                        if response.double_clicked() {
-                                                            action = TabBarAction::StartRename(i);
-                                                        }
-                                                    });
-
-                                                    // Close button (only show if more than one tab)
-                                                    if tab_count > 1 {
-                                                        let close_response = ui
-                                                            .small_button(ICON_CLOSE)
-                                                            .on_hover_text("Close tab");
-                                                        if close_response.clicked() {
-                                                            action = TabBarAction::CloseTab(i);
-                                                        }
+                                                // Close button (only show if more than one tab)
+                                                if tab_count > 1 {
+                                                    let close_response = ui
+                                                        .small_button(ICON_CLOSE)
+                                                        .on_hover_text("Close tab");
+                                                    if close_response.clicked() {
+                                                        action = TabBarAction::CloseTab(i);
                                                     }
                                                 }
                                             });

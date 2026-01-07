@@ -261,6 +261,12 @@ pub struct AppState {
 
     // Variable list expand/collapse all (consumed on next render)
     pub expand_all_variables: Option<bool>,
+
+    // Variable Export Mode State
+    pub export_mode_active: bool,
+    pub export_selected_variables: HashSet<String>,
+    pub export_search_query: String,
+    pub export_sort_order: VariableSortOrder,
 }
 
 impl Default for AppState {
@@ -303,6 +309,10 @@ impl Default for AppState {
             autocomplete_states: HashMap::new(),
             pending_cursor_positions: HashMap::new(),
             expand_all_variables: None,
+            export_mode_active: false,
+            export_selected_variables: HashSet::new(),
+            export_search_query: String::new(),
+            export_sort_order: VariableSortOrder::default(),
         }
     }
 }
@@ -1519,11 +1529,6 @@ impl AppState {
         true
     }
 
-    /// Check if a tab is currently being renamed
-    pub fn is_tab_renaming(&self, index: usize) -> bool {
-        self.tab_rename_index == Some(index)
-    }
-
     /// Validate the current tab rename text without committing
     /// Returns true if the name is valid and can be saved
     pub fn is_tab_rename_valid(&self) -> bool {
@@ -1579,5 +1584,87 @@ impl AppState {
 
         // Clear the confirmation dialog
         self.confirm_dialog = None;
+    }
+
+    // ==================== Variable Export Mode ====================
+
+    /// Enter variable export mode
+    pub fn enter_export_mode(&mut self) {
+        self.export_mode_active = true;
+        self.export_selected_variables.clear();
+        self.export_search_query.clear();
+    }
+
+    /// Exit variable export mode without exporting
+    pub fn exit_export_mode(&mut self) {
+        self.export_mode_active = false;
+        self.export_selected_variables.clear();
+        self.export_search_query.clear();
+    }
+
+    /// Toggle selection of a variable for export
+    pub fn toggle_export_variable(&mut self, name: &str) {
+        if self.export_selected_variables.contains(name) {
+            self.export_selected_variables.remove(name);
+        } else {
+            self.export_selected_variables.insert(name.to_string());
+        }
+    }
+
+    /// Select all variables for export (respects current search filter)
+    pub fn select_all_export_variables(&mut self) {
+        let search = self.export_search_query.to_lowercase();
+        for var in &self.library.variables {
+            if search.is_empty() || var.name.to_lowercase().contains(&search) {
+                self.export_selected_variables.insert(var.name.clone());
+            }
+        }
+    }
+
+    /// Deselect all variables for export
+    pub fn deselect_all_export_variables(&mut self) {
+        self.export_selected_variables.clear();
+    }
+
+    /// Export selected variables to YAML string
+    pub fn export_selected_variables_to_yaml(&self) -> Option<String> {
+        if self.export_selected_variables.is_empty() {
+            return None;
+        }
+
+        // DTO struct for YAML serialization (mirrors PromptVariable)
+        #[derive(serde::Serialize)]
+        struct VariableDto {
+            name: String,
+            #[serde(skip_serializing_if = "Vec::is_empty")]
+            options: Vec<String>,
+        }
+
+        #[derive(serde::Serialize)]
+        struct VariablesExport {
+            variables: Vec<VariableDto>,
+        }
+
+        // Collect selected variables in their original order
+        let selected: Vec<VariableDto> = self
+            .library
+            .variables
+            .iter()
+            .filter(|v| self.export_selected_variables.contains(&v.name))
+            .map(|v| VariableDto {
+                name: v.name.clone(),
+                options: v.options.clone(),
+            })
+            .collect();
+
+        if selected.is_empty() {
+            return None;
+        }
+
+        let export = VariablesExport {
+            variables: selected,
+        };
+
+        serde_yaml::to_string(&export).ok()
     }
 }

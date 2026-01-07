@@ -487,6 +487,51 @@ impl PromptGenApp {
             DeletePromptAction::None => {}
         }
     }
+
+    /// Render the rename prompt dialog and handle actions
+    fn render_rename_prompt_dialog(&mut self, ctx: &egui::Context) {
+        use dialogs::RenamePromptAction;
+
+        // Check if we have an active rename
+        let Some(index) = self.state.tab_rename_index else {
+            return;
+        };
+
+        let Some(tab) = self.state.prompt_tabs.get(index) else {
+            self.state.cancel_tab_rename();
+            return;
+        };
+
+        let current_name = tab.name.clone();
+        let is_valid = self.state.is_tab_rename_valid();
+
+        let action = dialogs::render_rename_prompt_dialog(
+            ctx,
+            &current_name,
+            &mut self.state.tab_rename_text,
+            is_valid,
+        );
+
+        match action {
+            RenamePromptAction::Rename { new_name } => {
+                // Apply the new name
+                self.state.tab_rename_text = new_name;
+                if self.state.commit_tab_rename() {
+                    // Persist library to disk if this was a library prompt
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if let Some(path) = &self.state.library_path
+                        && let Err(e) = promptgen_core::save_library(&self.state.library, path)
+                    {
+                        log::error!("Failed to save library after rename: {}", e);
+                    }
+                }
+            }
+            RenamePromptAction::Cancel => {
+                self.state.cancel_tab_rename();
+            }
+            RenamePromptAction::None => {}
+        }
+    }
 }
 
 impl eframe::App for PromptGenApp {
@@ -701,5 +746,8 @@ impl eframe::App for PromptGenApp {
 
         // Render delete prompt dialog (if active)
         self.render_delete_prompt_dialog(ctx);
+
+        // Render rename prompt dialog (if active)
+        self.render_rename_prompt_dialog(ctx);
     }
 }

@@ -38,6 +38,13 @@ pub enum DeletePromptAction {
     Cancel,
 }
 
+/// Actions that can result from the Rename Prompt dialog
+pub enum RenamePromptAction {
+    None,
+    Rename { new_name: String },
+    Cancel,
+}
+
 /// Render the Create Library dialog
 pub fn render_create_library_dialog(
     ctx: &egui::Context,
@@ -263,6 +270,97 @@ pub fn render_delete_prompt_dialog(ctx: &egui::Context, prompt_name: &str) -> De
                     action = DeletePromptAction::Delete;
                 }
             });
+        });
+
+    action
+}
+
+/// Render the Rename Prompt dialog
+pub fn render_rename_prompt_dialog(
+    ctx: &egui::Context,
+    current_name: &str,
+    new_name: &mut String,
+    is_valid: bool,
+) -> RenamePromptAction {
+    let mut action = RenamePromptAction::None;
+
+    // Check validity before entering the closure to avoid borrow issues
+    let has_text = !new_name.trim().is_empty();
+    let show_error = !is_valid && has_text;
+    let can_rename = is_valid && has_text;
+
+    egui::Window::new("Rename Prompt")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.label(format!("Rename \"{}\":", current_name));
+
+            ui.add_space(4.0);
+
+            // Text input with validation styling
+            let mut text_edit = egui::TextEdit::singleline(new_name).desired_width(250.0);
+
+            if show_error {
+                text_edit = text_edit.text_color(egui::Color32::from_rgb(243, 139, 168));
+            }
+
+            let response = if show_error {
+                egui::Frame::new()
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgb(243, 139, 168),
+                    ))
+                    .corner_radius(4.0)
+                    .show(ui, |ui| ui.add(text_edit))
+                    .inner
+            } else {
+                ui.add(text_edit)
+            };
+
+            // Auto-focus the text field
+            if response.gained_focus() || !response.has_focus() {
+                response.request_focus();
+            }
+
+            // Show error message if invalid
+            if show_error {
+                ui.label(
+                    egui::RichText::new("Name already exists or is invalid")
+                        .small()
+                        .color(egui::Color32::from_rgb(243, 139, 168)),
+                );
+            }
+
+            ui.add_space(8.0);
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    action = RenamePromptAction::Cancel;
+                }
+
+                if ui
+                    .add_enabled(can_rename, egui::Button::new("Rename"))
+                    .clicked()
+                {
+                    action = RenamePromptAction::Rename {
+                        new_name: new_name.trim().to_string(),
+                    };
+                }
+            });
+
+            // Handle Enter to confirm
+            if ui.input(|i| i.key_pressed(egui::Key::Enter)) && can_rename {
+                action = RenamePromptAction::Rename {
+                    new_name: new_name.trim().to_string(),
+                };
+            }
+
+            // Handle Escape to cancel
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                action = RenamePromptAction::Cancel;
+            }
         });
 
     action
