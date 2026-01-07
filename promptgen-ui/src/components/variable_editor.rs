@@ -45,14 +45,13 @@ impl VariableEditorPanel {
                 }
 
                 // Delete button (only for existing variables)
-                if let Some(original_name) = state.variable_editor_original_name.clone() {
-                    if ui
+                if let Some(original_name) = state.variable_editor_original_name.clone()
+                    && ui
                         .button(RichText::new("Delete").color(theme::current(ui.ctx()).syntax_error()))
                         .clicked()
                     {
                         state.request_delete_variable(&original_name);
                     }
-                }
 
                 // Dirty indicator
                 if state.variable_editor_dirty {
