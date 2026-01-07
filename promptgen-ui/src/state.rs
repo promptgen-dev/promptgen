@@ -179,6 +179,13 @@ pub struct PromptTab {
     /// Whether this tab has unsaved changes
     #[serde(default)]
     pub dirty: bool,
+    /// Whether the prompt editor section is expanded (per-tab)
+    #[serde(default = "default_true")]
+    pub prompt_editor_expanded: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for PromptTab {
@@ -190,6 +197,7 @@ impl Default for PromptTab {
             slot_defaults: SlotDefaults::default(),
             source: PromptSource::New,
             dirty: false,
+            prompt_editor_expanded: true,
         }
     }
 }
@@ -204,6 +212,7 @@ impl PromptTab {
             slot_defaults: SlotDefaults::default(),
             source: PromptSource::New,
             dirty: false,
+            prompt_editor_expanded: true,
         }
     }
 
@@ -223,6 +232,7 @@ impl PromptTab {
                 original_name: name,
             },
             dirty: false,
+            prompt_editor_expanded: true,
         }
     }
 }

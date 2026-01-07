@@ -776,8 +776,52 @@ impl eframe::App for PromptGenApp {
                         .id_salt("main_scroll")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            // Prompt editor section
-                            EditorPanel::show(ui, &mut self.state);
+                            // Prompt editor section (collapsible, per-tab state)
+                            let is_expanded = self
+                                .state
+                                .get_active_tab()
+                                .map(|t| t.prompt_editor_expanded)
+                                .unwrap_or(true);
+
+                            // Custom collapsible header with right-aligned arrow
+                            use egui_material_icons::icons::{
+                                ICON_CHEVRON_RIGHT, ICON_EXPAND_MORE,
+                            };
+
+                            let header_response = ui
+                                .horizontal(|ui| {
+                                    ui.heading("Prompt");
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            let icon = if is_expanded {
+                                                ICON_EXPAND_MORE
+                                            } else {
+                                                ICON_CHEVRON_RIGHT
+                                            };
+                                            ui.heading(icon);
+                                        },
+                                    );
+                                })
+                                .response
+                                .interact(egui::Sense::click());
+
+                            // Toggle on click
+                            if header_response.clicked() {
+                                if let Some(tab) = self.state.get_active_tab_mut() {
+                                    tab.prompt_editor_expanded = !tab.prompt_editor_expanded;
+                                }
+                            }
+
+                            // Show cursor hint on hover
+                            if header_response.hovered() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+
+                            // Show content when expanded
+                            if is_expanded {
+                                EditorPanel::show(ui, &mut self.state);
+                            }
 
                             // Slots section (only show if there are slots)
                             let has_slots = !self.state.get_slot_definitions().is_empty();
