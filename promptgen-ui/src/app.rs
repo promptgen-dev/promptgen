@@ -589,6 +589,63 @@ impl PromptGenApp {
             ImportVariablesAction::None => {}
         }
     }
+
+    /// Render the import prompts dialog and handle actions
+    fn render_import_prompts_dialog(&mut self, ctx: &egui::Context) {
+        use dialogs::ImportPromptsAction;
+
+        if !self.state.prompt_import_dialog_open {
+            return;
+        }
+
+        let can_import = self.state.can_import_prompts();
+
+        // Pre-compute flags for each imported prompt
+        let originally_conflicting: Vec<bool> = (0..self.state.prompt_import_parsed_prompts.len())
+            .map(|idx| self.state.is_prompt_import_originally_conflicting(idx))
+            .collect();
+
+        let currently_conflicting: Vec<bool> = (0..self.state.prompt_import_parsed_prompts.len())
+            .map(|idx| self.state.is_prompt_import_name_conflicting(idx))
+            .collect();
+
+        let action = dialogs::render_import_prompts_dialog(
+            ctx,
+            &mut self.state.prompt_import_yaml_text,
+            &self.state.prompt_import_parsed_prompts,
+            self.state.prompt_import_parse_error.as_deref(),
+            can_import,
+            &originally_conflicting,
+            &currently_conflicting,
+        );
+
+        match action {
+            ImportPromptsAction::Import => {
+                // Perform the import
+                self.state.perform_prompt_import();
+
+                // Persist library to disk
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(path) = &self.state.library_path
+                    && let Err(e) = promptgen_core::save_library(&self.state.library, path)
+                {
+                    log::error!("Failed to save library after import: {}", e);
+                }
+
+                self.state.close_prompt_import_dialog();
+            }
+            ImportPromptsAction::Cancel => {
+                self.state.close_prompt_import_dialog();
+            }
+            ImportPromptsAction::YamlChanged => {
+                self.state.parse_prompt_import_yaml();
+            }
+            ImportPromptsAction::RenamedChanged { index, new_name } => {
+                self.state.update_prompt_import_renamed_name(index, new_name);
+            }
+            ImportPromptsAction::None => {}
+        }
+    }
 }
 
 impl eframe::App for PromptGenApp {
@@ -809,5 +866,8 @@ impl eframe::App for PromptGenApp {
 
         // Render import variables dialog (if active)
         self.render_import_variables_dialog(ctx);
+
+        // Render import prompts dialog (if active)
+        self.render_import_prompts_dialog(ctx);
     }
 }

@@ -48,6 +48,19 @@ pub struct ImportedVariable {
     pub options: Vec<String>,
 }
 
+/// An imported prompt with its original name, renamed name, content, and slot defaults
+#[derive(Debug, Clone)]
+pub struct ImportedPrompt {
+    /// Original name from the YAML
+    pub original_name: String,
+    /// Renamed name (editable by user to resolve conflicts)
+    pub renamed_name: String,
+    /// The prompt content
+    pub content: String,
+    /// Slot defaults for this prompt
+    pub slot_defaults: SlotDefaults,
+}
+
 /// Sidebar mode - normal navigation vs slot picker overlay
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SidebarMode {
@@ -284,6 +297,17 @@ pub struct AppState {
     pub import_yaml_text: String,
     pub import_parsed_variables: Vec<ImportedVariable>,
     pub import_parse_error: Option<String>,
+
+    // Prompt Export Mode State
+    pub prompt_export_mode_active: bool,
+    pub prompt_export_selected: HashSet<String>,
+    pub prompt_export_search_query: String,
+
+    // Prompt Import Dialog State
+    pub prompt_import_dialog_open: bool,
+    pub prompt_import_yaml_text: String,
+    pub prompt_import_parsed_prompts: Vec<ImportedPrompt>,
+    pub prompt_import_parse_error: Option<String>,
 }
 
 impl Default for AppState {
@@ -334,6 +358,13 @@ impl Default for AppState {
             import_yaml_text: String::new(),
             import_parsed_variables: Vec::new(),
             import_parse_error: None,
+            prompt_export_mode_active: false,
+            prompt_export_selected: HashSet::new(),
+            prompt_export_search_query: String::new(),
+            prompt_import_dialog_open: false,
+            prompt_import_yaml_text: String::new(),
+            prompt_import_parsed_prompts: Vec::new(),
+            prompt_import_parse_error: None,
         }
     }
 }
@@ -1828,6 +1859,235 @@ impl AppState {
     pub fn update_import_renamed_name(&mut self, index: usize, new_name: String) {
         if let Some(var) = self.import_parsed_variables.get_mut(index) {
             var.renamed_name = new_name;
+        }
+    }
+
+    // ==================== Prompt Export Mode ====================
+
+    /// Enter prompt export mode
+    pub fn enter_prompt_export_mode(&mut self) {
+        self.prompt_export_mode_active = true;
+        self.prompt_export_selected.clear();
+        self.prompt_export_search_query.clear();
+    }
+
+    /// Exit prompt export mode without exporting
+    pub fn exit_prompt_export_mode(&mut self) {
+        self.prompt_export_mode_active = false;
+        self.prompt_export_selected.clear();
+        self.prompt_export_search_query.clear();
+    }
+
+    /// Toggle selection of a prompt for export
+    pub fn toggle_prompt_export(&mut self, name: &str) {
+        if self.prompt_export_selected.contains(name) {
+            self.prompt_export_selected.remove(name);
+        } else {
+            self.prompt_export_selected.insert(name.to_string());
+        }
+    }
+
+    /// Select all prompts for export (respects current search filter)
+    pub fn select_all_prompt_export(&mut self) {
+        let search = self.prompt_export_search_query.to_lowercase();
+        for prompt in &self.library.prompts {
+            if search.is_empty() || prompt.name.to_lowercase().contains(&search) {
+                self.prompt_export_selected.insert(prompt.name.clone());
+            }
+        }
+    }
+
+    /// Deselect all prompts for export
+    pub fn deselect_all_prompt_export(&mut self) {
+        self.prompt_export_selected.clear();
+    }
+
+    /// Export selected prompts to YAML string
+    pub fn export_selected_prompts_to_yaml(&self) -> Option<String> {
+        if self.prompt_export_selected.is_empty() {
+            return None;
+        }
+
+        // DTO struct for YAML serialization
+        #[derive(serde::Serialize)]
+        struct PromptDto {
+            name: String,
+            content: String,
+            #[serde(skip_serializing_if = "SlotDefaults::is_default")]
+            slot_defaults: SlotDefaults,
+        }
+
+        #[derive(serde::Serialize)]
+        struct PromptsExport {
+            prompts: Vec<PromptDto>,
+        }
+
+        // Collect selected prompts in their original order
+        let selected: Vec<PromptDto> = self
+            .library
+            .prompts
+            .iter()
+            .filter(|p| self.prompt_export_selected.contains(&p.name))
+            .map(|p| PromptDto {
+                name: p.name.clone(),
+                content: p.content.clone(),
+                slot_defaults: p.slot_defaults.clone(),
+            })
+            .collect();
+
+        if selected.is_empty() {
+            return None;
+        }
+
+        let export = PromptsExport { prompts: selected };
+
+        serde_yaml::to_string(&export).ok()
+    }
+
+    // ==================== Prompt Import ====================
+
+    /// Open the prompt import dialog
+    pub fn open_prompt_import_dialog(&mut self) {
+        self.prompt_import_dialog_open = true;
+        self.prompt_import_yaml_text.clear();
+        self.prompt_import_parsed_prompts.clear();
+        self.prompt_import_parse_error = None;
+    }
+
+    /// Close the prompt import dialog
+    pub fn close_prompt_import_dialog(&mut self) {
+        self.prompt_import_dialog_open = false;
+        self.prompt_import_yaml_text.clear();
+        self.prompt_import_parsed_prompts.clear();
+        self.prompt_import_parse_error = None;
+    }
+
+    /// Parse the prompt import YAML text and update parsed prompts
+    pub fn parse_prompt_import_yaml(&mut self) {
+        if self.prompt_import_yaml_text.trim().is_empty() {
+            self.prompt_import_parsed_prompts.clear();
+            self.prompt_import_parse_error = None;
+            return;
+        }
+
+        // DTO struct for parsing
+        #[derive(serde::Deserialize)]
+        struct PromptDto {
+            name: String,
+            #[serde(default)]
+            content: String,
+            #[serde(default)]
+            slot_defaults: SlotDefaults,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct PromptsImport {
+            #[serde(default)]
+            prompts: Vec<PromptDto>,
+        }
+
+        match serde_yaml::from_str::<PromptsImport>(&self.prompt_import_yaml_text) {
+            Ok(import) => {
+                self.prompt_import_parse_error = None;
+                self.prompt_import_parsed_prompts = import
+                    .prompts
+                    .into_iter()
+                    .map(|p| ImportedPrompt {
+                        original_name: p.name.clone(),
+                        renamed_name: p.name,
+                        content: p.content,
+                        slot_defaults: p.slot_defaults,
+                    })
+                    .collect();
+            }
+            Err(e) => {
+                self.prompt_import_parse_error = Some(format!("Parse error: {}", e));
+                self.prompt_import_parsed_prompts.clear();
+            }
+        }
+    }
+
+    /// Check if a specific imported prompt originally had a conflict
+    /// (original_name matches an existing library prompt)
+    pub fn is_prompt_import_originally_conflicting(&self, index: usize) -> bool {
+        let Some(prompt) = self.prompt_import_parsed_prompts.get(index) else {
+            return false;
+        };
+
+        // Check if original_name matches any existing library prompt
+        self.library
+            .prompts
+            .iter()
+            .any(|p| p.name == prompt.original_name)
+    }
+
+    /// Check if a specific imported prompt has a conflict
+    /// (matches existing name OR duplicates another imported prompt's renamed name)
+    pub fn is_prompt_import_name_conflicting(&self, index: usize) -> bool {
+        let Some(prompt) = self.prompt_import_parsed_prompts.get(index) else {
+            return false;
+        };
+
+        let name = &prompt.renamed_name;
+
+        // Check if empty
+        if name.trim().is_empty() {
+            return true;
+        }
+
+        // Check against existing library prompts
+        if self.library.prompts.iter().any(|p| &p.name == name) {
+            return true;
+        }
+
+        // Check against other imported prompts (duplicate renamed names)
+        for (i, other) in self.prompt_import_parsed_prompts.iter().enumerate() {
+            if i != index && other.renamed_name == *name {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Check if prompt import can proceed (no conflicts, at least one prompt)
+    pub fn can_import_prompts(&self) -> bool {
+        if self.prompt_import_parsed_prompts.is_empty() {
+            return false;
+        }
+
+        // Check all imported prompts for conflicts
+        for idx in 0..self.prompt_import_parsed_prompts.len() {
+            if self.is_prompt_import_name_conflicting(idx) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Perform the prompt import - add all parsed prompts to the library
+    pub fn perform_prompt_import(&mut self) {
+        if !self.can_import_prompts() {
+            return;
+        }
+
+        for prompt in &self.prompt_import_parsed_prompts {
+            self.library.prompts.push(promptgen_core::SavedPrompt {
+                name: prompt.renamed_name.clone(),
+                content: prompt.content.clone(),
+                slots: HashMap::new(), // Empty slots for imported prompts
+                slot_defaults: prompt.slot_defaults.clone(),
+            });
+        }
+
+        self.close_prompt_import_dialog();
+    }
+
+    /// Update the renamed name for an imported prompt
+    pub fn update_prompt_import_renamed_name(&mut self, index: usize, new_name: String) {
+        if let Some(prompt) = self.prompt_import_parsed_prompts.get_mut(index) {
+            prompt.renamed_name = new_name;
         }
     }
 }

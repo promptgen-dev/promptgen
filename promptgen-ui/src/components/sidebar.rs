@@ -7,7 +7,9 @@ use promptgen_core::Cardinality;
 
 use egui_material_icons::icons::{ICON_CLOSE, ICON_DESCRIPTION};
 
+use super::prompt_export_list::{PromptExportAction, PromptExportList};
 use super::prompt_menu::{PromptMenu, PromptMenuAction};
+use super::prompts_menu::{PromptsMenu, PromptsMenuAction};
 use super::variable_export_list::{VariableExportAction, VariableExportList};
 use super::variable_list::{VariableList, VariableListConfig};
 use crate::state::{AppState, OptionGroup, SidebarMode, SidebarViewMode};
@@ -65,7 +67,13 @@ impl SidebarPanel {
 
         // Check if we're in variable export mode
         if state.export_mode_active {
-            Self::render_export_mode(ui, state);
+            Self::render_variable_export_mode(ui, state);
+            return;
+        }
+
+        // Check if we're in prompt export mode
+        if state.prompt_export_mode_active {
+            Self::render_prompt_export_mode(ui, state);
             return;
         }
 
@@ -141,6 +149,11 @@ impl SidebarPanel {
                 if toolbar_result.import_clicked {
                     state.open_import_dialog();
                 }
+            }
+
+            // Toolbar (only in Prompts view) - includes import/export menu
+            if state.sidebar_view_mode == SidebarViewMode::Prompts {
+                Self::show_prompts_toolbar(ui, state);
             }
 
             ui.separator();
@@ -486,8 +499,31 @@ impl SidebarPanel {
             });
     }
 
+    /// Render the prompts toolbar with Import/Export menu.
+    fn show_prompts_toolbar(ui: &mut egui::Ui, state: &mut AppState) {
+        ui.add_space(4.0);
+        Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
+            // Import/Export menu (left-aligned)
+            flex.add_ui(FlexItem::default(), |ui| {
+                let menu_action = PromptsMenu::show(ui);
+                match menu_action {
+                    PromptsMenuAction::Export => {
+                        state.enter_prompt_export_mode();
+                    }
+                    PromptsMenuAction::Import => {
+                        state.open_prompt_import_dialog();
+                    }
+                    PromptsMenuAction::None => {}
+                }
+            });
+
+            // Spacer to push remaining buttons to the right
+            flex.add_ui(FlexItem::default().grow(1.0), |_ui| {});
+        });
+    }
+
     /// Render the variable export mode UI.
-    fn render_export_mode(ui: &mut egui::Ui, state: &mut AppState) {
+    fn render_variable_export_mode(ui: &mut egui::Ui, state: &mut AppState) {
         let action = VariableExportList::show(ui, state);
 
         match action {
@@ -502,6 +538,25 @@ impl SidebarPanel {
                 state.exit_export_mode();
             }
             VariableExportAction::None => {}
+        }
+    }
+
+    /// Render the prompt export mode UI.
+    fn render_prompt_export_mode(ui: &mut egui::Ui, state: &mut AppState) {
+        let action = PromptExportList::show(ui, state);
+
+        match action {
+            PromptExportAction::Cancel => {
+                state.exit_prompt_export_mode();
+            }
+            PromptExportAction::Export => {
+                // Export to clipboard
+                if let Some(yaml) = state.export_selected_prompts_to_yaml() {
+                    ui.ctx().copy_text(yaml);
+                }
+                state.exit_prompt_export_mode();
+            }
+            PromptExportAction::None => {}
         }
     }
 }
