@@ -13,6 +13,7 @@ use crate::components::focusable_frame::FocusableFrame;
 use crate::components::prompt_editor::{PromptEditor, PromptEditorConfig};
 use crate::state::AppState;
 use crate::theme;
+use crate::utils::truncate;
 
 /// Measure text size in the UI (based on hello_egui_utils::measure_text)
 fn measure_text(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) -> Vec2 {
@@ -414,17 +415,18 @@ impl SlotPanel {
                                         items.iter().enumerate().for_each(|(idx, item)| {
                                             let (_original_idx, value) = item;
 
-                                            // For display, replace newlines with spaces to keep chips single-line
-                                            let display_value: String = value
+                                            // For display, replace newlines with spaces and truncate
+                                            let collapsed: String = value
                                                 .chars()
                                                 .map(|c| if c == '\n' { ' ' } else { c })
                                                 .collect::<String>()
                                                 .split_whitespace()
                                                 .collect::<Vec<_>>()
                                                 .join(" ");
+                                            let display_value = truncate(&collapsed);
 
                                             // Measure the chip content size: value text + "x" button + spacing
-                                            let text_size = measure_text(ui, &display_value);
+                                            let text_size = measure_text(ui, display_value.as_ref());
                                             let x_button_size = measure_text(ui, "x");
 
                                             // Chip padding and internal spacing
@@ -481,7 +483,7 @@ impl SlotPanel {
                                                                             let label_response =
                                                                                 ui.add(
                                                                                     Label::new(
-                                                                                        &display_value,
+                                                                                        display_value.as_ref(),
                                                                                     )
                                                                                     .truncate(),
                                                                                 );

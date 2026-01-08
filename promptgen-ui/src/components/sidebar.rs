@@ -16,6 +16,7 @@ use super::variable_export_list::{VariableExportAction, VariableExportList};
 use super::variable_list::{VariableList, VariableListConfig};
 use crate::state::{AppState, OptionGroup, SidebarMode, SidebarViewMode, VariableSortOrder};
 use crate::theme;
+use crate::utils::truncate;
 
 /// Sidebar panel for navigating libraries, prompts, and variables.
 pub struct SidebarPanel;
@@ -271,35 +272,30 @@ impl SidebarPanel {
                 .corner_radius(4.0)
                 .inner_margin(egui::Margin::symmetric(4, 2))
                 .show(ui, |ui| {
-                    // Use flex layout for prompt row: label (grows/truncates) + menu button (fixed)
+                    // Use flex layout for prompt row: label (wraps) + menu button (fixed)
                     Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
-                        // Clickable label area (grows and truncates)
+                        // Clickable label area (grows and wraps like variable list)
                         let prompt_name = name.clone();
                         flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
-                            // Allocate full width with click sense
-                            let available_width = ui.available_width();
-                            let text_height = ui.text_style_height(&egui::TextStyle::Body);
-                            let (rect, response) = ui.allocate_exact_size(
-                                egui::vec2(available_width, text_height),
-                                egui::Sense::click(),
+                            ui.with_layout(
+                                egui::Layout::top_down_justified(egui::Align::LEFT),
+                                |ui| {
+                                    // Use Button with wrap like variable list does
+                                    let display_text = truncate(name);
+                                    let button = egui::Button::new(display_text.as_ref())
+                                        .fill(egui::Color32::TRANSPARENT)
+                                        .wrap();
+                                    let response = ui.add(button);
+
+                                    // Handle click
+                                    if response.clicked() {
+                                        prompt_to_open = Some(prompt_name.clone());
+                                    }
+
+                                    // Show full name on hover
+                                    response.on_hover_text(&prompt_name);
+                                },
                             );
-
-                            // Draw text left-aligned and vertically centered
-                            ui.painter().text(
-                                rect.left_center(),
-                                egui::Align2::LEFT_CENTER,
-                                name,
-                                egui::TextStyle::Body.resolve(ui.style()),
-                                ui.visuals().text_color(),
-                            );
-
-                            // Handle click
-                            if response.clicked() {
-                                prompt_to_open = Some(prompt_name.clone());
-                            }
-
-                            // Show tooltip on hover
-                            response.on_hover_text(&prompt_name);
                         });
 
                         // Menu button (fixed size)

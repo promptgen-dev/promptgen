@@ -5,6 +5,7 @@ mod components;
 mod highlighting;
 mod state;
 mod theme;
+mod utils;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod storage;

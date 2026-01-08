@@ -12,6 +12,7 @@ use egui_material_icons::icons::{
 use super::variable_menu::{VariableMenu, VariableMenuAction};
 use crate::state::{OptionGroup, VariableSortOrder};
 use crate::theme;
+use crate::utils::truncate;
 
 /// Configuration for the variable list component.
 pub struct VariableListConfig<'a> {
@@ -447,17 +448,18 @@ impl VariableList {
                     for (option_text, match_indices) in options_to_show {
                         let is_selected = config.selected_values.contains(&option_text.to_string());
 
-                        // Build the button content
+                        // Build the button content (truncated for display)
+                        let display_text = truncate(option_text);
                         let button_content = if !match_indices.is_empty() {
                             Self::build_option_button_job(
-                                option_text,
+                                &display_text,
                                 &match_indices,
                                 default_color,
                             )
                         } else {
                             let mut job = egui::text::LayoutJob::default();
                             job.append(
-                                &format!("• {}", option_text),
+                                &format!("• {}", display_text),
                                 0.0,
                                 egui::text::TextFormat {
                                     color: default_color,
@@ -663,7 +665,7 @@ impl VariableList {
             format!(" ({})", option_count)
         };
 
-        format!("{}{}{}", prefix, name, suffix)
+        format!("{}{}{}", prefix, truncate(name), suffix)
     }
 
     /// Build a LayoutJob for an option button with highlighting.
