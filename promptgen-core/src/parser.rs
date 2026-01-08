@@ -294,7 +294,7 @@ fn pick_variable_ref_parser<'src>()
     let simple_ref = just('@')
         .ignore_then(
             any()
-                .filter(|c: &char| c.is_alphabetic() || *c == '_')
+                .filter(|c: &char| c.is_alphanumeric() || *c == '_')
                 .then(
                     any()
                         .filter(|c: &char| c.is_alphanumeric() || *c == '_' || *c == '-')
@@ -522,9 +522,9 @@ fn simple_library_ref_parser<'src>()
 -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
     just('@')
         .ignore_then(
-            // Identifier: starts with letter or underscore, followed by letters, digits, underscores, hyphens
+            // Identifier: starts with letter, digit, or underscore, followed by letters, digits, underscores, hyphens
             any()
-                .filter(|c: &char| c.is_alphabetic() || *c == '_')
+                .filter(|c: &char| c.is_alphanumeric() || *c == '_')
                 .then(
                     any()
                         .filter(|c: &char| c.is_alphanumeric() || *c == '_' || *c == '-')
@@ -636,6 +636,33 @@ mod tests {
                         match &pick.sources[0].0 {
                             PickSource::VariableRef(lib_ref) => {
                                 assert_eq!(lib_ref.variable, "Eyes");
+                            }
+                            other => panic!("expected VariableRef, got {:?}", other),
+                        }
+                    }
+                    other => panic!("expected Pick, got {:?}", other),
+                }
+            }
+            other => panic!("expected SlotBlock, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_pick_slot_with_numeric_starting_variable_ref() {
+        let src = "{{ Test: pick(@01) }}";
+        let prompt = parse_prompt(src).expect("should parse");
+
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
+        match node {
+            Node::SlotBlock(slot) => {
+                assert_eq!(slot.label.0, "Test");
+                match &slot.kind.0 {
+                    SlotKind::Pick(pick) => {
+                        assert_eq!(pick.sources.len(), 1);
+                        match &pick.sources[0].0 {
+                            PickSource::VariableRef(lib_ref) => {
+                                assert_eq!(lib_ref.variable, "01");
                             }
                             other => panic!("expected VariableRef, got {:?}", other),
                         }
@@ -929,6 +956,22 @@ mod tests {
             Node::LibraryRef(lib_ref) => {
                 assert_eq!(lib_ref.library, None);
                 assert_eq!(lib_ref.variable, "hair-color");
+            }
+            other => panic!("expected LibraryRef, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_simple_library_ref_starting_with_digit() {
+        let src = "@01";
+        let prompt = parse_prompt(src).expect("should parse");
+
+        assert_eq!(prompt.nodes.len(), 1);
+        let (node, _span) = &prompt.nodes[0];
+        match node {
+            Node::LibraryRef(lib_ref) => {
+                assert_eq!(lib_ref.library, None);
+                assert_eq!(lib_ref.variable, "01");
             }
             other => panic!("expected LibraryRef, got {:?}", other),
         }
