@@ -706,7 +706,8 @@ impl PromptGenApp {
                 self.state.parse_prompt_import_yaml();
             }
             ImportPromptsAction::RenamedChanged { index, new_name } => {
-                self.state.update_prompt_import_renamed_name(index, new_name);
+                self.state
+                    .update_prompt_import_renamed_name(index, new_name);
             }
             ImportPromptsAction::None => {}
         }
@@ -876,10 +877,7 @@ impl eframe::App for PromptGenApp {
                         }
 
                         ui.add_space(8.0);
-                        ui.label(
-                            egui::RichText::new("Or select a prompt from the sidebar")
-                                .weak(),
-                        );
+                        ui.label(egui::RichText::new("Or select a prompt from the sidebar").weak());
                     } else {
                         ui.label("Open or create a library to get started.");
                         ui.add_space(16.0);
@@ -959,10 +957,10 @@ impl eframe::App for PromptGenApp {
                                 .interact(egui::Sense::click());
 
                             // Toggle on click
-                            if header_response.clicked() {
-                                if let Some(tab) = self.state.get_active_tab_mut() {
-                                    tab.prompt_editor_expanded = !tab.prompt_editor_expanded;
-                                }
+                            if header_response.clicked()
+                                && let Some(tab) = self.state.get_active_tab_mut()
+                            {
+                                tab.prompt_editor_expanded = !tab.prompt_editor_expanded;
                             }
 
                             // Show cursor hint on hover

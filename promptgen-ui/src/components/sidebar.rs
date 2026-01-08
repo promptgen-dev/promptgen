@@ -140,8 +140,8 @@ impl SidebarPanel {
                     &mut state.variable_sort_order,
                     &mut state.option_sort_order,
                     &mut state.expand_all_variables,
-                    true,  // show new variable button
-                    true,  // show import/export menu
+                    true, // show new variable button
+                    true, // show import/export menu
                 );
                 if toolbar_result.new_variable_clicked {
                     state.enter_new_variable_editor();
@@ -208,10 +208,10 @@ impl SidebarPanel {
         match sort_order {
             VariableSortOrder::None => {}
             VariableSortOrder::Ascending => {
-                prompts.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+                prompts.sort_by_key(|a| a.to_lowercase());
             }
             VariableSortOrder::Descending => {
-                prompts.sort_by(|a, b| b.to_lowercase().cmp(&a.to_lowercase()));
+                prompts.sort_by_key(|b| std::cmp::Reverse(b.to_lowercase()));
             }
         }
 
@@ -535,9 +535,7 @@ impl SidebarPanel {
                 let current_theme = theme::current(ui.ctx());
                 let is_active = state.prompt_sort_order != VariableSortOrder::None;
                 let (icon, tooltip) = match state.prompt_sort_order {
-                    VariableSortOrder::None => {
-                        (ICON_SORT_BY_ALPHA.to_string(), "Sort prompts A-Z")
-                    }
+                    VariableSortOrder::None => (ICON_SORT_BY_ALPHA.to_string(), "Sort prompts A-Z"),
                     VariableSortOrder::Ascending => (
                         format!("{}{}", ICON_SORT_BY_ALPHA, ICON_ARROW_UPWARD),
                         "Sort prompts Z-A",
