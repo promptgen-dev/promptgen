@@ -125,8 +125,8 @@ impl TabBarPanel {
                                                     }
                                                 });
 
-                                                // Menu button
-                                                let menu_action = PromptMenu::show(ui, tab_count > 1);
+                                                // Menu button (always allow delete since we have blank state)
+                                                let menu_action = PromptMenu::show(ui, true);
                                                 match menu_action {
                                                     PromptMenuAction::Rename => {
                                                         action = TabBarAction::StartRename(i);
@@ -137,14 +137,12 @@ impl TabBarPanel {
                                                     PromptMenuAction::None => {}
                                                 }
 
-                                                // Close button (only show if more than one tab)
-                                                if tab_count > 1 {
-                                                    let close_response = ui
-                                                        .small_button(ICON_CLOSE)
-                                                        .on_hover_text("Close tab");
-                                                    if close_response.clicked() {
-                                                        action = TabBarAction::CloseTab(i);
-                                                    }
+                                                // Close button (always show since we have blank state)
+                                                let close_response = ui
+                                                    .small_button(ICON_CLOSE)
+                                                    .on_hover_text("Close tab");
+                                                if close_response.clicked() {
+                                                    action = TabBarAction::CloseTab(i);
                                                 }
                                             });
                                         });

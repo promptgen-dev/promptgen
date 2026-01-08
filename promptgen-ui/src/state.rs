@@ -111,6 +111,20 @@ pub enum ConfirmDialog {
     CloseUnsavedTab { tab_index: usize },
     /// Confirm deleting a prompt from the library
     DeletePrompt { prompt_name: String },
+    /// Confirm discarding unsaved tabs when opening/creating a new library
+    OpenNewLibrary {
+        /// The pending action after confirmation
+        pending_action: PendingLibraryAction,
+    },
+}
+
+/// Pending library action (used with ConfirmDialog::OpenNewLibrary)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingLibraryAction {
+    /// Show the file picker dialog (user hasn't selected a file yet)
+    OpenFilePicker,
+    /// Show the create library dialog
+    ShowCreateDialog,
 }
 
 /// Autocomplete mode - what kind of completions to show
@@ -1289,11 +1303,6 @@ impl AppState {
     /// If the tab has unsaved changes, shows a confirmation dialog
     /// Returns true if the tab was closed immediately, false if confirmation is needed or cannot close
     pub fn try_close_tab(&mut self, index: usize) -> bool {
-        if self.prompt_tabs.len() <= 1 {
-            // Don't close the last tab
-            return false;
-        }
-
         if index >= self.prompt_tabs.len() {
             return false;
         }
@@ -1312,13 +1321,8 @@ impl AppState {
     }
 
     /// Close a tab by index without checking for unsaved changes
-    /// Returns true if the tab was closed, false if it was the last tab
+    /// Returns true if the tab was closed
     pub fn close_tab_force(&mut self, index: usize) -> bool {
-        if self.prompt_tabs.len() <= 1 {
-            // Don't close the last tab
-            return false;
-        }
-
         if index >= self.prompt_tabs.len() {
             return false;
         }
@@ -1326,7 +1330,15 @@ impl AppState {
         self.prompt_tabs.remove(index);
 
         // Adjust active tab index
-        if let Some(active) = self.active_tab_index {
+        if self.prompt_tabs.is_empty() {
+            // No more tabs, go to blank state
+            self.active_tab_index = None;
+            self.editor_content.clear();
+            self.slot_values.clear();
+            self.parse_result = None;
+            self.preview_output.clear();
+            self.preview_dirty = false;
+        } else if let Some(active) = self.active_tab_index {
             if active >= self.prompt_tabs.len() {
                 // Was pointing past end, move to last tab
                 self.active_tab_index = Some(self.prompt_tabs.len() - 1);
@@ -2103,5 +2115,82 @@ impl AppState {
         if let Some(prompt) = self.prompt_import_parsed_prompts.get_mut(index) {
             prompt.renamed_name = new_name;
         }
+    }
+
+    // ==================== Library State Management ====================
+
+    /// Check if there are any unsaved tabs
+    pub fn has_unsaved_tabs(&self) -> bool {
+        self.prompt_tabs.iter().any(|tab| tab.dirty)
+    }
+
+    /// Get the names of all unsaved tabs
+    pub fn get_unsaved_tab_names(&self) -> Vec<String> {
+        self.prompt_tabs
+            .iter()
+            .filter(|tab| tab.dirty)
+            .map(|tab| tab.name.clone())
+            .collect()
+    }
+
+    /// Reset prompt state to blank (used when opening/creating a new library)
+    /// This clears all tabs and returns to a clean state with no active tab.
+    pub fn reset_to_blank(&mut self) {
+        // Clear all tabs
+        self.prompt_tabs.clear();
+        self.active_tab_index = None;
+
+        // Clear editor state
+        self.editor_content.clear();
+        self.parse_result = None;
+        self.slot_values.clear();
+        self.preview_output.clear();
+        self.preview_seed = None;
+        self.preview_dirty = false;
+
+        // Clear UI state
+        self.sidebar_mode = SidebarMode::Normal;
+        self.editor_focus = EditorFocus::None;
+        self.search_query.clear();
+        self.slot_picker_search_query.clear();
+        self.slot_manual_edit.clear();
+        self.slot_manual_edit_text.clear();
+
+        // Reset editor mode to prompt (not variable editor)
+        self.editor_mode = EditorMode::Prompt;
+        self.variable_editor_name.clear();
+        self.variable_editor_content.clear();
+        self.variable_editor_original_name = None;
+        self.variable_editor_dirty = false;
+        self.confirm_dialog = None;
+
+        // Clear autocomplete state
+        self.autocomplete_states.clear();
+        self.pending_cursor_positions.clear();
+
+        // Clear export/import state
+        self.export_mode_active = false;
+        self.export_selected_variables.clear();
+        self.export_search_query.clear();
+        self.import_dialog_open = false;
+        self.import_yaml_text.clear();
+        self.import_parsed_variables.clear();
+        self.import_parse_error = None;
+        self.prompt_export_mode_active = false;
+        self.prompt_export_selected.clear();
+        self.prompt_export_search_query.clear();
+        self.prompt_import_dialog_open = false;
+        self.prompt_import_yaml_text.clear();
+        self.prompt_import_parsed_prompts.clear();
+        self.prompt_import_parse_error = None;
+
+        // Reset tab rename state
+        self.tab_rename_index = None;
+        self.tab_rename_text.clear();
+    }
+
+    /// Check if we're in a "blank" state (no active tab)
+    pub fn is_blank(&self) -> bool {
+        self.prompt_tabs.is_empty() || self.active_tab_index.is_none()
     }
 }

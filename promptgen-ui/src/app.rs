@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use crate::components::{
     EditorPanel, PreviewPanel, SidebarPanel, SlotPanel, TabBarPanel, VariableEditorPanel, dialogs,
 };
-use crate::state::{AppState, EditorMode, PromptTab, SidebarViewMode, VariableSortOrder};
+use crate::state::{
+    AppState, ConfirmDialog, EditorMode, PendingLibraryAction, PromptTab, SidebarViewMode,
+    VariableSortOrder,
+};
 use crate::theme;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -178,9 +181,23 @@ impl PromptGenApp {
         self.prompt_sort_order = self.state.prompt_sort_order;
     }
 
-    /// Open a file picker dialog and load the selected library
+    /// Request to open a library - checks for unsaved changes first, then shows file picker
     #[cfg(not(target_arch = "wasm32"))]
     fn open_library_dialog(&mut self) {
+        if self.state.has_unsaved_tabs() {
+            // Show confirmation dialog first, file picker will open after
+            self.state.confirm_dialog = Some(ConfirmDialog::OpenNewLibrary {
+                pending_action: PendingLibraryAction::OpenFilePicker,
+            });
+        } else {
+            // No unsaved changes, show file picker directly
+            self.show_open_file_picker();
+        }
+    }
+
+    /// Actually show the file picker and load the selected library
+    #[cfg(not(target_arch = "wasm32"))]
+    fn show_open_file_picker(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .set_title("Open Library File")
             .add_filter("YAML files", &["yaml", "yml"])
@@ -190,9 +207,12 @@ impl PromptGenApp {
         }
     }
 
-    /// Set the library path and load it
+    /// Set the library path and load it (resets state first)
     #[cfg(not(target_arch = "wasm32"))]
     fn set_library_path(&mut self, path: PathBuf) {
+        // Reset to blank state before loading new library
+        self.state.reset_to_blank();
+
         self.library_file_path = Some(path.clone());
         self.storage.set_library_path(path);
         self.load_library();
@@ -214,6 +234,25 @@ impl PromptGenApp {
         }
     }
 
+    /// Save all dirty tabs to the library
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_all_dirty_tabs(&mut self) {
+        // Save each dirty tab
+        for idx in 0..self.state.prompt_tabs.len() {
+            if self.state.prompt_tabs[idx].dirty {
+                self.state.switch_to_tab(idx);
+                self.state.save_active_tab_to_library();
+            }
+        }
+
+        // Persist library to disk
+        if let Some(path) = &self.state.library_path
+            && let Err(e) = promptgen_core::save_library(&self.state.library, path)
+        {
+            log::error!("Failed to save library: {}", e);
+        }
+    }
+
     /// Render the create library dialog and handle actions
     #[cfg(not(target_arch = "wasm32"))]
     fn render_create_library_dialog(&mut self, ctx: &egui::Context) {
@@ -228,6 +267,11 @@ impl PromptGenApp {
 
         match action {
             CreateLibraryAction::Create { name, path } => {
+                // Close the dialog first
+                self.show_create_library_dialog = false;
+                self.create_library_name.clear();
+                self.create_library_path = None;
+                // Create the library (unsaved check already happened before showing this dialog)
                 self.create_library(name, path);
             }
             CreateLibraryAction::Cancel => {
@@ -239,10 +283,25 @@ impl PromptGenApp {
         }
     }
 
-    /// Create a new library file
+    /// Request to show the create library dialog - checks for unsaved changes first
+    #[cfg(not(target_arch = "wasm32"))]
+    fn request_show_create_dialog(&mut self) {
+        if self.state.has_unsaved_tabs() {
+            // Show confirmation dialog first, create dialog will open after
+            self.state.confirm_dialog = Some(ConfirmDialog::OpenNewLibrary {
+                pending_action: PendingLibraryAction::ShowCreateDialog,
+            });
+        } else {
+            // No unsaved changes, show create dialog directly
+            self.show_create_library_dialog = true;
+        }
+    }
+
+    /// Create a new library file (resets state first)
     #[cfg(not(target_arch = "wasm32"))]
     fn create_library(&mut self, name: String, path: PathBuf) {
-        // TODO: Check if current library has unsaved changes and prompt user
+        // Reset to blank state before creating new library
+        self.state.reset_to_blank();
 
         // Create empty library
         let library = promptgen_core::Library {
@@ -259,15 +318,9 @@ impl PromptGenApp {
                 self.state.library = library;
                 self.state.library_path = Some(path.clone());
                 self.library_file_path = Some(path);
-
-                // Close dialog
-                self.show_create_library_dialog = false;
-                self.create_library_name.clear();
-                self.create_library_path = None;
             }
             Err(e) => {
                 log::error!("Failed to create library: {}", e);
-                // TODO: Show error in dialog instead of just logging
             }
         }
     }
@@ -658,6 +711,61 @@ impl PromptGenApp {
             ImportPromptsAction::None => {}
         }
     }
+
+    /// Render the unsaved prompts confirmation dialog (when opening/creating a new library)
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_unsaved_prompts_dialog(&mut self, ctx: &egui::Context) {
+        use dialogs::UnsavedPromptsAction;
+
+        // Check if we have an OpenNewLibrary dialog active
+        let pending_action = match &self.state.confirm_dialog {
+            Some(ConfirmDialog::OpenNewLibrary { pending_action }) => pending_action.clone(),
+            _ => return,
+        };
+
+        let unsaved_names = self.state.get_unsaved_tab_names();
+
+        let action = dialogs::render_unsaved_prompts_dialog(ctx, &unsaved_names);
+
+        match action {
+            UnsavedPromptsAction::SaveAll => {
+                // Save all dirty tabs to current library
+                self.save_all_dirty_tabs();
+
+                // Clear the dialog
+                self.state.confirm_dialog = None;
+
+                // Proceed with the pending action
+                match pending_action {
+                    PendingLibraryAction::OpenFilePicker => {
+                        self.show_open_file_picker();
+                    }
+                    PendingLibraryAction::ShowCreateDialog => {
+                        self.show_create_library_dialog = true;
+                    }
+                }
+            }
+            UnsavedPromptsAction::DiscardAll => {
+                // Clear the dialog
+                self.state.confirm_dialog = None;
+
+                // Proceed with the pending action (discarding unsaved changes)
+                match pending_action {
+                    PendingLibraryAction::OpenFilePicker => {
+                        self.show_open_file_picker();
+                    }
+                    PendingLibraryAction::ShowCreateDialog => {
+                        self.show_create_library_dialog = true;
+                    }
+                }
+            }
+            UnsavedPromptsAction::Cancel => {
+                // Just cancel - don't open/create the new library
+                self.state.confirm_dialog = None;
+            }
+            UnsavedPromptsAction::None => {}
+        }
+    }
 }
 
 impl eframe::App for PromptGenApp {
@@ -687,7 +795,7 @@ impl eframe::App for PromptGenApp {
                     ui.menu_button("File", |ui| {
                         if ui.button("Create Library...").clicked() {
                             ui.close();
-                            self.show_create_library_dialog = true;
+                            self.request_show_create_dialog();
                         }
                         if ui.button("Open Library...").clicked() {
                             ui.close();
@@ -751,6 +859,50 @@ impl eframe::App for PromptGenApp {
 
         // Central panel with unified scroll area for editor + slots
         egui::CentralPanel::default().show(ctx, |ui| {
+            // Show blank state if no active tab
+            if self.state.is_blank() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(100.0);
+
+                    ui.heading("Welcome to PromptGen");
+                    ui.add_space(16.0);
+
+                    if self.state.library_path.is_some() {
+                        ui.label("Create a new prompt to get started.");
+                        ui.add_space(16.0);
+
+                        if ui.button("+ New Prompt").clicked() {
+                            self.state.create_new_tab();
+                        }
+
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new("Or select a prompt from the sidebar")
+                                .weak(),
+                        );
+                    } else {
+                        ui.label("Open or create a library to get started.");
+                        ui.add_space(16.0);
+
+                        ui.horizontal(|ui| {
+                            ui.add_space(ui.available_width() / 2.0 - 100.0);
+
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                if ui.button("Open Library...").clicked() {
+                                    self.open_library_dialog();
+                                }
+
+                                if ui.button("Create Library...").clicked() {
+                                    self.request_show_create_dialog();
+                                }
+                            }
+                        });
+                    }
+                });
+                return;
+            }
+
             // Choose which editor to show based on editor mode
             match &self.state.editor_mode {
                 EditorMode::Prompt => {
@@ -925,5 +1077,9 @@ impl eframe::App for PromptGenApp {
 
         // Render import prompts dialog (if active)
         self.render_import_prompts_dialog(ctx);
+
+        // Render unsaved prompts dialog (when opening/creating new library)
+        #[cfg(not(target_arch = "wasm32"))]
+        self.render_unsaved_prompts_dialog(ctx);
     }
 }

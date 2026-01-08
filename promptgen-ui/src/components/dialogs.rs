@@ -577,6 +577,80 @@ pub fn render_import_variables_dialog(
     action
 }
 
+/// Actions that can result from the Unsaved Prompts dialog (when opening a new library)
+pub enum UnsavedPromptsAction {
+    None,
+    /// Save all unsaved prompts, then proceed
+    SaveAll,
+    /// Discard unsaved prompts and proceed
+    DiscardAll,
+    /// Cancel the operation (don't open/create the new library)
+    Cancel,
+}
+
+/// Render the Unsaved Prompts confirmation dialog
+pub fn render_unsaved_prompts_dialog(
+    ctx: &egui::Context,
+    unsaved_names: &[String],
+) -> UnsavedPromptsAction {
+    let mut action = UnsavedPromptsAction::None;
+
+    egui::Window::new("Unsaved Changes")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            if unsaved_names.len() == 1 {
+                ui.label(format!(
+                    "\"{}\" has unsaved changes.",
+                    unsaved_names[0]
+                ));
+            } else {
+                ui.label(format!(
+                    "{} prompts have unsaved changes:",
+                    unsaved_names.len()
+                ));
+                ui.add_space(4.0);
+                egui::Frame::new()
+                    .fill(ui.visuals().faint_bg_color)
+                    .corner_radius(4.0)
+                    .inner_margin(8.0)
+                    .show(ui, |ui| {
+                        for name in unsaved_names {
+                            ui.label(format!("  - {}", name));
+                        }
+                    });
+            }
+
+            ui.add_space(8.0);
+            ui.label("Do you want to save before opening a new library?");
+
+            ui.add_space(8.0);
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    action = UnsavedPromptsAction::Cancel;
+                }
+
+                if ui.button("Don't Save").clicked() {
+                    action = UnsavedPromptsAction::DiscardAll;
+                }
+
+                if ui.button("Save All").clicked() {
+                    action = UnsavedPromptsAction::SaveAll;
+                }
+            });
+
+            // Handle Escape to cancel
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                action = UnsavedPromptsAction::Cancel;
+            }
+        });
+
+    action
+}
+
 /// Actions that can result from the Import Prompts dialog
 pub enum ImportPromptsAction {
     None,
