@@ -2,6 +2,7 @@ mod autocomplete;
 pub mod dialogs;
 mod editor;
 mod focusable_frame;
+pub mod help;
 mod preview;
 pub mod prompt_editor;
 mod prompt_export_list;
@@ -16,6 +17,7 @@ mod variable_list;
 mod variable_menu;
 
 pub use editor::EditorPanel;
+pub use help::HelpWindow;
 pub use preview::PreviewPanel;
 pub use sidebar::SidebarPanel;
 pub use slots::SlotPanel;

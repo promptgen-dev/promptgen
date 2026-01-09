@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
 use crate::components::{
-    EditorPanel, PreviewPanel, SidebarPanel, SlotPanel, TabBarPanel, VariableEditorPanel, dialogs,
+    EditorPanel, HelpWindow, PreviewPanel, SidebarPanel, SlotPanel, TabBarPanel,
+    VariableEditorPanel, dialogs, help,
 };
+use egui_commonmark::CommonMarkCache;
 use crate::state::{
     AppState, ConfirmDialog, EditorMode, PendingLibraryAction, PromptTab, SidebarViewMode,
     VariableSortOrder,
@@ -92,6 +94,13 @@ pub struct PromptGenApp {
     #[cfg(not(target_arch = "wasm32"))]
     #[serde(skip)]
     pending_rename_path: Option<PathBuf>,
+
+    // Help system state (ephemeral)
+    #[serde(skip)]
+    show_getting_started_help: bool,
+
+    #[serde(skip)]
+    help_cache: CommonMarkCache,
 }
 
 impl PromptGenApp {
@@ -824,6 +833,14 @@ impl eframe::App for PromptGenApp {
                 }
 
                 egui::widgets::global_theme_preference_buttons(ui);
+
+                // Help menu
+                ui.menu_button("Help", |ui| {
+                    if ui.button("Getting Started").clicked() {
+                        ui.close();
+                        self.show_getting_started_help = true;
+                    }
+                });
             });
         });
 
@@ -1079,5 +1096,13 @@ impl eframe::App for PromptGenApp {
         // Render unsaved prompts dialog (when opening/creating new library)
         #[cfg(not(target_arch = "wasm32"))]
         self.render_unsaved_prompts_dialog(ctx);
+
+        // Render help windows
+        HelpWindow::new("getting_started_help", "Getting Started").show(
+            ctx,
+            &mut self.show_getting_started_help,
+            help::content::GETTING_STARTED,
+            &mut self.help_cache,
+        );
     }
 }
