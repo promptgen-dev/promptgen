@@ -8,6 +8,28 @@ use crate::state::AppState;
 use crate::theme;
 use promptgen_core::ParseResult;
 
+/// Calculate the cursor screen position from a TextEditOutput.
+/// Returns the position where the autocomplete popup should appear.
+fn get_cursor_screen_pos(output: &egui::text_edit::TextEditOutput) -> Option<egui::Pos2> {
+    // Get the cursor range from the output
+    let cursor = output.cursor_range?;
+    // Use the primary cursor position (where the caret is)
+    // cursor.primary is already a CCursor
+    let ccursor = cursor.primary;
+
+    // Get the position from the galley (relative to galley origin)
+    // pos_from_cursor returns a Rect representing the cursor position
+    let cursor_rect_in_galley = output.galley.pos_from_cursor(ccursor);
+
+    // Translate to screen coordinates using the galley position
+    // We want the bottom-left corner for popup positioning (below the cursor line)
+    let screen_pos = cursor_rect_in_galley
+        .translate(output.galley_pos.to_vec2())
+        .left_bottom();
+
+    Some(screen_pos)
+}
+
 /// Configuration for the template editor widget
 #[derive(Clone)]
 pub struct PromptEditorConfig {
@@ -112,7 +134,7 @@ impl PromptEditor {
                 ui.add_space(4.0);
             }
 
-            // Main editor - auto-size to content
+            // Main editor - use show() instead of add() to get TextEditOutput with galley
             let text_edit_id = ui.make_persistent_id(editor_id);
             let mut text_edit = egui::TextEdit::multiline(content)
                 .id(text_edit_id)
@@ -126,7 +148,8 @@ impl PromptEditor {
                 text_edit = text_edit.hint_text(hint.as_str());
             }
 
-            let response = ui.add(text_edit);
+            // Use show() to get full TextEditOutput including galley for cursor positioning
+            let output = text_edit.show(ui);
 
             // Apply pending cursor position if set
             if let Some(cursor_pos) = cursor_position
@@ -138,23 +161,36 @@ impl PromptEditor {
                     .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
                 text_state.store(ui.ctx(), text_edit_id);
                 // Request focus to make sure the cursor is visible
-                response.request_focus();
+                output.response.request_focus();
             }
 
-            // Read current cursor position
-            let cursor_position = egui::TextEdit::load_state(ui.ctx(), text_edit_id)
-                .and_then(|text_state| text_state.cursor.char_range())
-                .map(|range| range.primary.index);
+            // Get cursor position (character index) for autocomplete query
+            // cursor.primary is a CCursor which has an index field directly
+            let cursor_char_pos = output
+                .cursor_range
+                .map(|range| range.primary.index)
+                .unwrap_or(content.len());
 
-            (response, cursor_position)
+            // Get cursor screen position for popup positioning
+            let cursor_screen_pos = get_cursor_screen_pos(&output);
+
+            (output.response, cursor_char_pos, cursor_screen_pos)
         });
 
         let response = layout_response.inner.0;
-        let cursor_pos = layout_response.inner.1.unwrap_or(content.len());
+        let cursor_pos = layout_response.inner.1;
+        let cursor_screen_pos = layout_response.inner.2;
 
         // Handle autocomplete activation, popup display, and focus loss
-        if let Some(new_content) =
-            autocomplete_after_editor(ui, state, editor_id, content, &response, cursor_pos)
+        if let Some(new_content) = autocomplete_after_editor(
+            ui,
+            state,
+            editor_id,
+            content,
+            &response,
+            cursor_pos,
+            cursor_screen_pos,
+        )
         {
             *content = new_content;
         }

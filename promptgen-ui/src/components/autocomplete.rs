@@ -151,7 +151,10 @@ pub struct AutocompletePopupResult {
 pub struct AutocompletePopup;
 
 impl AutocompletePopup {
-    /// Show the autocomplete popup below the editor widget.
+    /// Show the autocomplete popup at the cursor position.
+    ///
+    /// `cursor_screen_pos` is the screen position where the popup should appear (at the cursor).
+    /// If not provided, falls back to positioning below the editor.
     ///
     /// Returns `AutocompletePopupResult` with the selected completion and hover state.
     #[allow(deprecated)]
@@ -161,8 +164,7 @@ impl AutocompletePopup {
         editor_id: &str,
         editor_response: &egui::Response,
         completions: &[CompletionItem],
-        _content: &str,
-        _cursor_pos: usize,
+        cursor_screen_pos: Option<egui::Pos2>,
     ) -> AutocompletePopupResult {
         if !state.is_autocomplete_active(editor_id) || completions.is_empty() {
             return AutocompletePopupResult {
@@ -185,25 +187,39 @@ impl AutocompletePopup {
         // NOTE: Keyboard handling is done in handle_autocomplete_keyboard() which must be
         // called BEFORE the TextEdit widget. This function only handles mouse clicks.
 
-        // Position popup just below the editor
+        // Position popup at cursor position if available, otherwise fall back to below editor
         let popup_height = 250.0; // max_height of the popup scroll area
         let popup_margin = 4.0;
         let screen_rect = ui.ctx().screen_rect();
 
-        // Space available below and above the editor
-        let space_below = screen_rect.bottom() - editor_response.rect.bottom() - popup_margin;
-        let space_above = editor_response.rect.top() - screen_rect.top() - popup_margin;
+        // Calculate popup position based on cursor screen position
+        let popup_pos = if let Some(cursor_pos) = cursor_screen_pos {
+            // Position below the cursor with some margin
+            let pos_below = cursor_pos + egui::vec2(0.0, popup_margin);
+            let pos_above = egui::pos2(cursor_pos.x, cursor_pos.y - popup_height - popup_margin);
 
-        // Determine popup position: below if enough space, otherwise above
-        let popup_pos = if space_below >= popup_height || space_below >= space_above {
-            // Position below the editor
-            editor_response.rect.left_bottom() + egui::vec2(0.0, popup_margin)
+            // Check if popup fits below cursor
+            let space_below = screen_rect.bottom() - cursor_pos.y - popup_margin;
+            let space_above = cursor_pos.y - screen_rect.top() - popup_margin;
+
+            if space_below >= popup_height || space_below >= space_above {
+                pos_below
+            } else {
+                pos_above
+            }
         } else {
-            // Position above the editor
-            egui::pos2(
-                editor_response.rect.left(),
-                editor_response.rect.top() - popup_height - popup_margin,
-            )
+            // Fallback: position below the editor
+            let space_below = screen_rect.bottom() - editor_response.rect.bottom() - popup_margin;
+            let space_above = editor_response.rect.top() - screen_rect.top() - popup_margin;
+
+            if space_below >= popup_height || space_below >= space_above {
+                editor_response.rect.left_bottom() + egui::vec2(0.0, popup_margin)
+            } else {
+                egui::pos2(
+                    editor_response.rect.left(),
+                    editor_response.rect.top() - popup_height - popup_margin,
+                )
+            }
         };
 
         let area_id = egui::Id::new(format!("autocomplete_area_{}", editor_id));
@@ -601,6 +617,8 @@ pub fn autocomplete_before_editor(
 /// - Showing the popup and handling mouse clicks
 /// - Deactivating autocomplete when editor loses focus (unless hovering popup)
 ///
+/// `cursor_screen_pos` is the screen position of the cursor for popup positioning.
+///
 /// Returns `Some(new_content)` if a completion was selected via mouse click,
 /// `None` otherwise.
 pub fn autocomplete_after_editor(
@@ -610,6 +628,7 @@ pub fn autocomplete_after_editor(
     content: &str,
     response: &egui::Response,
     cursor_pos: usize,
+    cursor_screen_pos: Option<egui::Pos2>,
 ) -> Option<String> {
     // Check for Ctrl+Space (or Cmd+Space on Mac) to force-activate autocomplete
     let ctrl_space = ui.ctx().input_mut(|i| {
@@ -667,9 +686,9 @@ pub fn autocomplete_after_editor(
         return None;
     }
 
-    // Show popup and handle mouse clicks
+    // Show popup and handle mouse clicks (positioned at cursor)
     let popup_result =
-        AutocompletePopup::show(ui, state, editor_id, response, &completions, content, cursor_pos);
+        AutocompletePopup::show(ui, state, editor_id, response, &completions, cursor_screen_pos);
 
     let new_content = popup_result
         .selected
