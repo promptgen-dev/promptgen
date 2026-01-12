@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use chumsky::prelude::*;
+use chumsky::text::{ascii::keyword, digits};
 use chumsky::{error::Simple, extra, span::SimpleSpan};
 
 use crate::ast::{
@@ -8,6 +9,16 @@ use crate::ast::{
     SlotBlock, SlotKind,
 };
 use crate::span::Span;
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Helper to convert Chumsky spans to our custom Span
+#[inline]
+fn to_span(span: SimpleSpan<usize>) -> Span {
+    span.start..span.end
+}
 
 /// Information about a duplicate slot label.
 #[derive(Debug, Clone)]
@@ -35,9 +46,20 @@ pub enum ParseError<'a> {
     },
 }
 
-/// Helper to convert Chumsky spans to our custom Span
-fn to_range(span: SimpleSpan<usize>) -> Span {
-    span.start..span.end
+/// Parse an identifier: starts with alphanumeric or underscore,
+/// followed by alphanumeric, underscore, or hyphen.
+fn identifier_parser<'src>()
+-> impl Parser<'src, &'src str, String, extra::Err<Simple<'src, char>>> + Clone {
+    any()
+        .filter(|c: &char| c.is_alphanumeric() || *c == '_')
+        .then(
+            any()
+                .filter(|c: &char| c.is_alphanumeric() || *c == '_' || *c == '-')
+                .repeated()
+                .collect::<String>(),
+        )
+        .map(|(first, rest)| format!("{first}{rest}"))
+        .labelled("identifier")
 }
 
 /// Parse a library reference string (the part after @ or inside quotes).
@@ -145,10 +167,11 @@ fn node_parser<'src>()
 /// 2. `{{ label }}` - textarea slot
 fn slot_block_parser<'src>()
 -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
-    just("{{")
-        .ignore_then(slot_block_content_parser().padded())
-        .then_ignore(just("}}"))
-        .map_with(|slot_block, e| (Node::SlotBlock(slot_block), to_range(e.span())))
+    slot_block_content_parser()
+        .padded()
+        .delimited_by(just("{{"), just("}}"))
+        .map_with(|slot_block, e| (Node::SlotBlock(slot_block), to_span(e.span())))
+        .labelled("slot block")
 }
 
 /// Parse the content inside {{ ... }}
@@ -174,7 +197,7 @@ fn pick_slot_parser<'src>()
 fn textarea_slot_parser<'src>()
 -> impl Parser<'src, &'src str, SlotBlock, extra::Err<Simple<'src, char>>> + Clone {
     slot_label_parser().map_with(|(label, label_span), e| {
-        let span = to_range(e.span());
+        let span = to_span(e.span());
         SlotBlock {
             label: (label, label_span),
             kind: (SlotKind::Textarea, span),
@@ -194,7 +217,7 @@ fn slot_label_parser<'src>()
                 .collect::<String>(),
         )
         .then_ignore(just('"'))
-        .map_with(|s, e| (s, to_range(e.span())));
+        .map_with(|s, e| (s, to_span(e.span())));
 
     // Bare label: anything up to ':' or '}}'
     // We need to be careful not to consume the ':' for pick slots
@@ -203,7 +226,7 @@ fn slot_label_parser<'src>()
         .at_least(1)
         .collect::<String>()
         .map(|s| s.trim().to_string())
-        .map_with(|s, e| (s, to_range(e.span())));
+        .map_with(|s, e| (s, to_span(e.span())));
 
     quoted_label.or(bare_label)
 }
@@ -211,12 +234,15 @@ fn slot_label_parser<'src>()
 /// Parse `pick(...) [| ops]`
 fn pick_expression_parser<'src>()
 -> impl Parser<'src, &'src str, (PickSlot, Span), extra::Err<Simple<'src, char>>> + Clone {
-    just("pick")
-        .ignore_then(just('(').padded())
-        .ignore_then(pick_sources_parser())
-        .then_ignore(just(')').padded())
+    keyword("pick")
+        .ignore_then(
+            pick_sources_parser()
+                .padded()
+                .delimited_by(just('('), just(')')),
+        )
         .then(pick_operators_parser())
-        .map_with(|(sources, operators), e| (PickSlot { sources, operators }, to_range(e.span())))
+        .map_with(|(sources, operators), e| (PickSlot { sources, operators }, to_span(e.span())))
+        .labelled("pick expression")
 }
 
 /// Parse comma-separated pick sources
@@ -244,7 +270,7 @@ fn pick_source_parser<'src>()
                     value: s,
                     quoted: true,
                 },
-                to_range(e.span()),
+                to_span(e.span()),
             )
         });
 
@@ -260,7 +286,7 @@ fn pick_source_parser<'src>()
                     value: s,
                     quoted: false,
                 },
-                to_range(e.span()),
+                to_span(e.span()),
             )
         });
 
@@ -285,29 +311,22 @@ fn quoted_string_content_parser<'src>()
 /// Parse @VariableRef inside pick()
 fn pick_variable_ref_parser<'src>()
 -> impl Parser<'src, &'src str, (PickSource, Span), extra::Err<Simple<'src, char>>> + Clone {
-    // @"quoted name" or @identifier
-    let quoted_ref = just("@\"")
-        .ignore_then(none_of("\"").repeated().collect::<String>())
-        .then_ignore(just('"'))
+    // @"quoted name" - allows spaces and special chars
+    let quoted_ref = none_of("\"")
+        .repeated()
+        .collect::<String>()
+        .delimited_by(just("@\""), just('"'))
         .map(|name| PickSource::VariableRef(parse_library_ref_string(&name)));
 
+    // @identifier - simple identifier
     let simple_ref = just('@')
-        .ignore_then(
-            any()
-                .filter(|c: &char| c.is_alphanumeric() || *c == '_')
-                .then(
-                    any()
-                        .filter(|c: &char| c.is_alphanumeric() || *c == '_' || *c == '-')
-                        .repeated()
-                        .collect::<String>(),
-                )
-                .map(|(first, rest)| format!("{}{}", first, rest)),
-        )
+        .ignore_then(identifier_parser())
         .map(|name| PickSource::VariableRef(LibraryRef::new(name)));
 
     quoted_ref
         .or(simple_ref)
-        .map_with(|source, e| (source, to_range(e.span())))
+        .map_with(|source, e| (source, to_span(e.span())))
+        .labelled("variable reference")
 }
 
 /// Parse pipe-separated operators: `| one` or `| many(...)`
@@ -327,25 +346,23 @@ fn pick_operator_parser<'src>()
 /// Parse `one` or `one(suffix="...")`
 fn one_operator_parser<'src>()
 -> impl Parser<'src, &'src str, (PickOperator, Span), extra::Err<Simple<'src, char>>> + Clone {
-    just("one")
+    keyword("one")
         .ignore_then(one_args_parser().or_not())
         .map_with(|args, e| {
             let spec = args.unwrap_or_default();
-            (PickOperator::One(spec), to_range(e.span()))
+            (PickOperator::One(spec), to_span(e.span()))
         })
+        .labelled("one operator")
 }
 
 /// Parse `(suffix="...")`
 fn one_args_parser<'src>()
 -> impl Parser<'src, &'src str, OneSpec, extra::Err<Simple<'src, char>>> + Clone {
-    just('(')
+    operator_arg_parser()
+        .separated_by(just(',').padded())
+        .collect::<Vec<_>>()
         .padded()
-        .ignore_then(
-            operator_arg_parser()
-                .separated_by(just(',').padded())
-                .collect::<Vec<_>>(),
-        )
-        .then_ignore(just(')').padded())
+        .delimited_by(just('('), just(')'))
         .map(|args| {
             let mut spec = OneSpec::default();
             for (key, value) in args {
@@ -360,25 +377,23 @@ fn one_args_parser<'src>()
 /// Parse `many` or `many(max=N, sep="...", suffix="...")`
 fn many_operator_parser<'src>()
 -> impl Parser<'src, &'src str, (PickOperator, Span), extra::Err<Simple<'src, char>>> + Clone {
-    just("many")
+    keyword("many")
         .ignore_then(many_args_parser().or_not())
         .map_with(|args, e| {
             let spec = args.unwrap_or_default();
-            (PickOperator::Many(spec), to_range(e.span()))
+            (PickOperator::Many(spec), to_span(e.span()))
         })
+        .labelled("many operator")
 }
 
 /// Parse `(max=N, sep="...", suffix="...")`
 fn many_args_parser<'src>()
 -> impl Parser<'src, &'src str, ManySpec, extra::Err<Simple<'src, char>>> + Clone {
-    just('(')
+    operator_arg_parser()
+        .separated_by(just(',').padded())
+        .collect::<Vec<_>>()
         .padded()
-        .ignore_then(
-            operator_arg_parser()
-                .separated_by(just(',').padded())
-                .collect::<Vec<_>>(),
-        )
-        .then_ignore(just(')').padded())
+        .delimited_by(just('('), just(')'))
         .map(|args| {
             let mut spec = ManySpec::default();
             for (key, value) in args {
@@ -417,17 +432,11 @@ fn operator_arg_parser<'src>()
 /// Parse an operator arg value: number or quoted string
 fn operator_arg_value_parser<'src>()
 -> impl Parser<'src, &'src str, String, extra::Err<Simple<'src, char>>> + Clone {
-    // Quoted string
-    let quoted = just('"')
-        .ignore_then(quoted_string_content_parser())
-        .then_ignore(just('"'));
+    // Quoted string: "..."
+    let quoted = quoted_string_content_parser().delimited_by(just('"'), just('"'));
 
-    // Number
-    let number = any()
-        .filter(|c: &char| c.is_ascii_digit())
-        .repeated()
-        .at_least(1)
-        .collect::<String>();
+    // Number using chumsky's digits parser
+    let number = digits(10).to_slice().map(|s: &str| s.to_string());
 
     // Identifier (for None, etc.)
     let ident = any()
@@ -436,7 +445,7 @@ fn operator_arg_value_parser<'src>()
         .at_least(1)
         .collect::<String>();
 
-    choice((quoted, number, ident))
+    choice((quoted, number, ident)).labelled("argument value")
 }
 
 /// Split a string by a delimiter, but only at depth 0 (outside nested braces).
@@ -467,21 +476,18 @@ fn split_at_depth_zero(s: &str, delimiter: char) -> Vec<&str> {
 /// Options can contain nested grammar (like @Hair or nested {x|y})
 fn inline_options_parser<'src>()
 -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
-    just('{')
-        .ignore_then(brace_balanced_content())
-        .then_ignore(just('}'))
+    brace_balanced_content()
+        .delimited_by(just('{'), just('}'))
         .map_with(|content, e| {
             // Split by | at depth 0 only (respecting nested braces)
             let options: Vec<OptionItem> = split_at_depth_zero(&content, '|')
                 .into_iter()
-                .map(|opt| {
-                    let opt = opt.trim();
-                    OptionItem::Text(opt.to_string())
-                })
+                .map(|opt| OptionItem::Text(opt.trim().to_string()))
                 .collect();
 
-            (Node::InlineOptions(options), to_range(e.span()))
+            (Node::InlineOptions(options), to_span(e.span()))
         })
+        .labelled("inline options")
 }
 
 /// Parse content inside braces, respecting nested braces.
@@ -508,35 +514,23 @@ fn brace_balanced_content<'src>()
 /// Parse `@"Name"` or `@"Lib:Name"` - quoted library reference
 fn quoted_library_ref_parser<'src>()
 -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
-    just("@\"")
-        .ignore_then(none_of("\"").repeated().collect::<String>())
-        .then_ignore(just('"'))
+    none_of("\"")
+        .repeated()
+        .collect::<String>()
+        .delimited_by(just("@\""), just('"'))
         .map_with(|name, e| {
-            let lib_ref = parse_library_ref_string(&name);
-            (Node::LibraryRef(lib_ref), to_range(e.span()))
+            (Node::LibraryRef(parse_library_ref_string(&name)), to_span(e.span()))
         })
+        .labelled("quoted library reference")
 }
 
 /// Parse `@Name` - simple library reference (no spaces allowed in name)
 fn simple_library_ref_parser<'src>()
 -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
     just('@')
-        .ignore_then(
-            // Identifier: starts with letter, digit, or underscore, followed by letters, digits, underscores, hyphens
-            any()
-                .filter(|c: &char| c.is_alphanumeric() || *c == '_')
-                .then(
-                    any()
-                        .filter(|c: &char| c.is_alphanumeric() || *c == '_' || *c == '-')
-                        .repeated()
-                        .collect::<String>(),
-                )
-                .map(|(first, rest)| format!("{}{}", first, rest)),
-        )
-        .map_with(|name, e| {
-            let lib_ref = LibraryRef::new(name);
-            (Node::LibraryRef(lib_ref), to_range(e.span()))
-        })
+        .ignore_then(identifier_parser())
+        .map_with(|name, e| (Node::LibraryRef(LibraryRef::new(name)), to_span(e.span())))
+        .labelled("library reference")
 }
 
 /// Parse `# comment to end of line`
@@ -544,7 +538,8 @@ fn comment_parser<'src>()
 -> impl Parser<'src, &'src str, (Node, Span), extra::Err<Simple<'src, char>>> + Clone {
     just('#')
         .ignore_then(none_of("\n").repeated().collect::<String>())
-        .map_with(|text, e| (Node::Comment(text.trim().to_string()), to_range(e.span())))
+        .map_with(|text, e| (Node::Comment(text.trim().to_string()), to_span(e.span())))
+        .labelled("comment")
 }
 
 /// Parse plain text - everything that's not a special construct
@@ -556,7 +551,7 @@ fn text_parser<'src>()
         .repeated()
         .at_least(1)
         .collect::<String>()
-        .map_with(|value, e| (Node::Text(value), to_range(e.span())))
+        .map_with(|value, e| (Node::Text(value), to_span(e.span())))
 }
 
 #[cfg(test)]
