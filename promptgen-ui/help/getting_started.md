@@ -1,6 +1,6 @@
 # Getting Started with PromptGen
 
-Welcome to PromptGen! This guide will help you get started with creating and managing prompts for AI image generation.
+Welcome to PromptGen! This guide will help you get started with creating and managing reusable prompt templates.
 
 ## Core Concepts
 
@@ -81,28 +81,43 @@ Portrait of a @Age @Gender with @HairStyle,
 - "Portrait of a young woman with long flowing hair, mysterious expression, oil painting, golden hour sunlight"
 - "Portrait of an elderly man with short cropped hair, serene expression, photograph, soft diffused light"
 
-### Example 2: Fantasy Landscape Generator
+### Example 2: Code Review Assistant
 
 **Variables:**
 
 ```
-Terrain: mountain range, enchanted forest, crystal caves
-TimeOfDay: sunrise, midnight, twilight
-Weather: misty, stormy, clear skies
-MagicElement: floating islands, glowing runes, aurora borealis
+Language:
+  Python
+  TypeScript
+  Rust
+  Go
+
+ReviewFocus:
+  security vulnerabilities
+  performance optimizations
+  code readability
+  error handling
+
+Tone:
+  concise and direct
+  detailed with explanations
+  educational for junior developers
 ```
 
 **Prompt:**
 
 ```
-@Terrain at @TimeOfDay, @Weather, featuring @MagicElement,
-epic fantasy art, highly detailed
+Review the following @Language code with a focus on @ReviewFocus.
+
+Be @Tone in your feedback. Include specific line references
+and suggest concrete improvements.
+
 ```
 
 **Sample outputs:**
 
-- "Enchanted forest at twilight, misty, featuring glowing runes, epic fantasy art, highly detailed"
-- "Crystal caves at midnight, clear skies, featuring aurora borealis, epic fantasy art, highly detailed"
+- "Review the following Rust code with a focus on error handling. Be concise and direct in your feedback..."
+- "Review the following Python code with a focus on security vulnerabilities. Be educational for junior developers..."
 
 ## Working with Slots
 
@@ -127,27 +142,27 @@ When you use variables in a prompt, they appear as **slots** below the editor. S
 5. **Configure slots** - Select or randomize values in the Slots section
 6. **Preview and iterate** - Use the Preview panel to see results
 
-## Keyboard Shortcuts
+## Autocomplete Keyboard Shortcuts
 
-| Shortcut     | Action                         |
-| ------------ | ------------------------------ |
-| `Ctrl+Space` | Toggle autocomplete            |
-| `Escape`     | Close picker/dialog            |
-| `Tab`        | Accept autocomplete suggestion |
+| Shortcut       | Action                         |
+| -------------- | ------------------------------ |
+| `Ctrl+Space`   | Toggle autocomplete            |
+| `Up/Down`      | Choose options                 |
+| `Escape`       | Close picker/dialog            |
+| `Tab or Enter` | Accept autocomplete suggestion |
 
 ## Tips
 
-> **Tip**: Start with broad variables (Style, Mood, Lighting) that work across many prompts, then add specific ones as needed.
-
-> **Tip**: Use the search in the slot picker to quickly find options in large variables.
-
-> **Tip**: Export your variables to share them across libraries or with others.
+- Start with broad variables (Tone, Persona, Format) that work across many prompts, then add specific ones as needed.
+- Use the search in the slot picker to quickly find options in large variables.
+- Export your variables to share them across libraries or with others.
 
 ## Variable Organization
 
 For complex libraries, consider organizing variables by category:
 
-**Subject variables:** Character, Animal, Object
-**Style variables:** ArtStyle, Medium, Technique
-**Environment variables:** Location, TimeOfDay, Weather, Season
-**Technical variables:** Camera, Lens, Lighting, Quality
+**For coding prompts:** Language, Framework, ReviewFocus, OutputFormat
+
+**For creative prompts:** Style, Mood, Subject, Medium
+
+**For workflow prompts:** Persona, Tone, Audience, Context
