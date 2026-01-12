@@ -1,6 +1,6 @@
 //! Reusable template editor widget with syntax highlighting, line numbers, and autocomplete.
 
-use egui::TextBuffer;
+use egui::{Color32, FontId, TextBuffer};
 
 use crate::components::autocomplete::{autocomplete_after_editor, autocomplete_before_editor};
 use crate::highlighting::highlight_prompt;
@@ -28,6 +28,67 @@ fn get_cursor_screen_pos(output: &egui::text_edit::TextEditOutput) -> Option<egu
         .left_bottom();
 
     Some(screen_pos)
+}
+
+/// Paint line numbers at the Y position of each logical line's first visual row.
+/// This correctly handles text wrapping - line numbers only appear at the start of each logical line.
+fn paint_line_numbers(
+    ui: &egui::Ui,
+    galley: &std::sync::Arc<egui::Galley>,
+    galley_pos: egui::Pos2,
+    line_number_rect: egui::Rect,
+    content: &str,
+) {
+    let painter = ui.painter();
+    let font_id = FontId::monospace(14.0);
+    let line_number_color = Color32::from_rgb(108, 112, 134); // Catppuccin overlay0
+
+    // Count logical lines to determine max digits needed
+    let logical_line_count = content.lines().count().max(1);
+    let max_digits = logical_line_count.to_string().len();
+
+    // Track which logical line we're on
+    let mut logical_line = 1;
+    let mut char_index: usize = 0;
+
+    for row in galley.rows.iter() {
+        // Check if this row starts a new logical line
+        // A row starts a new logical line if:
+        // 1. It's the first row (char_index == 0), or
+        // 2. The previous character was a newline
+        let is_new_logical_line = char_index == 0
+            || content
+                .get(..char_index)
+                .and_then(|s| s.chars().last())
+                .is_some_and(|c| c == '\n');
+
+        if is_new_logical_line {
+            // Format line number right-aligned
+            let line_num_str = format!("{:>width$}", logical_line, width = max_digits);
+
+            // Calculate Y position from the row rect, translated to screen coordinates
+            let row_y = galley_pos.y + row.rect().top();
+
+            // Paint the line number right-aligned within the line number column
+            let text_pos = egui::pos2(
+                line_number_rect.right() - 4.0, // Small margin from right edge
+                row_y,
+            );
+
+            painter.text(
+                text_pos,
+                egui::Align2::RIGHT_TOP,
+                line_num_str,
+                font_id.clone(),
+                line_number_color,
+            );
+
+            logical_line += 1;
+        }
+
+        // Advance char_index by the number of characters in this row
+        char_index += row.char_count_including_newline();
+    }
 }
 
 /// Configuration for the template editor widget
@@ -108,29 +169,27 @@ impl PromptEditor {
         let line_count = content.lines().count().max(1);
         let desired_rows = line_count.max(config.min_lines);
 
-        // Horizontal layout for line numbers + editor (no internal scroll)
+        // Calculate line number column width
+        let logical_line_count = content.lines().count().max(1);
+        let max_digits = logical_line_count.max(config.min_lines).to_string().len();
+        let line_number_width = if config.show_line_numbers {
+            (max_digits as f32) * 8.0 + 8.0 // ~8px per digit + margin
+        } else {
+            0.0
+        };
+
+        // Horizontal layout for line numbers + editor
         let layout_response = ui.horizontal_top(|ui| {
+            // Reserve space for line numbers (we'll paint them after getting the galley)
+            let line_number_rect = if config.show_line_numbers {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(line_number_width, 0.0), egui::Sense::hover());
+                Some(rect)
+            } else {
+                None
+            };
+
             if config.show_line_numbers {
-                // Line numbers column - match the number of lines in content
-                // Right-align numbers with minimal width based on max line number
-                let max_digits = desired_rows.to_string().len();
-                let line_numbers: String = (1..=desired_rows)
-                    .map(|n| format!("{:>width$}", n, width = max_digits))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                // Calculate width: ~8px per digit + small margin
-                let width = (max_digits as f32) * 8.0 + 4.0;
-
-                ui.add(
-                    egui::TextEdit::multiline(&mut line_numbers.as_str())
-                        .font(egui::TextStyle::Monospace)
-                        .desired_width(width)
-                        .frame(false)
-                        .interactive(false)
-                        .text_color(egui::Color32::from_rgb(108, 112, 134)), // Catppuccin overlay0
-                );
-
                 ui.add_space(4.0);
             }
 
@@ -174,12 +233,32 @@ impl PromptEditor {
             // Get cursor screen position for popup positioning
             let cursor_screen_pos = get_cursor_screen_pos(&output);
 
-            (output.response, cursor_char_pos, cursor_screen_pos)
+            (
+                output.response,
+                cursor_char_pos,
+                cursor_screen_pos,
+                line_number_rect,
+                output.galley,
+                output.galley_pos,
+            )
         });
 
         let response = layout_response.inner.0;
         let cursor_pos = layout_response.inner.1;
         let cursor_screen_pos = layout_response.inner.2;
+        let line_number_rect = layout_response.inner.3;
+        let galley = layout_response.inner.4;
+        let galley_pos = layout_response.inner.5;
+
+        // Paint line numbers at correct Y positions using the galley
+        if let Some(line_number_rect) = line_number_rect {
+            // Extend the line number rect to match the galley height
+            let extended_rect = egui::Rect::from_min_size(
+                egui::pos2(line_number_rect.left(), galley_pos.y),
+                egui::vec2(line_number_rect.width(), galley.rect.height()),
+            );
+            paint_line_numbers(ui, &galley, galley_pos, extended_rect, content);
+        }
 
         // Handle autocomplete activation, popup display, and focus loss
         if let Some(new_content) = autocomplete_after_editor(

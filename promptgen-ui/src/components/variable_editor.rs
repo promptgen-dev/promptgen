@@ -1,6 +1,6 @@
 //! Variable editor component for editing variable variables.
 
-use egui::{Color32, RichText, Vec2};
+use egui::{Color32, FontId, RichText};
 
 use egui_material_icons::icons::ICON_ARROW_BACK;
 
@@ -145,33 +145,18 @@ impl VariableEditorPanel {
                 let option_numbers = Self::calculate_option_numbers(&content);
                 let line_count = content.lines().count().max(5);
 
+                // Calculate option number column width
+                let max_option_num =
+                    option_numbers.iter().filter_map(|n| *n).max().unwrap_or(1);
+                let max_digits = max_option_num.to_string().len();
+                let number_width = (max_digits as f32) * 8.0 + 12.0;
+
                 ui.horizontal(|ui| {
-                    // Option numbers column
-                    let max_option_num =
-                        option_numbers.iter().filter_map(|n| *n).max().unwrap_or(1);
-                    let max_digits = max_option_num.to_string().len();
-                    let number_width = (max_digits as f32) * 8.0 + 12.0;
+                    // Reserve space for option numbers (we'll paint them after getting the galley)
+                    let (number_rect, _) =
+                        ui.allocate_exact_size(egui::vec2(number_width, 0.0), egui::Sense::hover());
 
-                    ui.allocate_ui(Vec2::new(number_width, 0.0), |ui| {
-                        let numbers_text: String = option_numbers
-                            .iter()
-                            .take(line_count.max(option_numbers.len()))
-                            .map(|n| match n {
-                                Some(num) => format!("{:>width$}", num, width = max_digits),
-                                None => " ".repeat(max_digits), // Blank for delimiter lines
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-
-                        ui.add(
-                            egui::TextEdit::multiline(&mut numbers_text.as_str())
-                                .font(egui::TextStyle::Monospace)
-                                .interactive(false)
-                                .desired_width(number_width)
-                                .frame(false)
-                                .text_color(Color32::from_rgb(108, 112, 134)),
-                        );
-                    });
+                    ui.add_space(4.0);
 
                     // Main editor with syntax highlighting
                     let mut layouter =
@@ -193,6 +178,19 @@ impl VariableEditorPanel {
                         .show(ui);
 
                     let response = &output.response;
+                    let galley = &output.galley;
+                    let galley_pos = output.galley_pos;
+
+                    // Paint option numbers at correct Y positions using the galley
+                    Self::paint_option_numbers(
+                        ui,
+                        galley,
+                        galley_pos,
+                        number_rect,
+                        &content,
+                        &option_numbers,
+                        max_digits,
+                    );
 
                     // Apply pending cursor position if set
                     if let Some(cursor_pos) = pending_cursor_position
@@ -290,6 +288,69 @@ impl VariableEditorPanel {
         }
 
         numbers
+    }
+
+    /// Paint option numbers at the Y position of each logical line's first visual row.
+    /// This correctly handles text wrapping - option numbers only appear at the start of each logical line.
+    fn paint_option_numbers(
+        ui: &egui::Ui,
+        galley: &std::sync::Arc<egui::Galley>,
+        galley_pos: egui::Pos2,
+        number_rect: egui::Rect,
+        content: &str,
+        option_numbers: &[Option<usize>],
+        max_digits: usize,
+    ) {
+        let painter = ui.painter();
+        let font_id = FontId::monospace(14.0);
+        let number_color = Color32::from_rgb(108, 112, 134); // Catppuccin overlay0
+
+        // Track which logical line we're on
+        let mut logical_line = 0;
+        let mut char_index: usize = 0;
+
+        for row in galley.rows.iter() {
+            // Check if this row starts a new logical line
+            // A row starts a new logical line if:
+            // 1. It's the first row (char_index == 0), or
+            // 2. The previous character was a newline
+            let is_new_logical_line = char_index == 0
+                || content
+                    .get(..char_index)
+                    .and_then(|s| s.chars().last())
+                    .is_some_and(|c| c == '\n');
+
+            if is_new_logical_line {
+                // Get the option number for this logical line (if any)
+                if let Some(Some(num)) = option_numbers.get(logical_line) {
+                    // Format option number right-aligned
+                    let num_str = format!("{:>width$}", num, width = max_digits);
+
+                    // Calculate Y position from the row rect, translated to screen coordinates
+                    let row_y = galley_pos.y + row.rect().top();
+
+                    // Paint the option number right-aligned within the number column
+                    let text_pos = egui::pos2(
+                        number_rect.right() - 4.0, // Small margin from right edge
+                        row_y,
+                    );
+
+                    painter.text(
+                        text_pos,
+                        egui::Align2::RIGHT_TOP,
+                        num_str,
+                        font_id.clone(),
+                        number_color,
+                    );
+                }
+                // If option_numbers[logical_line] is None, we don't paint anything (delimiter lines)
+
+                logical_line += 1;
+            }
+
+            // Advance char_index by the number of characters in this row
+            char_index += row.char_count_including_newline();
+        }
     }
 
     /// Calculate the cursor screen position from a TextEditOutput.
