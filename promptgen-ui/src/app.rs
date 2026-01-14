@@ -6,8 +6,8 @@ use crate::components::{
 };
 use egui_commonmark::CommonMarkCache;
 use crate::state::{
-    AppState, ConfirmDialog, EditorMode, PendingLibraryAction, PromptTab, SidebarViewMode,
-    VariableSortOrder,
+    AppState, ConfirmDialog, EditorMode, PendingLibraryAction, PreviewState, PromptTab,
+    SidebarViewMode, VariableSortOrder,
 };
 use crate::theme;
 
@@ -135,37 +135,37 @@ impl PromptGenApp {
     /// Restore tabs from persisted data into AppState
     fn restore_tabs(&mut self) {
         // Restore persisted settings
-        self.state.variable_sort_order = self.variable_sort_order;
-        self.state.auto_copy = self.auto_copy;
-        self.state.sidebar_view_mode = self.sidebar_view_mode;
-        self.state.slot_picker_sort_order = self.slot_picker_sort_order;
-        self.state.slot_picker_option_sort_order = self.slot_picker_option_sort_order;
-        self.state.option_sort_order = self.option_sort_order;
-        self.state.prompt_sort_order = self.prompt_sort_order;
+        self.state.sidebar.variable_sort_order = self.variable_sort_order;
+        self.state.preview.auto_copy = self.auto_copy;
+        self.state.sidebar.view_mode = self.sidebar_view_mode;
+        self.state.sidebar.slot_picker.sort_order = self.slot_picker_sort_order;
+        self.state.sidebar.slot_picker.option_sort_order = self.slot_picker_option_sort_order;
+        self.state.sidebar.option_sort_order = self.option_sort_order;
+        self.state.sidebar.prompt_sort_order = self.prompt_sort_order;
 
         // If we have persisted tabs, restore them
         if !self.prompt_tabs.is_empty() {
-            self.state.prompt_tabs = self.prompt_tabs.clone();
+            self.state.tabs.tabs = self.prompt_tabs.clone();
 
             // Validate and restore active tab index
             if let Some(idx) = self.active_tab_index {
-                if idx < self.state.prompt_tabs.len() {
-                    self.state.active_tab_index = Some(idx);
+                if idx < self.state.tabs.tabs.len() {
+                    self.state.tabs.active_index = Some(idx);
                 } else {
                     // Index out of bounds, use last tab
-                    self.state.active_tab_index = Some(self.state.prompt_tabs.len() - 1);
+                    self.state.tabs.active_index = Some(self.state.tabs.tabs.len() - 1);
                 }
-            } else if !self.state.prompt_tabs.is_empty() {
+            } else if !self.state.tabs.tabs.is_empty() {
                 // No saved index, default to first tab
-                self.state.active_tab_index = Some(0);
+                self.state.tabs.active_index = Some(0);
             }
 
             // Sync editor content with active tab
-            if let Some(idx) = self.state.active_tab_index
-                && let Some(tab) = self.state.prompt_tabs.get(idx)
+            if let Some(idx) = self.state.tabs.active_index
+                && let Some(tab) = self.state.tabs.tabs.get(idx)
             {
-                self.state.editor_content = tab.content.clone();
-                self.state.slot_values = crate::state::AppState::slot_values_to_vec_map(&tab.slots);
+                self.state.editor.content = tab.content.clone();
+                self.state.preview.slot_values = PreviewState::slot_values_from_tab(&tab.slots);
                 self.state.update_parse_result();
                 // Render immediately so preview is populated on app launch
                 self.state.request_render();
@@ -179,23 +179,54 @@ impl PromptGenApp {
         // Sync current slot values to active tab before saving
         self.state.save_slot_values_to_active_tab();
 
-        self.prompt_tabs = self.state.prompt_tabs.clone();
-        self.active_tab_index = self.state.active_tab_index;
-        self.variable_sort_order = self.state.variable_sort_order;
-        self.auto_copy = self.state.auto_copy;
-        self.sidebar_view_mode = self.state.sidebar_view_mode;
-        self.slot_picker_sort_order = self.state.slot_picker_sort_order;
-        self.slot_picker_option_sort_order = self.state.slot_picker_option_sort_order;
-        self.option_sort_order = self.state.option_sort_order;
-        self.prompt_sort_order = self.state.prompt_sort_order;
+        self.prompt_tabs = self.state.tabs.tabs.clone();
+        self.active_tab_index = self.state.tabs.active_index;
+        self.variable_sort_order = self.state.sidebar.variable_sort_order;
+        self.auto_copy = self.state.preview.auto_copy;
+        self.sidebar_view_mode = self.state.sidebar.view_mode;
+        self.slot_picker_sort_order = self.state.sidebar.slot_picker.sort_order;
+        self.slot_picker_option_sort_order = self.state.sidebar.slot_picker.option_sort_order;
+        self.option_sort_order = self.state.sidebar.option_sort_order;
+        self.prompt_sort_order = self.state.sidebar.prompt_sort_order;
     }
+
+    // ==========================================================================
+    // Centralized Library Persistence
+    // ==========================================================================
+
+    /// Persist the library to disk. Returns true if successful.
+    /// This centralizes all library save operations.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn persist_library(&self) -> bool {
+        if let Some(path) = &self.state.library_path {
+            if let Err(e) = promptgen_core::save_library(&self.state.library, path) {
+                log::error!("Failed to save library: {}", e);
+                return false;
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Persist the library to disk if it was modified.
+    /// Convenience wrapper that logs errors.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn persist_library_if_modified(&self, was_modified: bool) {
+        if was_modified {
+            self.persist_library();
+        }
+    }
+
+    // ==========================================================================
+    // Library Operations
+    // ==========================================================================
 
     /// Request to open a library - checks for unsaved changes first, then shows file picker
     #[cfg(not(target_arch = "wasm32"))]
     fn open_library_dialog(&mut self) {
         if self.state.has_unsaved_tabs() {
             // Show confirmation dialog first, file picker will open after
-            self.state.confirm_dialog = Some(ConfirmDialog::OpenNewLibrary {
+            self.state.dialogs.confirm = Some(ConfirmDialog::OpenNewLibrary {
                 pending_action: PendingLibraryAction::OpenFilePicker,
             });
         } else {
@@ -247,49 +278,15 @@ impl PromptGenApp {
     #[cfg(not(target_arch = "wasm32"))]
     fn save_all_dirty_tabs(&mut self) {
         // Save each dirty tab
-        for idx in 0..self.state.prompt_tabs.len() {
-            if self.state.prompt_tabs[idx].dirty {
+        for idx in 0..self.state.tabs.tabs.len() {
+            if self.state.tabs.tabs[idx].dirty {
                 self.state.switch_to_tab(idx);
                 self.state.save_active_tab_to_library();
             }
         }
 
         // Persist library to disk
-        if let Some(path) = &self.state.library_path
-            && let Err(e) = promptgen_core::save_library(&self.state.library, path)
-        {
-            log::error!("Failed to save library: {}", e);
-        }
-    }
-
-    /// Render the create library dialog and handle actions
-    #[cfg(not(target_arch = "wasm32"))]
-    fn render_create_library_dialog(&mut self, ctx: &egui::Context) {
-        use dialogs::CreateLibraryAction;
-
-        let action = dialogs::render_create_library_dialog(
-            ctx,
-            &mut self.show_create_library_dialog,
-            &mut self.create_library_name,
-            &mut self.create_library_path,
-        );
-
-        match action {
-            CreateLibraryAction::Create { name, path } => {
-                // Close the dialog first
-                self.show_create_library_dialog = false;
-                self.create_library_name.clear();
-                self.create_library_path = None;
-                // Create the library (unsaved check already happened before showing this dialog)
-                self.create_library(name, path);
-            }
-            CreateLibraryAction::Cancel => {
-                self.show_create_library_dialog = false;
-                self.create_library_name.clear();
-                self.create_library_path = None;
-            }
-            CreateLibraryAction::None => {}
-        }
+        self.persist_library();
     }
 
     /// Request to show the create library dialog - checks for unsaved changes first
@@ -297,7 +294,7 @@ impl PromptGenApp {
     fn request_show_create_dialog(&mut self) {
         if self.state.has_unsaved_tabs() {
             // Show confirmation dialog first, create dialog will open after
-            self.state.confirm_dialog = Some(ConfirmDialog::OpenNewLibrary {
+            self.state.dialogs.confirm = Some(ConfirmDialog::OpenNewLibrary {
                 pending_action: PendingLibraryAction::ShowCreateDialog,
             });
         } else {
@@ -331,30 +328,6 @@ impl PromptGenApp {
             Err(e) => {
                 log::error!("Failed to create library: {}", e);
             }
-        }
-    }
-
-    /// Render the edit library dialog and handle actions
-    #[cfg(not(target_arch = "wasm32"))]
-    fn render_edit_library_dialog(&mut self, ctx: &egui::Context) {
-        use dialogs::EditLibraryAction;
-
-        let action = dialogs::render_edit_library_dialog(
-            ctx,
-            &mut self.show_edit_library_dialog,
-            &mut self.edit_library_name,
-            &self.state.library.name,
-        );
-
-        match action {
-            EditLibraryAction::Save { new_name } => {
-                self.rename_library(new_name);
-            }
-            EditLibraryAction::Cancel => {
-                self.show_edit_library_dialog = false;
-                self.edit_library_name.clear();
-            }
-            EditLibraryAction::None => {}
         }
     }
 
@@ -401,9 +374,7 @@ impl PromptGenApp {
         self.state.library.name = new_name.clone();
 
         // Save library with new name to current file
-        if let Err(e) = promptgen_core::save_library(&self.state.library, current_path) {
-            log::error!("Failed to save library with new name: {}", e);
-            // TODO: Show error in dialog instead of just logging
+        if !self.persist_library() {
             return;
         }
 
@@ -414,7 +385,6 @@ impl PromptGenApp {
                 && let Err(e) = std::fs::remove_file(&new_path)
             {
                 log::error!("Failed to delete existing file: {}", e);
-                // TODO: Show error in dialog instead of just logging
                 return;
             }
 
@@ -429,8 +399,6 @@ impl PromptGenApp {
                 }
                 Err(e) => {
                     log::error!("Failed to rename library file: {}", e);
-                    // TODO: Show error in dialog instead of just logging
-                    // Note: Library name in YAML was already updated, but file wasn't renamed
                 }
             }
         }
@@ -440,6 +408,64 @@ impl PromptGenApp {
         self.edit_library_name.clear();
         self.show_overwrite_confirm = false;
         self.pending_rename_path = None;
+    }
+
+    // ==========================================================================
+    // Dialog Rendering
+    // ==========================================================================
+
+    /// Render the create library dialog and handle actions
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_create_library_dialog(&mut self, ctx: &egui::Context) {
+        use dialogs::CreateLibraryAction;
+
+        let action = dialogs::render_create_library_dialog(
+            ctx,
+            &mut self.show_create_library_dialog,
+            &mut self.create_library_name,
+            &mut self.create_library_path,
+        );
+
+        match action {
+            CreateLibraryAction::Create { name, path } => {
+                // Close the dialog first
+                self.show_create_library_dialog = false;
+                self.create_library_name.clear();
+                self.create_library_path = None;
+                // Create the library (unsaved check already happened before showing this dialog)
+                self.create_library(name, path);
+            }
+            CreateLibraryAction::Cancel => {
+                self.show_create_library_dialog = false;
+                self.create_library_name.clear();
+                self.create_library_path = None;
+            }
+            CreateLibraryAction::None => {}
+        }
+    }
+
+    /// Render the edit library dialog and handle actions
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_edit_library_dialog(&mut self, ctx: &egui::Context) {
+        use dialogs::EditLibraryAction;
+
+        let action = dialogs::render_edit_library_dialog(
+            ctx,
+            &mut self.show_edit_library_dialog,
+            &mut self.edit_library_name,
+            &self.state.library.name,
+        );
+
+        match action {
+            EditLibraryAction::Save { new_name } => {
+                self.rename_library(new_name);
+            }
+            EditLibraryAction::Cancel => {
+                self.show_edit_library_dialog = false;
+                self.edit_library_name.clear();
+            }
+            EditLibraryAction::None => {}
+        }
     }
 
     /// Render the overwrite confirmation dialog and handle actions
@@ -479,11 +505,10 @@ impl PromptGenApp {
 
     /// Render the close unsaved tab confirmation dialog and handle actions
     fn render_close_unsaved_tab_dialog(&mut self, ctx: &egui::Context) {
-        use crate::state::ConfirmDialog;
         use dialogs::CloseUnsavedTabAction;
 
         // Check if we have a CloseUnsavedTab dialog active
-        let tab_index = match &self.state.confirm_dialog {
+        let tab_index = match &self.state.dialogs.confirm {
             Some(ConfirmDialog::CloseUnsavedTab { tab_index }) => *tab_index,
             _ => return,
         };
@@ -491,7 +516,8 @@ impl PromptGenApp {
         // Get the tab name for display
         let tab_name = self
             .state
-            .prompt_tabs
+            .tabs
+            .tabs
             .get(tab_index)
             .map(|t| t.name.clone())
             .unwrap_or_else(|| "Prompt".to_string());
@@ -506,24 +532,20 @@ impl PromptGenApp {
 
                 // Persist library to disk
                 #[cfg(not(target_arch = "wasm32"))]
-                if let Some(path) = &self.state.library_path
-                    && let Err(e) = promptgen_core::save_library(&self.state.library, path)
-                {
-                    log::error!("Failed to save library: {}", e);
-                }
+                self.persist_library();
 
                 // Now close the tab (it's clean now)
                 self.state.close_tab_force(tab_index);
-                self.state.confirm_dialog = None;
+                self.state.dialogs.confirm = None;
             }
             CloseUnsavedTabAction::DontSave => {
                 // Close without saving
                 self.state.close_tab_force(tab_index);
-                self.state.confirm_dialog = None;
+                self.state.dialogs.confirm = None;
             }
             CloseUnsavedTabAction::Cancel => {
                 // Just close the dialog
-                self.state.confirm_dialog = None;
+                self.state.dialogs.confirm = None;
             }
             CloseUnsavedTabAction::None => {}
         }
@@ -531,11 +553,10 @@ impl PromptGenApp {
 
     /// Render the delete prompt confirmation dialog and handle actions
     fn render_delete_prompt_dialog(&mut self, ctx: &egui::Context) {
-        use crate::state::ConfirmDialog;
         use dialogs::DeletePromptAction;
 
         // Check if we have a DeletePrompt dialog active
-        let prompt_name = match &self.state.confirm_dialog {
+        let prompt_name = match &self.state.dialogs.confirm {
             Some(ConfirmDialog::DeletePrompt { prompt_name }) => prompt_name.clone(),
             _ => return,
         };
@@ -549,14 +570,10 @@ impl PromptGenApp {
 
                 // Persist library to disk
                 #[cfg(not(target_arch = "wasm32"))]
-                if let Some(path) = &self.state.library_path
-                    && let Err(e) = promptgen_core::save_library(&self.state.library, path)
-                {
-                    log::error!("Failed to save library after delete: {}", e);
-                }
+                self.persist_library();
             }
             DeletePromptAction::Cancel => {
-                self.state.confirm_dialog = None;
+                self.state.dialogs.confirm = None;
             }
             DeletePromptAction::None => {}
         }
@@ -567,11 +584,12 @@ impl PromptGenApp {
         use dialogs::RenamePromptAction;
 
         // Check if we have an active rename
-        let Some(index) = self.state.tab_rename_index else {
+        let Some(rename_state) = &self.state.tabs.rename else {
             return;
         };
+        let index = rename_state.index;
 
-        let Some(tab) = self.state.prompt_tabs.get(index) else {
+        let Some(tab) = self.state.tabs.tabs.get(index) else {
             self.state.cancel_tab_rename();
             return;
         };
@@ -579,25 +597,26 @@ impl PromptGenApp {
         let current_name = tab.name.clone();
         let is_valid = self.state.is_tab_rename_valid();
 
+        // We need to get mutable access to the rename text
+        let rename_text = &mut self.state.tabs.rename.as_mut().unwrap().text;
+
         let action = dialogs::render_rename_prompt_dialog(
             ctx,
             &current_name,
-            &mut self.state.tab_rename_text,
+            rename_text,
             is_valid,
         );
 
         match action {
             RenamePromptAction::Rename { new_name } => {
                 // Apply the new name
-                self.state.tab_rename_text = new_name;
+                if let Some(rename) = &mut self.state.tabs.rename {
+                    rename.text = new_name;
+                }
                 if self.state.commit_tab_rename() {
                     // Persist library to disk if this was a library prompt
                     #[cfg(not(target_arch = "wasm32"))]
-                    if let Some(path) = &self.state.library_path
-                        && let Err(e) = promptgen_core::save_library(&self.state.library, path)
-                    {
-                        log::error!("Failed to save library after rename: {}", e);
-                    }
+                    self.persist_library();
                 }
             }
             RenamePromptAction::Cancel => {
@@ -611,26 +630,26 @@ impl PromptGenApp {
     fn render_import_variables_dialog(&mut self, ctx: &egui::Context) {
         use dialogs::ImportVariablesAction;
 
-        if !self.state.import_dialog_open {
+        if !self.state.variable_import.dialog_open {
             return;
         }
 
-        let can_import = self.state.can_import();
+        let can_import = self.state.variable_import.can_import(&self.state.library);
 
         // Pre-compute flags for each imported variable
-        let originally_conflicting: Vec<bool> = (0..self.state.import_parsed_variables.len())
-            .map(|idx| self.state.is_import_originally_conflicting(idx))
+        let originally_conflicting: Vec<bool> = (0..self.state.variable_import.parsed.len())
+            .map(|idx| self.state.variable_import.is_originally_conflicting(idx, &self.state.library))
             .collect();
 
-        let currently_conflicting: Vec<bool> = (0..self.state.import_parsed_variables.len())
-            .map(|idx| self.state.is_import_name_conflicting(idx))
+        let currently_conflicting: Vec<bool> = (0..self.state.variable_import.parsed.len())
+            .map(|idx| self.state.variable_import.is_name_conflicting(idx, &self.state.library))
             .collect();
 
         let action = dialogs::render_import_variables_dialog(
             ctx,
-            &mut self.state.import_yaml_text,
-            &self.state.import_parsed_variables,
-            self.state.import_parse_error.as_deref(),
+            &mut self.state.variable_import.yaml_text,
+            &self.state.variable_import.parsed,
+            self.state.variable_import.parse_error.as_deref(),
             can_import,
             &originally_conflicting,
             &currently_conflicting,
@@ -639,26 +658,20 @@ impl PromptGenApp {
         match action {
             ImportVariablesAction::Import => {
                 // Perform the import
-                self.state.perform_import();
+                self.state.variable_import.perform_import(&mut self.state.library);
 
                 // Persist library to disk
                 #[cfg(not(target_arch = "wasm32"))]
-                if let Some(path) = &self.state.library_path
-                    && let Err(e) = promptgen_core::save_library(&self.state.library, path)
-                {
-                    log::error!("Failed to save library after import: {}", e);
-                }
-
-                self.state.close_import_dialog();
+                self.persist_library();
             }
             ImportVariablesAction::Cancel => {
-                self.state.close_import_dialog();
+                self.state.variable_import.close();
             }
             ImportVariablesAction::YamlChanged => {
-                self.state.parse_import_yaml();
+                self.state.variable_import.parse_yaml();
             }
             ImportVariablesAction::RenamedChanged { index, new_name } => {
-                self.state.update_import_renamed_name(index, new_name);
+                self.state.variable_import.update_renamed_name(index, new_name);
             }
             ImportVariablesAction::None => {}
         }
@@ -668,26 +681,26 @@ impl PromptGenApp {
     fn render_import_prompts_dialog(&mut self, ctx: &egui::Context) {
         use dialogs::ImportPromptsAction;
 
-        if !self.state.prompt_import_dialog_open {
+        if !self.state.prompt_import.dialog_open {
             return;
         }
 
-        let can_import = self.state.can_import_prompts();
+        let can_import = self.state.prompt_import.can_import(&self.state.library);
 
         // Pre-compute flags for each imported prompt
-        let originally_conflicting: Vec<bool> = (0..self.state.prompt_import_parsed_prompts.len())
-            .map(|idx| self.state.is_prompt_import_originally_conflicting(idx))
+        let originally_conflicting: Vec<bool> = (0..self.state.prompt_import.parsed.len())
+            .map(|idx| self.state.prompt_import.is_originally_conflicting(idx, &self.state.library))
             .collect();
 
-        let currently_conflicting: Vec<bool> = (0..self.state.prompt_import_parsed_prompts.len())
-            .map(|idx| self.state.is_prompt_import_name_conflicting(idx))
+        let currently_conflicting: Vec<bool> = (0..self.state.prompt_import.parsed.len())
+            .map(|idx| self.state.prompt_import.is_name_conflicting(idx, &self.state.library))
             .collect();
 
         let action = dialogs::render_import_prompts_dialog(
             ctx,
-            &mut self.state.prompt_import_yaml_text,
-            &self.state.prompt_import_parsed_prompts,
-            self.state.prompt_import_parse_error.as_deref(),
+            &mut self.state.prompt_import.yaml_text,
+            &self.state.prompt_import.parsed,
+            self.state.prompt_import.parse_error.as_deref(),
             can_import,
             &originally_conflicting,
             &currently_conflicting,
@@ -696,27 +709,20 @@ impl PromptGenApp {
         match action {
             ImportPromptsAction::Import => {
                 // Perform the import
-                self.state.perform_prompt_import();
+                self.state.prompt_import.perform_import(&mut self.state.library);
 
                 // Persist library to disk
                 #[cfg(not(target_arch = "wasm32"))]
-                if let Some(path) = &self.state.library_path
-                    && let Err(e) = promptgen_core::save_library(&self.state.library, path)
-                {
-                    log::error!("Failed to save library after import: {}", e);
-                }
-
-                self.state.close_prompt_import_dialog();
+                self.persist_library();
             }
             ImportPromptsAction::Cancel => {
-                self.state.close_prompt_import_dialog();
+                self.state.prompt_import.close();
             }
             ImportPromptsAction::YamlChanged => {
-                self.state.parse_prompt_import_yaml();
+                self.state.prompt_import.parse_yaml();
             }
             ImportPromptsAction::RenamedChanged { index, new_name } => {
-                self.state
-                    .update_prompt_import_renamed_name(index, new_name);
+                self.state.prompt_import.update_renamed_name(index, new_name);
             }
             ImportPromptsAction::None => {}
         }
@@ -728,7 +734,7 @@ impl PromptGenApp {
         use dialogs::UnsavedPromptsAction;
 
         // Check if we have an OpenNewLibrary dialog active
-        let pending_action = match &self.state.confirm_dialog {
+        let pending_action = match &self.state.dialogs.confirm {
             Some(ConfirmDialog::OpenNewLibrary { pending_action }) => pending_action.clone(),
             _ => return,
         };
@@ -743,7 +749,7 @@ impl PromptGenApp {
                 self.save_all_dirty_tabs();
 
                 // Clear the dialog
-                self.state.confirm_dialog = None;
+                self.state.dialogs.confirm = None;
 
                 // Proceed with the pending action
                 match pending_action {
@@ -757,7 +763,7 @@ impl PromptGenApp {
             }
             UnsavedPromptsAction::DiscardAll => {
                 // Clear the dialog
-                self.state.confirm_dialog = None;
+                self.state.dialogs.confirm = None;
 
                 // Proceed with the pending action (discarding unsaved changes)
                 match pending_action {
@@ -771,7 +777,7 @@ impl PromptGenApp {
             }
             UnsavedPromptsAction::Cancel => {
                 // Just cancel - don't open/create the new library
-                self.state.confirm_dialog = None;
+                self.state.dialogs.confirm = None;
             }
             UnsavedPromptsAction::None => {}
         }
@@ -919,19 +925,14 @@ impl eframe::App for PromptGenApp {
             }
 
             // Choose which editor to show based on editor mode
-            match &self.state.editor_mode {
+            match &self.state.editor.mode {
                 EditorMode::Prompt => {
                     // Tab bar (fixed at top, outside scroll area)
                     let tab_result = TabBarPanel::show(ui, &mut self.state);
 
                     // Persist library to disk if it was modified
                     #[cfg(not(target_arch = "wasm32"))]
-                    if tab_result.library_modified
-                        && let Some(path) = &self.state.library_path
-                        && let Err(e) = promptgen_core::save_library(&self.state.library, path)
-                    {
-                        log::error!("Failed to save library: {}", e);
-                    }
+                    self.persist_library_if_modified(tab_result.library_modified);
 
                     #[cfg(target_arch = "wasm32")]
                     let _ = tab_result;

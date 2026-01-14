@@ -9,15 +9,17 @@ impl PreviewPanel {
     /// Render the preview panel.
     pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         // Capture output before processing render
-        let output_before = state.preview_output.clone();
+        let output_before = state.preview.output.clone();
 
         // Process any pending render requests from other components
         state.process_pending_render();
 
         // Auto-copy if enabled and output changed
-        if state.auto_copy && state.preview_output != output_before && !state.preview_output.is_empty()
+        if state.preview.auto_copy
+            && state.preview.output != output_before
+            && !state.preview.output.is_empty()
         {
-            ui.ctx().copy_text(state.preview_output.clone());
+            ui.ctx().copy_text(state.preview.output.clone());
         }
 
         ui.heading("Preview");
@@ -29,7 +31,8 @@ impl PreviewPanel {
 
             // Convert seed to string for editing
             let mut seed_str = state
-                .preview_seed
+                .preview
+                .seed
                 .map(|s| s.to_string())
                 .unwrap_or_default();
 
@@ -41,32 +44,33 @@ impl PreviewPanel {
 
             if response.changed() {
                 // Parse seed when changed
-                state.preview_seed = seed_str.parse().ok();
+                state.preview.seed = seed_str.parse().ok();
             }
 
             if ui.button("🎲").on_hover_text("Random seed").clicked() {
-                state.randomize_seed();
+                state.preview.randomize_seed();
             }
         });
 
         ui.add_space(8.0);
 
         // Auto-render checkbox
-        ui.checkbox(&mut state.auto_render, "Live preview")
+        ui.checkbox(&mut state.preview.auto_render, "Live preview")
             .on_hover_text("Automatically render as you type");
 
         // Auto-randomize seed checkbox
-        ui.checkbox(&mut state.auto_randomize_seed, "Randomize seed")
+        ui.checkbox(&mut state.preview.auto_randomize_seed, "Randomize seed")
             .on_hover_text("Generate a new random seed on edit and when clicking Render");
 
         // Auto-copy checkbox
-        ui.checkbox(&mut state.auto_copy, "Auto copy")
+        ui.checkbox(&mut state.preview.auto_copy, "Auto copy")
             .on_hover_text("Automatically copy output to clipboard when it changes");
 
         ui.add_space(8.0);
 
         // Render and copy buttons - always visible
         let can_render = state
+            .editor
             .parse_result
             .as_ref()
             .is_some_and(|r| r.errors.is_empty() && r.ast.is_some());
@@ -77,27 +81,27 @@ impl PreviewPanel {
                 .clicked()
             {
                 // Randomize seed first if enabled
-                if state.auto_randomize_seed {
-                    state.randomize_seed();
+                if state.preview.auto_randomize_seed {
+                    state.preview.randomize_seed();
                 }
                 if let Err(e) = state.render_prompt() {
-                    state.preview_output = format!("Error: {}", e);
-                } else if state.auto_copy && !state.preview_output.is_empty() {
+                    state.preview.output = format!("Error: {}", e);
+                } else if state.preview.auto_copy && !state.preview.output.is_empty() {
                     // Auto-copy on manual render
-                    ui.ctx().copy_text(state.preview_output.clone());
+                    ui.ctx().copy_text(state.preview.output.clone());
                 }
             }
 
             // Copy button - always visible but disabled if no output
             if ui
                 .add_enabled(
-                    !state.preview_output.is_empty(),
+                    !state.preview.output.is_empty(),
                     egui::Button::new("📋 Copy"),
                 )
                 .on_hover_text("Copy to clipboard")
                 .clicked()
             {
-                ui.ctx().copy_text(state.preview_output.clone());
+                ui.ctx().copy_text(state.preview.output.clone());
             }
         });
 
@@ -109,7 +113,7 @@ impl PreviewPanel {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                if state.preview_output.is_empty() {
+                if state.preview.output.is_empty() {
                     ui.label(
                         egui::RichText::new("Click 'Render' to generate output")
                             .italics()
@@ -117,7 +121,7 @@ impl PreviewPanel {
                     );
                 } else {
                     ui.add(
-                        egui::TextEdit::multiline(&mut state.preview_output.as_str())
+                        egui::TextEdit::multiline(&mut state.preview.output.as_str())
                             .desired_width(f32::INFINITY)
                             .font(egui::TextStyle::Monospace),
                     );

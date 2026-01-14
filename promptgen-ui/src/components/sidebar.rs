@@ -63,19 +63,19 @@ impl SidebarPanel {
         library_file_path: &Option<PathBuf>,
     ) {
         // Check if we're in slot picker mode
-        if let SidebarMode::SlotPicker { slot_label } = &state.sidebar_mode {
+        if let SidebarMode::SlotPicker { slot_label } = &state.sidebar.mode {
             Self::render_slot_picker(ui, state, slot_label.clone());
             return;
         }
 
         // Check if we're in variable export mode
-        if state.export_mode_active {
+        if state.variable_export.active {
             Self::render_variable_export_mode(ui, state);
             return;
         }
 
         // Check if we're in prompt export mode
-        if state.prompt_export_mode_active {
+        if state.prompt_export.active {
             Self::render_prompt_export_mode(ui, state);
             return;
         }
@@ -110,36 +110,36 @@ impl SidebarPanel {
             ui.horizontal(|ui| {
                 if ui
                     .selectable_label(
-                        state.sidebar_view_mode == SidebarViewMode::Prompts,
+                        state.sidebar.view_mode == SidebarViewMode::Prompts,
                         "Prompts",
                     )
                     .clicked()
                 {
-                    state.sidebar_view_mode = SidebarViewMode::Prompts;
+                    state.sidebar.view_mode = SidebarViewMode::Prompts;
                 }
                 if ui
                     .selectable_label(
-                        state.sidebar_view_mode == SidebarViewMode::Variables,
+                        state.sidebar.view_mode == SidebarViewMode::Variables,
                         "Variables",
                     )
                     .clicked()
                 {
-                    state.sidebar_view_mode = SidebarViewMode::Variables;
+                    state.sidebar.view_mode = SidebarViewMode::Variables;
                 }
             });
 
             ui.add_space(4.0);
 
             // Search input with clear button
-            VariableList::show_search_bar(ui, &mut state.search_query);
+            VariableList::show_search_bar(ui, &mut state.sidebar.search_query);
 
             // Toolbar (only in Variables view) - includes new variable button and import/export menu
-            if state.sidebar_view_mode == SidebarViewMode::Variables {
+            if state.sidebar.view_mode == SidebarViewMode::Variables {
                 let toolbar_result = VariableList::show_toolbar(
                     ui,
-                    &mut state.variable_sort_order,
-                    &mut state.option_sort_order,
-                    &mut state.expand_all_variables,
+                    &mut state.sidebar.variable_sort_order,
+                    &mut state.sidebar.option_sort_order,
+                    &mut state.sidebar.expand_all_variables,
                     true, // show new variable button
                     true, // show import/export menu
                 );
@@ -147,15 +147,15 @@ impl SidebarPanel {
                     state.enter_new_variable_editor();
                 }
                 if toolbar_result.export_clicked {
-                    state.enter_export_mode();
+                    state.variable_export.enter();
                 }
                 if toolbar_result.import_clicked {
-                    state.open_import_dialog();
+                    state.variable_import.open();
                 }
             }
 
             // Toolbar (only in Prompts view) - includes import/export menu
-            if state.sidebar_view_mode == SidebarViewMode::Prompts {
+            if state.sidebar.view_mode == SidebarViewMode::Prompts {
                 Self::show_prompts_toolbar(ui, state);
             }
 
@@ -184,7 +184,7 @@ impl SidebarPanel {
     fn render_sidebar_content(ui: &mut egui::Ui, state: &mut AppState) {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
-            .show(ui, |ui| match state.sidebar_view_mode {
+            .show(ui, |ui| match state.sidebar.view_mode {
                 SidebarViewMode::Prompts => Self::render_prompt_list(ui, state),
                 SidebarViewMode::Variables => Self::render_variable_list(ui, state),
             });
@@ -192,8 +192,8 @@ impl SidebarPanel {
 
     /// Render the prompt list.
     fn render_prompt_list(ui: &mut egui::Ui, state: &mut AppState) {
-        let search_query = state.search_query.to_lowercase();
-        let sort_order = state.prompt_sort_order;
+        let search_query = state.sidebar.search_query.to_lowercase();
+        let sort_order = state.sidebar.prompt_sort_order;
 
         // Collect prompt info we need
         let mut prompts: Vec<_> = state
@@ -230,8 +230,9 @@ impl SidebarPanel {
 
         // Get active tab info for highlighting
         let active_tab_name = state
-            .active_tab_index
-            .and_then(|idx| state.prompt_tabs.get(idx))
+            .tabs
+            .active_index
+            .and_then(|idx| state.tabs.tabs.get(idx))
             .and_then(|tab| {
                 if let crate::state::PromptSource::FromLibrary { original_name } = &tab.source {
                     Some(original_name.clone())
@@ -242,7 +243,7 @@ impl SidebarPanel {
 
         for name in &prompts {
             // Check if this prompt is open in a tab (for visual indication)
-            let tab_index = state.find_tab_by_library_prompt(name);
+            let tab_index = state.tabs.find_by_library_prompt(name);
             let is_open_in_tab = tab_index.is_some();
             let is_active_tab = active_tab_name.as_ref() == Some(name);
 
@@ -320,21 +321,21 @@ impl SidebarPanel {
         if let Some(name) = prompt_to_open {
             state.open_library_prompt(&name);
             // Also ensure we're in Prompt editing mode
-            state.editor_mode = crate::state::EditorMode::Prompt;
+            state.editor.mode = crate::state::EditorMode::Prompt;
         }
 
         // Request delete confirmation
         if let Some(name) = prompt_to_delete {
-            state.request_delete_prompt(&name);
+            state.dialogs.request_delete_prompt(&name);
         }
 
         // Start rename (opens the prompt first, then starts rename)
         if let Some(name) = prompt_to_rename {
             // Open the prompt in a tab if not already open
             state.open_library_prompt(&name);
-            state.editor_mode = crate::state::EditorMode::Prompt;
+            state.editor.mode = crate::state::EditorMode::Prompt;
             // Find the tab index for this prompt and start rename
-            if let Some(idx) = state.find_tab_by_library_prompt(&name) {
+            if let Some(idx) = state.tabs.find_by_library_prompt(&name) {
                 state.start_tab_rename(idx);
             }
         }
@@ -356,7 +357,7 @@ impl SidebarPanel {
             .collect();
 
         // Take expand_all_variables state (consumed once per render)
-        let expand_all = state.expand_all_variables.take();
+        let expand_all = state.sidebar.expand_all_variables.take();
 
         let config = VariableListConfig {
             id_prefix: "variables",
@@ -369,9 +370,9 @@ impl SidebarPanel {
         let result = VariableList::show_groups(
             ui,
             &groups,
-            &state.search_query,
-            state.variable_sort_order,
-            state.option_sort_order,
+            &state.sidebar.search_query,
+            state.sidebar.variable_sort_order,
+            state.sidebar.option_sort_order,
             expand_all,
             &config,
             Some(&state.library),
@@ -406,6 +407,7 @@ impl SidebarPanel {
                 Cardinality::Many { max: None } => "Select any".to_string(),
                 Cardinality::Many { max: Some(n) } => {
                     let current = state
+                        .preview
                         .slot_values
                         .get(&slot_label)
                         .map(|v| v.len())
@@ -423,14 +425,14 @@ impl SidebarPanel {
         ui.add_space(4.0);
 
         // Search bar
-        VariableList::show_search_bar(ui, &mut state.slot_picker_search_query);
+        VariableList::show_search_bar(ui, &mut state.sidebar.slot_picker.search_query);
 
         // Toolbar (sort, expand/collapse) - no new variable or export button in slot picker
         VariableList::show_toolbar(
             ui,
-            &mut state.slot_picker_sort_order,
-            &mut state.slot_picker_option_sort_order,
-            &mut state.expand_all_variables,
+            &mut state.sidebar.slot_picker.sort_order,
+            &mut state.sidebar.slot_picker.option_sort_order,
+            &mut state.sidebar.expand_all_variables,
             false, // don't show new variable button
             false, // don't show export button
         );
@@ -440,6 +442,7 @@ impl SidebarPanel {
         // Get option groups and selected values
         let groups = state.get_pick_option_groups(&slot_label);
         let selected_values: Vec<String> = state
+            .preview
             .slot_values
             .get(&slot_label)
             .cloned()
@@ -453,7 +456,7 @@ impl SidebarPanel {
         };
 
         // Take expand_all_variables state (consumed once per render)
-        let expand_all = state.expand_all_variables.take();
+        let expand_all = state.sidebar.expand_all_variables.take();
 
         let config = VariableListConfig {
             id_prefix: "slot_picker",
@@ -470,9 +473,9 @@ impl SidebarPanel {
                 let result = VariableList::show_groups(
                     ui,
                     &groups,
-                    &state.slot_picker_search_query,
-                    state.slot_picker_sort_order,
-                    state.slot_picker_option_sort_order,
+                    &state.sidebar.slot_picker.search_query,
+                    state.sidebar.slot_picker.sort_order,
+                    state.sidebar.slot_picker.option_sort_order,
                     expand_all,
                     &config,
                     Some(&state.library),
@@ -518,10 +521,10 @@ impl SidebarPanel {
                 let menu_action = PromptsMenu::show(ui);
                 match menu_action {
                     PromptsMenuAction::Export => {
-                        state.enter_prompt_export_mode();
+                        state.prompt_export.enter();
                     }
                     PromptsMenuAction::Import => {
-                        state.open_prompt_import_dialog();
+                        state.prompt_import.open();
                     }
                     PromptsMenuAction::None => {}
                 }
@@ -533,8 +536,8 @@ impl SidebarPanel {
             // Sort button - cycles through None -> Ascending -> Descending -> None
             flex.add_ui(FlexItem::default(), |ui| {
                 let current_theme = theme::current(ui.ctx());
-                let is_active = state.prompt_sort_order != VariableSortOrder::None;
-                let (icon, tooltip) = match state.prompt_sort_order {
+                let is_active = state.sidebar.prompt_sort_order != VariableSortOrder::None;
+                let (icon, tooltip) = match state.sidebar.prompt_sort_order {
                     VariableSortOrder::None => (ICON_SORT_BY_ALPHA.to_string(), "Sort prompts A-Z"),
                     VariableSortOrder::Ascending => (
                         format!("{}{}", ICON_SORT_BY_ALPHA, ICON_ARROW_UPWARD),
@@ -555,7 +558,7 @@ impl SidebarPanel {
                     .on_hover_text(tooltip)
                     .clicked()
                 {
-                    state.prompt_sort_order = match state.prompt_sort_order {
+                    state.sidebar.prompt_sort_order = match state.sidebar.prompt_sort_order {
                         VariableSortOrder::None => VariableSortOrder::Ascending,
                         VariableSortOrder::Ascending => VariableSortOrder::Descending,
                         VariableSortOrder::Descending => VariableSortOrder::None,
@@ -571,14 +574,14 @@ impl SidebarPanel {
 
         match action {
             VariableExportAction::Cancel => {
-                state.exit_export_mode();
+                state.variable_export.exit();
             }
             VariableExportAction::Export => {
                 // Export to clipboard
-                if let Some(yaml) = state.export_selected_variables_to_yaml() {
+                if let Some(yaml) = state.variable_export.export_to_yaml(&state.library) {
                     ui.ctx().copy_text(yaml);
                 }
-                state.exit_export_mode();
+                state.variable_export.exit();
             }
             VariableExportAction::None => {}
         }
@@ -590,14 +593,14 @@ impl SidebarPanel {
 
         match action {
             PromptExportAction::Cancel => {
-                state.exit_prompt_export_mode();
+                state.prompt_export.exit();
             }
             PromptExportAction::Export => {
                 // Export to clipboard
-                if let Some(yaml) = state.export_selected_prompts_to_yaml() {
+                if let Some(yaml) = state.prompt_export.export_to_yaml(&state.library) {
                     ui.ctx().copy_text(yaml);
                 }
-                state.exit_prompt_export_mode();
+                state.prompt_export.exit();
             }
             PromptExportAction::None => {}
         }

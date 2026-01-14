@@ -29,7 +29,7 @@ impl EditorPanel {
         let is_focused = state.is_main_editor_focused();
 
         // Clone content to avoid double mutable borrow
-        let mut content = state.editor_content.clone();
+        let mut content = state.editor.content.clone();
 
         let frame_response = FocusableFrame::new(is_focused).show(ui, |ui| {
             PromptEditor::show(ui, &mut content, state, &config)
@@ -38,16 +38,16 @@ impl EditorPanel {
         let result = frame_response.inner;
 
         // Check if content was modified (by typing OR by autocomplete)
-        let content_changed = content != state.editor_content;
+        let content_changed = content != state.editor.content;
 
         // Update editor content if it changed
         if content_changed {
-            state.editor_content = content;
+            state.editor.content = content;
         }
 
         // Update parse result when editor content changes (from typing or autocomplete)
         if result.response.changed() || content_changed {
-            state.parse_result = Some(result.parse_result.clone());
+            state.editor.parse_result = Some(result.parse_result.clone());
             state.update_parse_result();
             state.request_render();
             // Sync content back to the active tab

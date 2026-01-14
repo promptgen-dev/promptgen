@@ -35,7 +35,7 @@ impl PromptExportList {
         ui.add_space(8.0);
 
         // Search bar
-        Self::show_search_bar(ui, &mut state.prompt_export_search_query);
+        Self::show_search_bar(ui, &mut state.prompt_export.search_query);
 
         // Toolbar
         let toolbar_action = Self::show_toolbar(ui, state);
@@ -98,7 +98,7 @@ impl PromptExportList {
 
             // Export button (left, next to Cancel)
             flex.add_ui(FlexItem::default(), |ui| {
-                let selected_count = state.prompt_export_selected.len();
+                let selected_count = state.prompt_export.selected.len();
                 let can_export = selected_count > 0;
                 let label = if selected_count > 0 {
                     format!("{} Export ({})", ICON_FILE_UPLOAD, selected_count)
@@ -125,7 +125,7 @@ impl PromptExportList {
                     .on_hover_text("Select all")
                     .clicked()
                 {
-                    state.select_all_prompt_export();
+                    state.prompt_export.select_all(&state.library);
                 }
             });
 
@@ -136,7 +136,7 @@ impl PromptExportList {
                     .on_hover_text("Deselect all")
                     .clicked()
                 {
-                    state.deselect_all_prompt_export();
+                    state.prompt_export.deselect_all();
                 }
             });
         });
@@ -146,7 +146,7 @@ impl PromptExportList {
 
     /// Render the prompt list with checkboxes.
     fn show_prompt_list(ui: &mut egui::Ui, state: &mut AppState) {
-        let search_query = state.prompt_export_search_query.to_lowercase();
+        let search_query = state.prompt_export.search_query.to_lowercase();
 
         // Collect prompt data upfront to avoid borrow issues
         let prompts: Vec<String> = state
@@ -173,7 +173,7 @@ impl PromptExportList {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for prompt_name in &prompts {
-                    let is_selected = state.prompt_export_selected.contains(prompt_name);
+                    let is_selected = state.prompt_export.selected.contains(prompt_name);
 
                     // Row with checkbox and prompt name
                     Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
@@ -212,7 +212,7 @@ impl PromptExportList {
 
         // Apply toggle after UI pass
         if let Some(name) = toggle_prompt {
-            state.toggle_prompt_export(&name);
+            state.prompt_export.toggle(&name);
         }
     }
 }

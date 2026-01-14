@@ -8,7 +8,7 @@ use crate::components::autocomplete::{
     autocomplete_after_editor, autocomplete_before_editor,
 };
 use crate::highlighting::highlight_prompt;
-use crate::state::{AppState, ConfirmDialog};
+use crate::state::{AppState, ConfirmDialog, VariableEditorState};
 use crate::theme;
 
 /// The editor ID for the variable options editor
@@ -37,7 +37,7 @@ impl VariableEditorPanel {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Save button
                 let can_save = state.validate_variable_name().is_none()
-                    && !state.variable_editor_content.trim().is_empty();
+                    && !state.variable_editor.content.trim().is_empty();
 
                 let save_button = ui.add_enabled(can_save, egui::Button::new("Save"));
                 if save_button.clicked() && Self::save_variable(state) {
@@ -45,16 +45,16 @@ impl VariableEditorPanel {
                 }
 
                 // Delete button (only for existing variables)
-                if let Some(original_name) = state.variable_editor_original_name.clone()
+                if let Some(original_name) = state.variable_editor.original_name.clone()
                     && ui
                         .button(RichText::new("Delete").color(theme::current(ui.ctx()).syntax_error()))
                         .clicked()
                     {
-                        state.request_delete_variable(&original_name);
+                        state.dialogs.request_delete_variable(&original_name);
                     }
 
                 // Dirty indicator
-                if state.variable_editor_dirty {
+                if state.variable_editor.dirty {
                     ui.label(RichText::new("•").color(Color32::from_rgb(249, 226, 175))); // Yellow dot
                 }
             });
@@ -66,12 +66,12 @@ impl VariableEditorPanel {
         ui.horizontal(|ui| {
             ui.label("Variable Name:");
             let name_response = ui.add(
-                egui::TextEdit::singleline(&mut state.variable_editor_name)
+                egui::TextEdit::singleline(&mut state.variable_editor.name)
                     .hint_text("Enter variable name...")
                     .desired_width(300.0),
             );
             if name_response.changed() {
-                state.mark_variable_editor_dirty();
+                state.variable_editor.mark_dirty();
             }
         });
 
@@ -89,7 +89,7 @@ impl VariableEditorPanel {
         ui.horizontal(|ui| {
             ui.label("Options:");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let count = state.get_variable_editor_option_count();
+                let count = state.variable_editor.get_option_count();
                 ui.label(
                     RichText::new(format!(
                         "{} option{}",
@@ -126,12 +126,12 @@ impl VariableEditorPanel {
         let pending_cursor_position = state.take_pending_cursor_position(editor_id);
 
         // Clone content to avoid double mutable borrow
-        let mut content = state.variable_editor_content.clone();
+        let mut content = state.variable_editor.content.clone();
 
         // Handle autocomplete keyboard input BEFORE the text editor processes input
         if let Some(new_content) = autocomplete_before_editor(ui, state, editor_id, &content) {
             content = new_content;
-            state.mark_variable_editor_dirty();
+            state.variable_editor.mark_dirty();
         }
 
         egui::Frame::NONE
@@ -226,18 +226,18 @@ impl VariableEditorPanel {
                         cursor_screen_pos,
                     ) {
                         content = new_content;
-                        state.mark_variable_editor_dirty();
+                        state.variable_editor.mark_dirty();
                     }
 
                     if response.changed() {
-                        state.mark_variable_editor_dirty();
+                        state.variable_editor.mark_dirty();
                     }
                 });
             });
 
         // Update state content if it changed
-        if content != state.variable_editor_content {
-            state.variable_editor_content = content;
+        if content != state.variable_editor.content {
+            state.variable_editor.content = content;
         }
     }
 
@@ -429,7 +429,7 @@ impl VariableEditorPanel {
 
     /// Show parse errors for individual options
     fn show_option_errors(ui: &mut egui::Ui, state: &AppState) {
-        let options = AppState::parse_options(&state.variable_editor_content);
+        let options = VariableEditorState::parse_options(&state.variable_editor.content);
 
         let mut errors = Vec::new();
         for (idx, option) in options.iter().enumerate() {
@@ -452,7 +452,7 @@ impl VariableEditorPanel {
 
     /// Show confirmation dialogs
     fn show_confirmation_dialogs(ui: &mut egui::Ui, state: &mut AppState, should_close: &mut bool) {
-        let dialog = state.confirm_dialog.clone();
+        let dialog = state.dialogs.confirm.clone();
 
         if let Some(dialog) = dialog {
             egui::Window::new("Confirm")
@@ -469,7 +469,7 @@ impl VariableEditorPanel {
                                 *should_close = true;
                             }
                             if ui.button("Cancel").clicked() {
-                                state.cancel_confirm_dialog();
+                                state.dialogs.close_confirm();
                             }
                         });
                     }
@@ -485,7 +485,7 @@ impl VariableEditorPanel {
                                 *should_close = true;
                             }
                             if ui.button("Cancel").clicked() {
-                                state.cancel_confirm_dialog();
+                                state.dialogs.close_confirm();
                             }
                         });
                     }
@@ -499,15 +499,15 @@ impl VariableEditorPanel {
 
     /// Save the current variable to the library
     fn save_variable(state: &mut AppState) -> bool {
-        let name = state.variable_editor_name.trim().to_string();
-        let options = AppState::parse_options(&state.variable_editor_content);
+        let name = state.variable_editor.name.trim().to_string();
+        let options = VariableEditorState::parse_options(&state.variable_editor.content);
 
         if name.is_empty() || options.is_empty() {
             return false;
         }
 
         // Update the library
-        if let Some(original_name) = &state.variable_editor_original_name {
+        if let Some(original_name) = &state.variable_editor.original_name {
             // Editing existing variable - find and update it
             if let Some(variable) = state
                 .library

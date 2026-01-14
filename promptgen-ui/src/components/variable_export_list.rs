@@ -36,7 +36,7 @@ impl VariableExportList {
         ui.add_space(8.0);
 
         // Search bar
-        Self::show_search_bar(ui, &mut state.export_search_query);
+        Self::show_search_bar(ui, &mut state.variable_export.search_query);
 
         // Toolbar
         let toolbar_action = Self::show_toolbar(ui, state);
@@ -99,7 +99,7 @@ impl VariableExportList {
 
             // Export button (left, next to Cancel)
             flex.add_ui(FlexItem::default(), |ui| {
-                let selected_count = state.export_selected_variables.len();
+                let selected_count = state.variable_export.selected.len();
                 let can_export = selected_count > 0;
                 let label = if selected_count > 0 {
                     format!("{} Export ({})", ICON_FILE_UPLOAD, selected_count)
@@ -122,8 +122,8 @@ impl VariableExportList {
             // Variable sort button
             flex.add_ui(FlexItem::default(), |ui| {
                 let current_theme = theme::current(ui.ctx());
-                let is_active = state.export_sort_order != VariableSortOrder::None;
-                let (icon, tooltip) = match state.export_sort_order {
+                let is_active = state.variable_export.sort_order != VariableSortOrder::None;
+                let (icon, tooltip) = match state.variable_export.sort_order {
                     VariableSortOrder::None => {
                         (ICON_SORT_BY_ALPHA.to_string(), "Sort variables A-Z")
                     }
@@ -146,7 +146,7 @@ impl VariableExportList {
                     .on_hover_text(tooltip)
                     .clicked()
                 {
-                    state.export_sort_order = match state.export_sort_order {
+                    state.variable_export.sort_order = match state.variable_export.sort_order {
                         VariableSortOrder::None => VariableSortOrder::Ascending,
                         VariableSortOrder::Ascending => VariableSortOrder::Descending,
                         VariableSortOrder::Descending => VariableSortOrder::None,
@@ -161,7 +161,7 @@ impl VariableExportList {
                     .on_hover_text("Select all")
                     .clicked()
                 {
-                    state.select_all_export_variables();
+                    state.variable_export.select_all(&state.library);
                 }
             });
 
@@ -172,7 +172,7 @@ impl VariableExportList {
                     .on_hover_text("Deselect all")
                     .clicked()
                 {
-                    state.deselect_all_export_variables();
+                    state.variable_export.deselect_all();
                 }
             });
         });
@@ -182,8 +182,8 @@ impl VariableExportList {
 
     /// Render the variable list with checkboxes.
     fn show_variable_list(ui: &mut egui::Ui, state: &mut AppState) {
-        let search_query = state.export_search_query.to_lowercase();
-        let sort_order = state.export_sort_order;
+        let search_query = state.variable_export.search_query.to_lowercase();
+        let sort_order = state.variable_export.sort_order;
 
         // Collect variable data upfront to avoid borrow issues
         let mut variables: Vec<(String, usize)> = state
@@ -221,7 +221,7 @@ impl VariableExportList {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for (var_name, option_count) in &variables {
-                    let is_selected = state.export_selected_variables.contains(var_name);
+                    let is_selected = state.variable_export.selected.contains(var_name);
 
                     // Row with checkbox and variable name
                     Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
@@ -261,7 +261,7 @@ impl VariableExportList {
 
         // Apply toggle after UI pass
         if let Some(name) = toggle_variable {
-            state.toggle_export_variable(&name);
+            state.variable_export.toggle(&name);
         }
     }
 }

@@ -252,6 +252,7 @@ impl SlotPanel {
 
         // Get current values as mutable vec with indices for DnD
         let mut items: Vec<(usize, String)> = state
+            .preview
             .slot_values
             .get(label)
             .cloned()

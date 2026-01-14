@@ -71,8 +71,8 @@ impl TabBarPanel {
                         })
                         .show(ui, |ui| {
                             // Create a list of tab indices for drag-and-drop
-                            let active_index = state.active_tab_index;
-                            let tab_count = state.prompt_tabs.len();
+                            let active_index = state.tabs.active_index;
+                            let tab_count = state.tabs.tabs.len();
                             let mut tab_indices: Vec<usize> = (0..tab_count).collect();
 
                             // Use egui_dnd for drag-and-drop reordering
@@ -103,7 +103,7 @@ impl TabBarPanel {
                                         .inner_margin(egui::Margin::symmetric(6, 2))
                                         .show(ui, |ui| {
                                             ui.horizontal(|ui| {
-                                                let tab = &state.prompt_tabs[i];
+                                                let tab = &state.tabs.tabs[i];
 
                                                 // Build tab label (name + dirty indicator)
                                                 let label = if tab.dirty {
@@ -155,17 +155,17 @@ impl TabBarPanel {
                                 // We need to reorder the actual tabs to match
                                 let new_tabs: Vec<_> = tab_indices
                                     .iter()
-                                    .filter_map(|&idx| state.prompt_tabs.get(idx).cloned())
+                                    .filter_map(|&idx| state.tabs.tabs.get(idx).cloned())
                                     .collect();
 
-                                if new_tabs.len() == state.prompt_tabs.len() {
+                                if new_tabs.len() == state.tabs.tabs.len() {
                                     // Find the new position of the active tab
                                     if let Some(active) = active_index {
                                         let new_active =
                                             tab_indices.iter().position(|&idx| idx == active);
-                                        state.active_tab_index = new_active;
+                                        state.tabs.active_index = new_active;
                                     }
-                                    state.prompt_tabs = new_tabs;
+                                    state.tabs.tabs = new_tabs;
                                 }
                             }
                         });
