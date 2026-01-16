@@ -29,12 +29,12 @@ impl FocusableFrame {
     pub fn new(is_focused: bool) -> Self {
         Self {
             is_focused,
-            inner_margin: 8.0,
+            inner_margin: 6.0,
             corner_radius: 4.0,
         }
     }
 
-    /// Set the inner margin (default: 8.0)
+    /// Set the inner margin (default: 6.0)
     #[allow(dead_code)]
     pub fn inner_margin(mut self, margin: f32) -> Self {
         self.inner_margin = margin;

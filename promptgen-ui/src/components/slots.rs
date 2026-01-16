@@ -3,7 +3,9 @@
 use egui::{Align, Id, Label, Layout, UiBuilder, Vec2};
 use egui_dnd::dnd;
 use egui_flex::{Flex, FlexItem};
-use egui_material_icons::icons::{ICON_CHECK, ICON_CLOSE, ICON_DONE_ALL, ICON_EDIT, ICON_TEXT_AD};
+use egui_material_icons::icons::{
+    ICON_CHECK, ICON_CLOSE, ICON_DONE_ALL, ICON_EDIT, ICON_INVENTORY_2, ICON_TEXT_AD,
+};
 use promptgen_core::{Cardinality, Node, ParseResult, SlotDefKind};
 
 use crate::components::autocomplete::{
@@ -12,6 +14,7 @@ use crate::components::autocomplete::{
 use crate::components::focusable_frame::FocusableFrame;
 use crate::components::prompt_editor::{PromptEditor, PromptEditorConfig};
 use crate::state::AppState;
+use crate::styles::{Buttons, Components, Patterns, Typography, spacing};
 use crate::theme;
 use crate::utils::truncate;
 
@@ -50,10 +53,11 @@ impl SlotPanel {
         let definitions = state.get_slot_definitions();
 
         if definitions.is_empty() {
-            ui.label(
-                egui::RichText::new("No slots in prompt")
-                    .italics()
-                    .color(egui::Color32::from_rgb(108, 112, 134)),
+            Patterns::empty_state(
+                ui,
+                ICON_INVENTORY_2,
+                "No slots in prompt",
+                Some("Add slots with {label:type} syntax"),
             );
             return;
         }
@@ -117,7 +121,7 @@ impl SlotPanel {
                 }
             }
 
-            ui.add_space(4.0);
+            ui.add_space(spacing::XS);
         }
 
         // Add scroll padding at the bottom so autocomplete popups have room to display
@@ -163,7 +167,7 @@ impl SlotPanel {
                 if has_content {
                     flex.add_ui(FlexItem::default(), |ui| {
                         if ui
-                            .small_button(ICON_CLOSE)
+                            .add(Buttons::icon_small(ICON_CLOSE))
                             .on_hover_text("Clear slot")
                             .clicked()
                         {
@@ -247,9 +251,6 @@ impl SlotPanel {
             state.request_render();
         }
 
-        // Get the editor background color from the current theme
-        let editor_bg = ui.visuals().extreme_bg_color;
-
         // Get current values as mutable vec with indices for DnD
         let mut items: Vec<(usize, String)> = state
             .preview
@@ -307,7 +308,11 @@ impl SlotPanel {
                     } else {
                         "Edit as text"
                     };
-                    if ui.small_button(icon).on_hover_text(tooltip).clicked() {
+                    if ui
+                        .add(Buttons::icon_small(icon))
+                        .on_hover_text(tooltip)
+                        .clicked()
+                    {
                         toggle_edit_mode.set(true);
                     }
                 });
@@ -338,7 +343,7 @@ impl SlotPanel {
                 if has_content {
                     flex.add_ui(FlexItem::default(), |ui| {
                         if ui
-                            .small_button(ICON_CLOSE)
+                            .add(Buttons::icon_small(ICON_CLOSE))
                             .on_hover_text("Clear slot")
                             .clicked()
                         {
@@ -387,159 +392,109 @@ impl SlotPanel {
                     });
                 }
             } else {
+                let theme = theme::current(ui.ctx());
+
                 // Picker mode - display selected values as chips
                 if !items.is_empty() {
-                    // Container with editor background color - full width
-                    egui::Frame::NONE
-                        .inner_margin(egui::Margin {
-                            left: 8,
-                            right: 8,
-                            top: 6,
-                            bottom: 6,
-                        })
-                        .corner_radius(4.0)
-                        .fill(editor_bg)
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            // Make item spacing equal for horizontal wrapped layout
-                            ui.spacing_mut().item_spacing.x = ui.spacing().item_spacing.y;
+                    // Container with input frame styling
+                    Components::input_frame(&theme).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        // Make item spacing equal for horizontal wrapped layout
+                        ui.spacing_mut().item_spacing.x = ui.spacing().item_spacing.y;
 
-                            // Use horizontal_wrapped with egui_dnd for drag-and-drop
-                            ui.horizontal_wrapped(|ui| {
-                                let dnd_id = format!("slot_dnd_{}", label_owned);
-                                // Calculate max chip width (leave room for spacing)
-                                let max_chip_width = (ui.available_width() - 16.0).max(100.0);
+                        // Use horizontal_wrapped with egui_dnd for drag-and-drop
+                        ui.horizontal_wrapped(|ui| {
+                            let dnd_id = format!("slot_dnd_{}", label_owned);
+                            // Calculate max chip width (leave room for spacing)
+                            let max_chip_width = (ui.available_width() - 16.0).max(100.0);
 
-                                dnd(ui, dnd_id).show_custom_vec(
-                                    &mut items,
-                                    |ui, items, item_iter| {
-                                        items.iter().enumerate().for_each(|(idx, item)| {
-                                            let (_original_idx, value) = item;
+                            dnd(ui, dnd_id).show_custom_vec(&mut items, |ui, items, item_iter| {
+                                items.iter().enumerate().for_each(|(idx, item)| {
+                                    let (_original_idx, value) = item;
 
-                                            // For display, replace newlines with spaces and truncate
-                                            let collapsed: String = value
-                                                .chars()
-                                                .map(|c| if c == '\n' { ' ' } else { c })
-                                                .collect::<String>()
-                                                .split_whitespace()
-                                                .collect::<Vec<_>>()
-                                                .join(" ");
-                                            let display_value = truncate(&collapsed);
+                                    // For display, replace newlines with spaces and truncate
+                                    let collapsed: String = value
+                                        .chars()
+                                        .map(|c| if c == '\n' { ' ' } else { c })
+                                        .collect::<String>()
+                                        .split_whitespace()
+                                        .collect::<Vec<_>>()
+                                        .join(" ");
+                                    let display_value = truncate(&collapsed);
 
-                                            // Measure the chip content size: value text + "x" button + spacing
-                                            let text_size = measure_text(ui, display_value.as_ref());
-                                            let x_button_size = measure_text(ui, "x");
+                                    // Measure the chip content size: value text + "x" button + spacing
+                                    let text_size = measure_text(ui, display_value.as_ref());
+                                    let x_button_size = measure_text(ui, ICON_CLOSE);
 
-                                            // Chip padding and internal spacing
-                                            let chip_padding = 6.0; // left + right inner margin
-                                            let chip_spacing = 4.0; // space between label and X button
-                                            let chip_vertical_padding = 2.0; // top + bottom
+                                    // Chip padding and internal spacing
+                                    let chip_padding = 6.0; // left + right inner margin
+                                    let chip_spacing = 4.0; // space between label and X button
+                                    let chip_vertical_padding = 2.0; // top + bottom
 
-                                            let raw_chip_width = text_size.x
-                                                + x_button_size.x
-                                                + chip_padding * 2.0
-                                                + chip_spacing
-                                                + 8.0; // extra for button frame
+                                    let raw_chip_width = text_size.x
+                                        + x_button_size.x
+                                        + chip_padding * 2.0
+                                        + chip_spacing
+                                        + 8.0; // extra for button frame
 
-                                            let chip_size = Vec2::new(
-                                                raw_chip_width.min(max_chip_width),
-                                                text_size.y.max(x_button_size.y)
-                                                    + chip_vertical_padding * 2.0
-                                                    + 4.0,
-                                            );
+                                    let chip_size = Vec2::new(
+                                        raw_chip_width.min(max_chip_width),
+                                        text_size.y.max(x_button_size.y)
+                                            + chip_vertical_padding * 2.0
+                                            + 4.0,
+                                    );
 
-                                            // Use the value string as a stable ID (combined with slot label for uniqueness)
-                                            let item_id = Id::new((&label_owned, value));
-                                            item_iter.next(
-                                                ui,
-                                                item_id,
-                                                idx,
-                                                true,
-                                                |ui, item_handle| {
-                                                    item_handle.ui_sized(
-                                                        ui,
-                                                        chip_size,
-                                                        |ui, handle, _state| {
-                                                            // Chip with X button - entire chip is drag handle
-                                                            let chip_bg =
-                                                                theme::current(ui.ctx()).chip_bg();
-                                                            handle.ui_sized(ui, chip_size, |ui| {
-                                                                egui::Frame::NONE
-                                                                    .inner_margin(egui::Margin {
-                                                                        left: chip_padding as i8,
-                                                                        right: chip_padding as i8,
-                                                                        top: chip_vertical_padding
-                                                                            as i8,
-                                                                        bottom: chip_vertical_padding
-                                                                            as i8,
-                                                                    })
-                                                                    .corner_radius(12.0)
-                                                                    .fill(chip_bg)
-                                                                    .show(ui, |ui| {
-                                                                        ui.horizontal(|ui| {
-                                                                            ui.spacing_mut()
-                                                                                .item_spacing
-                                                                                .x = chip_spacing;
-                                                                            // Truncate long labels, show single-line version
-                                                                            let label_response =
-                                                                                ui.add(
-                                                                                    Label::new(
-                                                                                        display_value.as_ref(),
-                                                                                    )
-                                                                                    .truncate(),
-                                                                                );
-                                                                            // Show full original text on hover
-                                                                            label_response
-                                                                                .on_hover_text(
-                                                                                    value,
-                                                                                );
-                                                                            if ui
-                                                                                .small_button("x")
-                                                                                .on_hover_text(
-                                                                                    "Remove",
-                                                                                )
-                                                                                .clicked()
-                                                                            {
-                                                                                *to_remove
-                                                                                    .borrow_mut() =
-                                                                                    Some(
-                                                                                        value
-                                                                                            .clone(),
-                                                                                    );
-                                                                                chip_removed
-                                                                                    .set(true);
-                                                                            }
-                                                                        });
-                                                                    });
-                                                            });
-                                                        },
-                                                    )
-                                                },
-                                            );
-                                        });
-                                    },
-                                );
+                                    // Use the value string as a stable ID (combined with slot label for uniqueness)
+                                    let item_id = Id::new((&label_owned, value));
+                                    item_iter.next(ui, item_id, idx, true, |ui, item_handle| {
+                                        item_handle.ui_sized(ui, chip_size, |ui, handle, _state| {
+                                            // Chip with X button - entire chip is drag handle
+                                            let chip_bg = theme::current(ui.ctx()).chip_bg();
+                                            handle.ui_sized(ui, chip_size, |ui| {
+                                                egui::Frame::NONE
+                                                    .inner_margin(egui::Margin {
+                                                        left: chip_padding as i8,
+                                                        right: chip_padding as i8,
+                                                        top: chip_vertical_padding as i8,
+                                                        bottom: chip_vertical_padding as i8,
+                                                    })
+                                                    .corner_radius(6.0)
+                                                    .fill(chip_bg)
+                                                    .show(ui, |ui| {
+                                                        ui.horizontal(|ui| {
+                                                            ui.spacing_mut().item_spacing.x =
+                                                                chip_spacing;
+                                                            // Truncate long labels, show single-line version
+                                                            let label_response = ui.add(
+                                                                Label::new(display_value.as_ref())
+                                                                    .truncate(),
+                                                            );
+                                                            // Show full original text on hover
+                                                            label_response.on_hover_text(value);
+                                                            if ui
+                                                                .small_button(ICON_CLOSE)
+                                                                .on_hover_text("Remove")
+                                                                .clicked()
+                                                            {
+                                                                *to_remove.borrow_mut() =
+                                                                    Some(value.clone());
+                                                                chip_removed.set(true);
+                                                            }
+                                                        });
+                                                    });
+                                            });
+                                        })
+                                    });
+                                });
                             });
                         });
+                    });
                 } else {
                     // Empty state - show placeholder in a clickable area
-                    egui::Frame::NONE
-                        .inner_margin(egui::Margin {
-                            left: 8,
-                            right: 8,
-                            top: 6,
-                            bottom: 6,
-                        })
-                        .corner_radius(4.0)
-                        .fill(editor_bg)
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(
-                                egui::RichText::new("Click to select...")
-                                    .italics()
-                                    .color(egui::Color32::from_rgb(108, 112, 134)),
-                            );
-                        });
+                    Components::input_frame(&theme).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(Typography::hint("Click to select...", &theme));
+                    });
                 }
             }
         });

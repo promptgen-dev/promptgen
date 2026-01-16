@@ -2,6 +2,7 @@
 
 use super::prompt_menu::{PromptMenu, PromptMenuAction};
 use crate::state::AppState;
+use crate::styles::{Buttons, Components, Icons, Layout, Patterns};
 use crate::theme;
 use egui_dnd::dnd;
 use egui_material_icons::icons::{ICON_ADD, ICON_CLOSE, ICON_SAVE};
@@ -36,11 +37,13 @@ impl TabBarPanel {
     /// Show the tab bar and return the result including any action triggered
     pub fn show(ui: &mut egui::Ui, state: &mut AppState) -> TabBarResult {
         let mut action = TabBarAction::None;
+        let theme = theme::current(ui.ctx());
 
         ui.horizontal(|ui| {
             // [+ New] button
+            let new_btn = Buttons::secondary(Icons::with_label(ICON_ADD, "New"), &theme);
             if ui
-                .button(format!("{} New", ICON_ADD))
+                .add(new_btn)
                 .on_hover_text("Create new prompt tab")
                 .clicked()
             {
@@ -49,16 +52,17 @@ impl TabBarPanel {
 
             // [Save] button - enabled when active tab is dirty
             let can_save = state.get_active_tab().is_some_and(|tab| tab.dirty);
+            let save_btn = Buttons::primary(Icons::with_label(ICON_SAVE, "Save"), &theme);
 
             if ui
-                .add_enabled(can_save, egui::Button::new(format!("{} Save", ICON_SAVE)))
+                .add_enabled(can_save, save_btn)
                 .on_hover_text("Save prompt to library")
                 .clicked()
             {
                 action = TabBarAction::SaveTab;
             }
 
-            ui.separator();
+            Layout::gap(ui);
 
             // Scrollable area for tabs with bottom padding for scrollbar
             egui::ScrollArea::horizontal()
@@ -81,41 +85,19 @@ impl TabBarPanel {
                                 |ui, original_idx, handle, _dragging| {
                                     let i = *original_idx;
                                     let is_active = active_index == Some(i);
-
-                                    // Tab styling - use theme selection colors
                                     let theme = theme::current(ui.ctx());
-                                    let (tab_fill, tab_stroke) = if is_active {
-                                        (
-                                            theme.active_selected_bg(),
-                                            egui::Stroke::new(1.0, theme.active_selected_stroke()),
-                                        )
-                                    } else {
-                                        (
-                                            theme.selected_bg(),
-                                            egui::Stroke::new(1.0, theme.selected_stroke()),
-                                        )
-                                    };
 
-                                    egui::Frame::new()
-                                        .fill(tab_fill)
-                                        .stroke(tab_stroke)
-                                        .corner_radius(4.0)
-                                        .inner_margin(egui::Margin::symmetric(6, 2))
-                                        .show(ui, |ui| {
-                                            ui.horizontal(|ui| {
-                                                let tab = &state.tabs.tabs[i];
+                                    // Use list_item_frame for consistent tab styling
+                                    // Wrap handle around the entire frame so dragging works anywhere
+                                    handle.ui(ui, |ui| {
+                                        Components::list_item_frame(&theme, is_active, !is_active)
+                                            .show(ui, |ui| {
+                                                ui.horizontal_centered(|ui| {
+                                                    let tab = &state.tabs.tabs[i];
 
-                                                // Build tab label (name + dirty indicator)
-                                                let label = if tab.dirty {
-                                                    format!("{}*", tab.name)
-                                                } else {
-                                                    tab.name.clone()
-                                                };
-
-                                                // Drag handle wraps the clickable label
-                                                handle.ui(ui, |ui| {
+                                                    // Clickable label
                                                     let response = ui.add(
-                                                        egui::Label::new(&label)
+                                                        egui::Label::new(&tab.name)
                                                             .selectable(false)
                                                             .sense(egui::Sense::click()),
                                                     );
@@ -123,29 +105,35 @@ impl TabBarPanel {
                                                     if response.clicked() && !is_active {
                                                         action = TabBarAction::SwitchTab(i);
                                                     }
-                                                });
 
-                                                // Menu button (always allow delete since we have blank state)
-                                                let menu_action = PromptMenu::show(ui, true);
-                                                match menu_action {
-                                                    PromptMenuAction::Rename => {
-                                                        action = TabBarAction::StartRename(i);
+                                                    // Dirty indicator (separate from name)
+                                                    if tab.dirty {
+                                                        Patterns::dirty_indicator(ui, &theme);
                                                     }
-                                                    PromptMenuAction::Delete => {
+
+                                                    // Menu button (always allow delete since we have blank state)
+                                                    let menu_action = PromptMenu::show(ui, true);
+                                                    match menu_action {
+                                                        PromptMenuAction::Rename => {
+                                                            action = TabBarAction::StartRename(i);
+                                                        }
+                                                        PromptMenuAction::Delete => {
+                                                            action = TabBarAction::CloseTab(i);
+                                                        }
+                                                        PromptMenuAction::None => {}
+                                                    }
+
+                                                    // Close button (always show since we have blank state)
+                                                    if ui
+                                                        .add(Buttons::icon_small(ICON_CLOSE))
+                                                        .on_hover_text("Close tab")
+                                                        .clicked()
+                                                    {
                                                         action = TabBarAction::CloseTab(i);
                                                     }
-                                                    PromptMenuAction::None => {}
-                                                }
-
-                                                // Close button (always show since we have blank state)
-                                                let close_response = ui
-                                                    .small_button(ICON_CLOSE)
-                                                    .on_hover_text("Close tab");
-                                                if close_response.clicked() {
-                                                    action = TabBarAction::CloseTab(i);
-                                                }
+                                                });
                                             });
-                                        });
+                                    });
                                 },
                             );
 

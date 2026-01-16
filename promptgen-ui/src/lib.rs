@@ -4,6 +4,7 @@ mod app;
 mod components;
 mod highlighting;
 mod state;
+pub mod styles;
 mod theme;
 mod utils;
 

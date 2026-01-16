@@ -1,6 +1,6 @@
 //! Reusable template editor widget with syntax highlighting, line numbers, and autocomplete.
 
-use egui::{Color32, FontId, TextBuffer};
+use egui::{FontId, TextBuffer};
 
 use crate::components::autocomplete::{autocomplete_after_editor, autocomplete_before_editor};
 use crate::highlighting::highlight_prompt;
@@ -41,7 +41,7 @@ fn paint_line_numbers(
 ) {
     let painter = ui.painter();
     let font_id = FontId::monospace(14.0);
-    let line_number_color = Color32::from_rgb(108, 112, 134); // Catppuccin overlay0
+    let line_number_color = theme::current(ui.ctx()).muted();
 
     // Count logical lines to determine max digits needed
     let logical_line_count = content.lines().count().max(1);
@@ -282,13 +282,15 @@ impl PromptEditor {
 
     /// Show parse errors below the editor (call after show())
     pub fn show_errors(ui: &mut egui::Ui, parse_result: &ParseResult) {
+        let theme = theme::current(ui.ctx());
+
         if !parse_result.errors.is_empty() {
             ui.add_space(8.0);
             ui.separator();
 
             for error in &parse_result.errors {
                 ui.horizontal(|ui| {
-                    ui.colored_label(theme::current(ui.ctx()).syntax_error(), "error:");
+                    ui.colored_label(theme.syntax_error(), "error:");
                     ui.label(&error.message);
                 });
 
@@ -298,7 +300,7 @@ impl PromptEditor {
                     ui.horizontal(|ui| {
                         ui.add_space(20.0);
                         ui.colored_label(
-                            egui::Color32::from_rgb(108, 112, 134),
+                            theme.muted(),
                             format!("  at position {}..{}", span.start, span.end),
                         );
                     });
@@ -311,10 +313,7 @@ impl PromptEditor {
             ui.add_space(4.0);
             for warning in &parse_result.warnings {
                 ui.horizontal(|ui| {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(249, 226, 175), // Catppuccin yellow
-                        "warning:",
-                    );
+                    ui.colored_label(theme.accent_five, "warning:");
                     ui.label(&warning.message);
                 });
             }

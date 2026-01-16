@@ -15,6 +15,7 @@ use super::prompts_menu::{PromptsMenu, PromptsMenuAction};
 use super::variable_export_list::{VariableExportAction, VariableExportList};
 use super::variable_list::{VariableList, VariableListConfig};
 use crate::state::{AppState, OptionGroup, SidebarMode, SidebarViewMode, VariableSortOrder};
+use crate::styles::{Buttons, Components, Icons, Layout, Patterns, Typography};
 use crate::theme;
 use crate::utils::truncate;
 
@@ -82,15 +83,17 @@ impl SidebarPanel {
 
         // Check if we have a library loaded
         if let Some(lib_path) = &state.library_path {
+            let theme = theme::current(ui.ctx());
+
             // Library header: icon + name as main heading
             ui.horizontal(|ui| {
-                ui.label(ICON_DESCRIPTION);
+                ui.label(Icons::button_icon(ICON_DESCRIPTION));
                 let name = if state.library.name.is_empty() {
                     "Untitled Library"
                 } else {
                     &state.library.name
                 };
-                ui.heading(name);
+                ui.label(Typography::heading(name));
             });
 
             // File name in smaller, lighter text below
@@ -98,37 +101,32 @@ impl SidebarPanel {
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| lib_path.display().to_string());
-            ui.label(
-                egui::RichText::new(file_name)
-                    .small()
-                    .color(ui.visuals().weak_text_color()),
-            );
+            ui.label(Typography::caption(file_name, &theme));
 
-            ui.add_space(8.0);
+            Layout::gap(ui);
 
             // View mode toggle (Prompts / Variables)
             ui.horizontal(|ui| {
-                if ui
-                    .selectable_label(
-                        state.sidebar.view_mode == SidebarViewMode::Prompts,
-                        "Prompts",
-                    )
-                    .clicked()
-                {
+                let prompts_btn = Buttons::tab(
+                    "Prompts",
+                    state.sidebar.view_mode == SidebarViewMode::Prompts,
+                    &theme,
+                );
+                if ui.add(prompts_btn).clicked() {
                     state.sidebar.view_mode = SidebarViewMode::Prompts;
                 }
-                if ui
-                    .selectable_label(
-                        state.sidebar.view_mode == SidebarViewMode::Variables,
-                        "Variables",
-                    )
-                    .clicked()
-                {
+
+                let variables_btn = Buttons::tab(
+                    "Variables",
+                    state.sidebar.view_mode == SidebarViewMode::Variables,
+                    &theme,
+                );
+                if ui.add(variables_btn).clicked() {
                     state.sidebar.view_mode = SidebarViewMode::Variables;
                 }
             });
 
-            ui.add_space(4.0);
+            Layout::small_gap(ui);
 
             // Search input with clear button
             VariableList::show_search_bar(ui, &mut state.sidebar.search_query);
@@ -164,18 +162,18 @@ impl SidebarPanel {
             // Content list based on view mode
             Self::render_sidebar_content(ui, state);
         } else if library_file_path.is_some() {
-            ui.add_space(16.0);
-            ui.label("Failed to load library");
-            ui.add_space(4.0);
-            ui.label("Check the file format and try again");
+            Patterns::empty_state(
+                ui,
+                ICON_DESCRIPTION,
+                "Failed to load library",
+                Some("Check the file format and try again"),
+            );
         } else {
-            ui.add_space(16.0);
-            ui.label("No library loaded");
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new("Use File → Open Library to get started")
-                    .small()
-                    .color(ui.visuals().weak_text_color()),
+            Patterns::empty_state(
+                ui,
+                ICON_DESCRIPTION,
+                "No library loaded",
+                Some("Use File → Open Library to get started"),
             );
         }
     }
@@ -247,31 +245,10 @@ impl SidebarPanel {
             let is_open_in_tab = tab_index.is_some();
             let is_active_tab = active_tab_name.as_ref() == Some(name);
 
-            // Determine background color based on state
             let theme = theme::current(ui.ctx());
-            let (bg_fill, stroke) = if is_active_tab {
-                // Active tab - bright selection color
-                (
-                    theme.active_selected_bg(),
-                    egui::Stroke::new(1.0, theme.active_selected_stroke()),
-                )
-            } else if is_open_in_tab {
-                // Open but not active - subtle selection
-                (
-                    theme.selected_bg(),
-                    egui::Stroke::new(1.0, theme.selected_stroke()),
-                )
-            } else {
-                // Not open - transparent
-                (egui::Color32::TRANSPARENT, egui::Stroke::NONE)
-            };
 
-            // Wrap the row in a frame with background color
-            egui::Frame::new()
-                .fill(bg_fill)
-                .stroke(stroke)
-                .corner_radius(4.0)
-                .inner_margin(egui::Margin::symmetric(4, 2))
+            // Use list_item_frame for consistent styling
+            Components::list_item_frame(&theme, is_active_tab, is_open_in_tab)
                 .show(ui, |ui| {
                     // Use flex layout for prompt row: label (wraps) + menu button (fixed)
                     Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
@@ -386,12 +363,14 @@ impl SidebarPanel {
 
     /// Render the slot picker overlay for selecting options for a pick slot.
     fn render_slot_picker(ui: &mut egui::Ui, state: &mut AppState, slot_label: String) {
+        let theme = theme::current(ui.ctx());
+
         // Header with slot name and close button
         ui.horizontal(|ui| {
-            ui.heading(&slot_label);
+            ui.label(Typography::heading(&slot_label));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
-                    .button(ICON_CLOSE)
+                    .add(Buttons::icon(ICON_CLOSE))
                     .on_hover_text("Close picker")
                     .clicked()
                 {
@@ -415,14 +394,10 @@ impl SidebarPanel {
                     format!("Select up to {} ({}/{})", n, current, n)
                 }
             };
-            ui.label(
-                egui::RichText::new(cardinality_text)
-                    .small()
-                    .color(ui.visuals().weak_text_color()),
-            );
+            ui.label(Typography::caption(cardinality_text, &theme));
         }
 
-        ui.add_space(4.0);
+        Layout::small_gap(ui);
 
         // Search bar
         VariableList::show_search_bar(ui, &mut state.sidebar.slot_picker.search_query);
@@ -514,7 +489,7 @@ impl SidebarPanel {
 
     /// Render the prompts toolbar with Import/Export menu and sort button.
     fn show_prompts_toolbar(ui: &mut egui::Ui, state: &mut AppState) {
-        ui.add_space(4.0);
+        Layout::small_gap(ui);
         Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
             // Import/Export menu (left-aligned)
             flex.add_ui(FlexItem::default(), |ui| {
