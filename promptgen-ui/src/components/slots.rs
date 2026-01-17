@@ -265,6 +265,13 @@ impl SlotPanel {
             theme.surface0.gamma_multiply(lighten_factor)
         };
 
+        // Check if any slots in this group have values
+        let has_values = state.has_slots_with_prefix_values(label);
+
+        // Track if clear button was clicked
+        let clear_clicked = std::cell::Cell::new(false);
+        let label_for_clear = label.to_string();
+
         // Frame for the entire reference group
         egui::Frame::new()
             .fill(bg_color)
@@ -278,34 +285,79 @@ impl SlotPanel {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
 
-                // Header row with toggle icon and label
+                // Header row with clickable toggle area, chevron, and clear button
                 Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
-                    // Toggle icon (fixed size)
-                    let icon = if collapsing_state.is_open() {
-                        ICON_EXPAND_MORE
-                    } else {
-                        ICON_CHEVRON_RIGHT
-                    };
+                    // Clickable header area (icon + label) - grows to fill space
+                    flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
+                        ui.set_width(ui.available_width());
+
+                        // Make the entire header area clickable
+                        let (rect, response) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), 20.0),
+                            egui::Sense::click(),
+                        );
+
+                        // Draw the header content (without chevron - it's on the right now)
+                        let header_text = format!("{} {}", ICON_INPUT, label);
+
+                        // Paint the text
+                        ui.painter().text(
+                            rect.left_center(),
+                            egui::Align2::LEFT_CENTER,
+                            header_text,
+                            egui::FontId::proportional(15.0),
+                            theme.text,
+                        );
+
+                        // Toggle on click
+                        if response.clicked() {
+                            collapsing_state.toggle(ui);
+                        }
+
+                        // Show hover cursor
+                        if response.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                    });
+
+                    // Chevron button (fixed size, on the right)
                     flex.add_ui(FlexItem::default(), |ui| {
-                        if ui.small_button(icon).clicked() {
+                        let icon = if collapsing_state.is_open() {
+                            ICON_EXPAND_MORE
+                        } else {
+                            ICON_CHEVRON_RIGHT
+                        };
+                        if ui
+                            .add(Buttons::icon_small(icon))
+                            .on_hover_text(if collapsing_state.is_open() {
+                                "Collapse"
+                            } else {
+                                "Expand"
+                            })
+                            .clicked()
+                        {
                             collapsing_state.toggle(ui);
                         }
                     });
 
-                    // Reference icon and label (grows and truncates)
-                    flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
-                        ui.set_width(ui.available_width());
-                        let header_text = format!("{} {}", ICON_INPUT, label);
-                        ui.add(
-                            Label::new(
-                                egui::RichText::new(header_text)
-                                    .strong()
-                                    .color(theme.subtext0),
-                            )
-                            .truncate(),
-                        );
-                    });
+                    // Clear button (fixed size, only shown if there are values)
+                    if has_values {
+                        flex.add_ui(FlexItem::default(), |ui| {
+                            if ui
+                                .add(Buttons::icon_small(ICON_CLOSE))
+                                .on_hover_text("Clear all values in this group")
+                                .clicked()
+                            {
+                                clear_clicked.set(true);
+                            }
+                        });
+                    }
                 });
+
+                // Handle clear after UI is done
+                if clear_clicked.get() {
+                    state.clear_slots_with_prefix(&label_for_clear);
+                }
 
                 // Body content (only shown when expanded)
                 collapsing_state.show_body_unindented(ui, |ui| {

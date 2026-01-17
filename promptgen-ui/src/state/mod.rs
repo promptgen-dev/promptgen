@@ -394,6 +394,35 @@ impl AppState {
         }
     }
 
+    /// Clear all slots with a given prefix (e.g., "Head - " clears "Head - Hair", "Head - Eyes", etc.)
+    pub fn clear_slots_with_prefix(&mut self, prefix: &str) {
+        let full_prefix = format!("{} - ", prefix);
+        let slots_to_clear: Vec<String> = self
+            .preview
+            .slot_values
+            .keys()
+            .filter(|k| k.starts_with(&full_prefix))
+            .cloned()
+            .collect();
+
+        if !slots_to_clear.is_empty() {
+            for slot in slots_to_clear {
+                self.preview.slot_values.get_mut(&slot).map(|v| v.clear());
+            }
+            self.tabs.mark_active_dirty();
+            self.request_render();
+        }
+    }
+
+    /// Check if any slots with a given prefix have values
+    pub fn has_slots_with_prefix_values(&self, prefix: &str) -> bool {
+        let full_prefix = format!("{} - ", prefix);
+        self.preview
+            .slot_values
+            .iter()
+            .any(|(k, v)| k.starts_with(&full_prefix) && !v.is_empty())
+    }
+
     // ==========================================================================
     // Slot manual edit mode
     // ==========================================================================
