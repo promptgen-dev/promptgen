@@ -4,9 +4,10 @@ use egui::{Align, Id, Label, Layout, UiBuilder, Vec2};
 use egui_dnd::dnd;
 use egui_flex::{Flex, FlexItem};
 use egui_material_icons::icons::{
-    ICON_CHECK, ICON_CLOSE, ICON_DONE_ALL, ICON_EDIT, ICON_INVENTORY_2, ICON_TEXT_AD,
+    ICON_CHECK, ICON_CHEVRON_RIGHT, ICON_CLOSE, ICON_DONE_ALL, ICON_EDIT, ICON_EXPAND_MORE,
+    ICON_INPUT, ICON_INVENTORY_2, ICON_TEXT_AD,
 };
-use promptgen_core::{Cardinality, Node, ParseResult, SlotDefKind};
+use promptgen_core::{Cardinality, Node, ParseResult, SlotDefKind, SlotDefinition};
 
 use crate::components::autocomplete::{
     apply_completion, get_completions, handle_autocomplete_keyboard,
@@ -17,6 +18,78 @@ use crate::state::AppState;
 use crate::styles::{Buttons, Components, Patterns, Typography, spacing};
 use crate::theme;
 use crate::utils::truncate;
+
+// ============================================================================
+// Hierarchical Slot Structure
+// ============================================================================
+
+/// A hierarchical slot entry - either a leaf slot or a reference group with children.
+#[derive(Debug, Clone)]
+enum SlotEntry {
+    /// A regular slot (textarea or pick) - the leaf node.
+    Slot(SlotDefinition),
+    /// A reference group containing nested slots.
+    ReferenceGroup {
+        /// The prefix label for this group (e.g., "Style" from "Style - Color").
+        label: String,
+        /// Child entries (can be more reference groups or slots).
+        children: Vec<SlotEntry>,
+    },
+}
+
+/// Build a hierarchical slot structure from flat slot definitions.
+///
+/// Slots with prefixed names like "Style - Color" are grouped under a
+/// ReferenceGroup with label "Style". Nested prefixes create nested groups.
+fn build_slot_hierarchy(definitions: &[SlotDefinition]) -> Vec<SlotEntry> {
+    let mut root: Vec<SlotEntry> = Vec::new();
+
+    for def in definitions {
+        insert_into_hierarchy(&mut root, def, &def.label);
+    }
+
+    root
+}
+
+/// Extract the local (display) name from a slot label.
+///
+/// For nested slots like "Style - Color", this returns "Color".
+/// For non-nested slots like "Name", this returns "Name".
+fn local_slot_name(label: &str) -> &str {
+    label.rsplit(" - ").next().unwrap_or(label)
+}
+
+/// Insert a slot definition into the hierarchy at the appropriate position.
+fn insert_into_hierarchy(entries: &mut Vec<SlotEntry>, def: &SlotDefinition, remaining_path: &str) {
+    // Check if this path has a prefix (contains " - ")
+    if let Some(sep_pos) = remaining_path.find(" - ") {
+        let prefix = &remaining_path[..sep_pos];
+        let rest = &remaining_path[sep_pos + 3..]; // Skip " - "
+
+        // Find or create the reference group for this prefix
+        let group_idx = entries.iter().position(|e| {
+            matches!(e, SlotEntry::ReferenceGroup { label, .. } if label == prefix)
+        });
+
+        if let Some(idx) = group_idx {
+            // Group exists, insert into it
+            if let SlotEntry::ReferenceGroup { children, .. } = &mut entries[idx] {
+                insert_into_hierarchy(children, def, rest);
+            }
+        } else {
+            // Create new group
+            let mut children = Vec::new();
+            insert_into_hierarchy(&mut children, def, rest);
+            entries.push(SlotEntry::ReferenceGroup {
+                label: prefix.to_string(),
+                children,
+            });
+        }
+    } else {
+        // No more prefixes - this is a leaf slot
+        entries.push(SlotEntry::Slot(def.clone()));
+    }
+}
 
 /// Measure text size in the UI (based on hello_egui_utils::measure_text)
 fn measure_text(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) -> Vec2 {
@@ -71,6 +144,7 @@ impl SlotPanel {
             let should_handle = match &def.kind {
                 SlotDefKind::Textarea => true,
                 SlotDefKind::Pick { .. } => state.is_slot_manual_edit(&def.label),
+                SlotDefKind::Reference { .. } => false, // References don't have editors
             };
 
             if should_handle {
@@ -88,44 +162,164 @@ impl SlotPanel {
             }
         }
 
-        // No internal scroll - parent handles scrolling
-        for def in &definitions {
-            let is_focused = state.is_slot_focused(&def.label);
+        // Build hierarchical slot structure
+        let hierarchy = build_slot_hierarchy(&definitions);
 
-            match &def.kind {
-                SlotDefKind::Textarea => {
-                    // Check if we have a pending autocomplete selection for this slot
-                    let pending_completion = slot_autocomplete_selection
-                        .as_ref()
-                        .filter(|(id, _)| *id == format!("slot_editor_{}", def.label))
-                        .map(|(_, text)| text.clone());
-                    Self::show_textarea_slot(ui, state, &def.label, is_focused, pending_completion);
-                }
-                SlotDefKind::Pick {
-                    cardinality, sep, ..
-                } => {
-                    // Check if we have a pending autocomplete selection for this pick slot in manual edit mode
-                    let pending_completion = slot_autocomplete_selection
-                        .as_ref()
-                        .filter(|(id, _)| *id == format!("slot_editor_{}", def.label))
-                        .map(|(_, text)| text.clone());
-                    Self::show_pick_slot(
-                        ui,
-                        state,
-                        &def.label,
-                        cardinality,
-                        sep,
-                        is_focused,
-                        pending_completion,
-                    );
-                }
-            }
-
-            ui.add_space(spacing::XS);
-        }
+        // Render the hierarchy (depth 0 = root level)
+        Self::render_slot_entries(ui, state, &hierarchy, 0, &slot_autocomplete_selection);
 
         // Add scroll padding at the bottom so autocomplete popups have room to display
         ui.add_space(300.0);
+    }
+
+    /// Render a list of slot entries at a given depth level.
+    fn render_slot_entries(
+        ui: &mut egui::Ui,
+        state: &mut AppState,
+        entries: &[SlotEntry],
+        depth: usize,
+        autocomplete_selection: &Option<(String, String)>,
+    ) {
+        for entry in entries {
+            match entry {
+                SlotEntry::Slot(def) => {
+                    let is_focused = state.is_slot_focused(&def.label);
+
+                    match &def.kind {
+                        SlotDefKind::Textarea => {
+                            let pending_completion = autocomplete_selection
+                                .as_ref()
+                                .filter(|(id, _)| *id == format!("slot_editor_{}", def.label))
+                                .map(|(_, text)| text.clone());
+                            Self::show_textarea_slot(
+                                ui,
+                                state,
+                                &def.label,
+                                is_focused,
+                                pending_completion,
+                            );
+                        }
+                        SlotDefKind::Pick {
+                            cardinality, sep, ..
+                        } => {
+                            let pending_completion = autocomplete_selection
+                                .as_ref()
+                                .filter(|(id, _)| *id == format!("slot_editor_{}", def.label))
+                                .map(|(_, text)| text.clone());
+                            Self::show_pick_slot(
+                                ui,
+                                state,
+                                &def.label,
+                                cardinality,
+                                sep,
+                                is_focused,
+                                pending_completion,
+                            );
+                        }
+                        SlotDefKind::Reference { .. } => {
+                            // Reference slots are expanded into groups, not rendered directly
+                        }
+                    }
+
+                    ui.add_space(spacing::XS);
+                }
+                SlotEntry::ReferenceGroup { label, children } => {
+                    Self::show_reference_group(
+                        ui,
+                        state,
+                        label,
+                        children,
+                        depth,
+                        autocomplete_selection,
+                    );
+                    ui.add_space(spacing::XS);
+                }
+            }
+        }
+    }
+
+    /// Render a reference group as a collapsible section.
+    fn show_reference_group(
+        ui: &mut egui::Ui,
+        state: &mut AppState,
+        label: &str,
+        children: &[SlotEntry],
+        depth: usize,
+        autocomplete_selection: &Option<(String, String)>,
+    ) {
+        let theme = theme::current(ui.ctx());
+        let id = ui.make_persistent_id(format!("slot_ref_group_{}", label));
+
+        // Use CollapsingState for custom header layout - default to open
+        let mut collapsing_state =
+            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true);
+
+        // Calculate background color based on nesting depth
+        let bg_color = if theme.is_light {
+            // For light themes, darken by 5% per level
+            let darken_factor = 0.95_f32.powi(depth as i32 + 1);
+            theme.base.gamma_multiply(darken_factor)
+        } else {
+            // For dark themes, lighten by 5% per level
+            let lighten_factor = 1.05_f32.powi(depth as i32 + 1);
+            theme.surface0.gamma_multiply(lighten_factor)
+        };
+
+        // Frame for the entire reference group
+        egui::Frame::new()
+            .fill(bg_color)
+            .inner_margin(egui::Margin {
+                left: 8,
+                right: 8,
+                top: 6,
+                bottom: 6,
+            })
+            .corner_radius(6.0)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+
+                // Header row with toggle icon and label
+                Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
+                    // Toggle icon (fixed size)
+                    let icon = if collapsing_state.is_open() {
+                        ICON_EXPAND_MORE
+                    } else {
+                        ICON_CHEVRON_RIGHT
+                    };
+                    flex.add_ui(FlexItem::default(), |ui| {
+                        if ui.small_button(icon).clicked() {
+                            collapsing_state.toggle(ui);
+                        }
+                    });
+
+                    // Reference icon and label (grows and truncates)
+                    flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
+                        ui.set_width(ui.available_width());
+                        let header_text = format!("{} {}", ICON_INPUT, label);
+                        ui.add(
+                            Label::new(
+                                egui::RichText::new(header_text)
+                                    .strong()
+                                    .color(theme.subtext0),
+                            )
+                            .truncate(),
+                        );
+                    });
+                });
+
+                // Body content (only shown when expanded)
+                collapsing_state.show_body_unindented(ui, |ui| {
+                    ui.add_space(spacing::SM);
+                    // Render children at the next depth level
+                    Self::render_slot_entries(
+                        ui,
+                        state,
+                        children,
+                        depth + 1,
+                        autocomplete_selection,
+                    );
+                });
+            });
     }
 
     /// Render a textarea slot.
@@ -159,7 +353,8 @@ impl SlotPanel {
                 // Label and type indicator (grows and truncates)
                 flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
                     ui.set_width(ui.available_width());
-                    let header_text = format!("{} {}", ICON_TEXT_AD, label_owned);
+                    let display_name = local_slot_name(&label_owned);
+                    let header_text = format!("{} {}", ICON_TEXT_AD, display_name);
                     ui.add(Label::new(header_text).truncate());
                 });
 
@@ -322,12 +517,13 @@ impl SlotPanel {
                     ui.set_width(ui.available_width());
 
                     // Build the header text (without icon, since toggle button has it)
+                    let display_name = local_slot_name(&label_owned);
                     let header_text = match &cardinality_clone {
-                        Cardinality::One => label_owned.clone(),
-                        Cardinality::Many { max: None } => label_owned.clone(),
+                        Cardinality::One => display_name.to_string(),
+                        Cardinality::Many { max: None } => display_name.to_string(),
                         Cardinality::Many { max: Some(n) } => {
                             let count = items.len();
-                            format!("{} ({}/{})", label_owned, count, n)
+                            format!("{} ({}/{})", display_name, count, n)
                         }
                     };
 

@@ -169,7 +169,15 @@ impl AppState {
         if let Some(result) = &self.editor.parse_result
             && let Some(ast) = &result.ast
         {
-            let current_slots = self.library.get_slots(ast);
+            // Use get_slot_definitions to get all slots including expanded reference slots
+            let defaults = self
+                .tabs
+                .get_active()
+                .map(|t| t.slot_defaults.clone())
+                .unwrap_or_default();
+            let definitions = self.library.get_slot_definitions(ast, &defaults);
+            let current_slots: Vec<String> = definitions.iter().map(|d| d.label.clone()).collect();
+
             // Remove slots that no longer exist
             self.preview
                 .slot_values
