@@ -177,8 +177,12 @@ fn slot_block_parser<'src>()
 /// Parse the content inside {{ ... }}
 fn slot_block_content_parser<'src>()
 -> impl Parser<'src, &'src str, SlotBlock, extra::Err<Simple<'src, char>>> + Clone {
-    // Try pick slot first (has colon), then textarea
-    pick_slot_parser().or(textarea_slot_parser())
+    // Try pick slot first, then reference, then textarea (most specific first)
+    choice((
+        pick_slot_parser(),
+        reference_slot_parser(),
+        textarea_slot_parser(),
+    ))
 }
 
 /// Parse `label: pick(...) [| ops]`
@@ -191,6 +195,32 @@ fn pick_slot_parser<'src>()
             label: (label, label_span),
             kind: (SlotKind::Pick(pick_slot), kind_span),
         })
+}
+
+/// Parse `label: reference("PromptName")`
+fn reference_slot_parser<'src>()
+-> impl Parser<'src, &'src str, SlotBlock, extra::Err<Simple<'src, char>>> + Clone {
+    slot_label_parser()
+        .then_ignore(just(':').padded())
+        .then(reference_expression_parser())
+        .map(|((label, label_span), (prompt_name, kind_span))| SlotBlock {
+            label: (label, label_span),
+            kind: (SlotKind::Reference { prompt_name }, kind_span),
+        })
+}
+
+/// Parse `reference("PromptName")`
+fn reference_expression_parser<'src>()
+-> impl Parser<'src, &'src str, (String, Span), extra::Err<Simple<'src, char>>> + Clone {
+    keyword("reference")
+        .ignore_then(
+            quoted_string_content_parser()
+                .delimited_by(just('"'), just('"'))
+                .padded()
+                .delimited_by(just('('), just(')')),
+        )
+        .map_with(|prompt_name, e| (prompt_name, to_span(e.span())))
+        .labelled("reference expression")
 }
 
 /// Parse just a label (textarea slot)

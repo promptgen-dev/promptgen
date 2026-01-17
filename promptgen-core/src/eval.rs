@@ -32,6 +32,11 @@ pub struct EvalContext<'a, R: Rng = StdRng> {
     pub slot_defaults: SlotDefaults,
     /// Stack of variable names being evaluated (for cycle detection).
     eval_stack: Vec<String>,
+    /// Stack of prompt names being evaluated (for prompt reference cycle detection).
+    prompt_stack: Vec<String>,
+    /// Current slot name prefix for nested prompt references.
+    /// When rendering a referenced prompt, slots are prefixed with "ParentSlot - ".
+    slot_prefix: Option<String>,
 }
 
 impl<'a> EvalContext<'a, StdRng> {
@@ -45,6 +50,8 @@ impl<'a> EvalContext<'a, StdRng> {
             slot_overrides: HashMap::new(),
             slot_defaults: SlotDefaults::default(),
             eval_stack: Vec::new(),
+            prompt_stack: Vec::new(),
+            slot_prefix: None,
         }
     }
 
@@ -56,6 +63,8 @@ impl<'a> EvalContext<'a, StdRng> {
             slot_overrides: HashMap::new(),
             slot_defaults: SlotDefaults::default(),
             eval_stack: Vec::new(),
+            prompt_stack: Vec::new(),
+            slot_prefix: None,
         }
     }
 }
@@ -69,6 +78,8 @@ impl<'a, R: Rng> EvalContext<'a, R> {
             slot_overrides: HashMap::new(),
             slot_defaults: SlotDefaults::default(),
             eval_stack: Vec::new(),
+            prompt_stack: Vec::new(),
+            slot_prefix: None,
         }
     }
 
@@ -95,6 +106,15 @@ impl<'a, R: Rng> EvalContext<'a, R> {
             self.slot_overrides.insert(name, vec![value]);
         }
     }
+
+    /// Get the full slot name with any prefix applied.
+    /// Used when rendering referenced prompts to prefix slot names.
+    fn prefixed_slot_name(&self, slot_name: &str) -> String {
+        match &self.slot_prefix {
+            Some(prefix) => format!("{} - {}", prefix, slot_name),
+            None => slot_name.to_string(),
+        }
+    }
 }
 
 /// Record of which option was chosen from a variable.
@@ -118,6 +138,9 @@ pub struct RenderResult {
     /// Slot values that were used (slot name -> list of values).
     pub slot_values: HashMap<String, Vec<String>>,
 }
+
+/// Maximum depth for prompt references to prevent stack overflow.
+pub const MAX_REFERENCE_DEPTH: usize = 10;
 
 /// Error that can occur during rendering.
 #[derive(Debug, thiserror::Error)]
@@ -146,6 +169,15 @@ pub enum RenderError {
 
     #[error("Slots may not reference other slots: {0}")]
     SlotReferencesSlot(String),
+
+    #[error("prompt not found: {0}")]
+    PromptNotFound(String),
+
+    #[error("circular prompt reference detected: {0}")]
+    CircularPromptReference(String),
+
+    #[error("maximum prompt reference depth ({0}) exceeded")]
+    MaxReferenceDepthExceeded(usize),
 }
 
 /// Render a parsed prompt AST using the given context.
@@ -181,12 +213,14 @@ fn eval_node<R: Rng>(
         Node::Comment(_) => Ok(String::new()),
 
         Node::SlotBlock(slot_block) => {
-            let slot_name = &slot_block.label.0;
+            let raw_slot_name = &slot_block.label.0;
+            // Apply any prefix from referenced prompts
+            let slot_name = ctx.prefixed_slot_name(raw_slot_name);
 
             match &slot_block.kind.0 {
                 SlotKind::Textarea => {
                     // Textarea slot: check for override, otherwise return empty string
-                    if let Some(values) = ctx.slot_overrides.get(slot_name).cloned() {
+                    if let Some(values) = ctx.slot_overrides.get(&slot_name).cloned() {
                         // For textarea, join all values (typically just one)
                         // Each value can contain grammar - parse and evaluate
                         let mut result = String::new();
@@ -205,13 +239,22 @@ fn eval_node<R: Rng>(
                 }
                 SlotKind::Pick(pick) => {
                     // Pick slot: check for override first
-                    if let Some(values) = ctx.slot_overrides.get(slot_name).cloned() {
+                    if let Some(values) = ctx.slot_overrides.get(&slot_name).cloned() {
                         // Validate and render the pick slot values
-                        eval_pick_slot_value(slot_name, &values, pick, ctx, chosen_options)
+                        eval_pick_slot_value(&slot_name, &values, pick, ctx, chosen_options)
                     } else {
                         // No value provided - render as empty string per spec
                         Ok(String::new())
                     }
+                }
+                SlotKind::Reference { prompt_name } => {
+                    // Reference slot: render the referenced prompt with prefixed slots
+                    eval_prompt_reference(
+                        &slot_name,
+                        prompt_name,
+                        ctx,
+                        chosen_options,
+                    )
                 }
             }
         }
@@ -425,6 +468,61 @@ fn eval_inline_options<R: Rng>(
             Ok(output)
         }
     }
+}
+
+/// Evaluate a prompt reference slot.
+/// Renders the referenced prompt with slot names prefixed by the slot label.
+fn eval_prompt_reference<R: Rng>(
+    slot_name: &str,
+    prompt_name: &str,
+    ctx: &mut EvalContext<'_, R>,
+    chosen_options: &mut Vec<ChosenOption>,
+) -> Result<String, RenderError> {
+    // Check depth limit
+    if ctx.prompt_stack.len() >= MAX_REFERENCE_DEPTH {
+        return Err(RenderError::MaxReferenceDepthExceeded(MAX_REFERENCE_DEPTH));
+    }
+
+    // Check for circular prompt reference
+    if ctx.prompt_stack.contains(&prompt_name.to_string()) {
+        let chain = ctx.prompt_stack.join(" -> ");
+        return Err(RenderError::CircularPromptReference(format!(
+            "{} -> {}",
+            chain, prompt_name
+        )));
+    }
+
+    // Find the prompt in the library
+    let saved_prompt = ctx
+        .library
+        .find_prompt(prompt_name)
+        .ok_or_else(|| RenderError::PromptNotFound(prompt_name.to_string()))?;
+
+    // Parse the prompt content
+    let ast = parse_prompt(&saved_prompt.content)
+        .map_err(|e| RenderError::OptionParseError(format!("in prompt '{}': {}", prompt_name, e)))?;
+
+    // Push prompt to stack for cycle detection
+    ctx.prompt_stack.push(prompt_name.to_string());
+
+    // Save the old prefix and set the new one
+    let old_prefix = ctx.slot_prefix.take();
+    ctx.slot_prefix = Some(slot_name.to_string());
+
+    // Render the referenced prompt
+    let mut output = String::new();
+    for (node, _span) in &ast.nodes {
+        let text = eval_node(node, ctx, chosen_options)?;
+        output.push_str(&text);
+    }
+
+    // Restore the old prefix
+    ctx.slot_prefix = old_prefix;
+
+    // Pop from prompt stack
+    ctx.prompt_stack.pop();
+
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -653,5 +751,233 @@ mod tests {
         assert!(result.text.contains(" and "));
         // Should have 2 chosen options (Hair and Eyes)
         assert_eq!(result.chosen_options.len(), 2);
+    }
+
+    // =========================================================================
+    // Prompt Reference Tests
+    // =========================================================================
+
+    use crate::library::SavedPrompt;
+
+    #[test]
+    fn test_reference_basic_expansion() {
+        // Test basic prompt reference: {{ Style: reference("HairPrompt") }}
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new(
+            "HairPrompt",
+            "hair with {{ Color }} highlights",
+        ));
+
+        let ast = parse_prompt("A character with {{ Style: reference(\"HairPrompt\") }}").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
+        ctx.set_slot("Style - Color", "blue");
+
+        let result = render(&ast, &mut ctx).unwrap();
+        assert_eq!(result.text, "A character with hair with blue highlights");
+    }
+
+    #[test]
+    fn test_reference_slot_prefix_applied() {
+        // Verify that slots from referenced prompts are prefixed correctly
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new(
+            "CharacterPrompt",
+            "{{ Name }} with {{ Trait }}",
+        ));
+
+        let ast = parse_prompt("Hero: {{ Character: reference(\"CharacterPrompt\") }}").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
+        // Use prefixed slot names
+        ctx.set_slot("Character - Name", "Alice");
+        ctx.set_slot("Character - Trait", "bravery");
+
+        let result = render(&ast, &mut ctx).unwrap();
+        assert_eq!(result.text, "Hero: Alice with bravery");
+    }
+
+    #[test]
+    fn test_reference_nested_chained_prefixes() {
+        // Test A -> B -> C prefix chaining: "A - B - C's Slot"
+        let mut lib = Library::new("Test");
+
+        // Level C: the innermost prompt with a slot
+        lib.prompts.push(SavedPrompt::new(
+            "LevelC",
+            "value={{ Value }}",
+        ));
+
+        // Level B: references C
+        lib.prompts.push(SavedPrompt::new(
+            "LevelB",
+            "B[{{ RefC: reference(\"LevelC\") }}]",
+        ));
+
+        // Main prompt references B
+        let ast = parse_prompt("A[{{ RefB: reference(\"LevelB\") }}]").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
+
+        // The slot name should be "RefB - RefC - Value" (chained prefixes)
+        ctx.set_slot("RefB - RefC - Value", "42");
+
+        let result = render(&ast, &mut ctx).unwrap();
+        assert_eq!(result.text, "A[B[value=42]]");
+    }
+
+    #[test]
+    fn test_reference_circular_detection() {
+        // Test circular reference detection: A -> B -> A
+        let mut lib = Library::new("Test");
+
+        lib.prompts.push(SavedPrompt::new(
+            "PromptA",
+            "A: {{ RefB: reference(\"PromptB\") }}",
+        ));
+        lib.prompts.push(SavedPrompt::new(
+            "PromptB",
+            "B: {{ RefA: reference(\"PromptA\") }}",
+        ));
+
+        let ast = parse_prompt("{{ Start: reference(\"PromptA\") }}").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
+
+        let result = render(&ast, &mut ctx);
+        assert!(matches!(result, Err(RenderError::CircularPromptReference(_))));
+    }
+
+    #[test]
+    fn test_reference_self_circular_detection() {
+        // Test self-reference: A -> A
+        let mut lib = Library::new("Test");
+
+        lib.prompts.push(SavedPrompt::new(
+            "SelfRef",
+            "Self: {{ Loop: reference(\"SelfRef\") }}",
+        ));
+
+        let ast = parse_prompt("{{ Start: reference(\"SelfRef\") }}").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
+
+        let result = render(&ast, &mut ctx);
+        assert!(matches!(result, Err(RenderError::CircularPromptReference(_))));
+    }
+
+    #[test]
+    fn test_reference_prompt_not_found() {
+        // Test that referencing a non-existent prompt returns an error
+        let lib = Library::new("Test");
+
+        let ast = parse_prompt("{{ Style: reference(\"NonExistentPrompt\") }}").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
+
+        let result = render(&ast, &mut ctx);
+        assert!(matches!(result, Err(RenderError::PromptNotFound(_))));
+        if let Err(RenderError::PromptNotFound(name)) = result {
+            assert_eq!(name, "NonExistentPrompt");
+        }
+    }
+
+    #[test]
+    fn test_reference_max_depth_exceeded() {
+        // Test that deeply nested references hit the depth limit
+        let mut lib = Library::new("Test");
+
+        // Create a chain of prompts that exceeds MAX_REFERENCE_DEPTH
+        for i in 0..=MAX_REFERENCE_DEPTH {
+            let name = format!("Level{}", i);
+            let content = if i < MAX_REFERENCE_DEPTH {
+                format!("L{}[{{{{ Ref: reference(\"Level{}\") }}}}]", i, i + 1)
+            } else {
+                format!("L{}", i)
+            };
+            lib.prompts.push(SavedPrompt::new(name, content));
+        }
+
+        let ast = parse_prompt("{{ Start: reference(\"Level0\") }}").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
+
+        let result = render(&ast, &mut ctx);
+        assert!(matches!(result, Err(RenderError::MaxReferenceDepthExceeded(_))));
+    }
+
+    #[test]
+    fn test_reference_multiple_slots_in_referenced_prompt() {
+        // Test that multiple slots in a referenced prompt are all prefixed
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new(
+            "PersonPrompt",
+            "{{ Name }}, {{ Age }} years old, likes {{ Hobby }}",
+        ));
+
+        let ast = parse_prompt("Person: {{ P: reference(\"PersonPrompt\") }}").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
+        ctx.set_slot("P - Name", "Bob");
+        ctx.set_slot("P - Age", "25");
+        ctx.set_slot("P - Hobby", "hiking");
+
+        let result = render(&ast, &mut ctx).unwrap();
+        assert_eq!(result.text, "Person: Bob, 25 years old, likes hiking");
+    }
+
+    #[test]
+    fn test_reference_with_library_refs() {
+        // Test that library refs (@Var) work inside referenced prompts
+        let mut lib = Library::new("Test");
+        lib.variables.push(PromptVariable::with_options(
+            "Color",
+            vec!["red", "blue", "green"],
+        ));
+        lib.prompts.push(SavedPrompt::new(
+            "ColorPrompt",
+            "a @Color thing",
+        ));
+
+        let ast = parse_prompt("{{ Item: reference(\"ColorPrompt\") }}").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
+
+        let result = render(&ast, &mut ctx).unwrap();
+        assert!(result.text.starts_with("a "));
+        assert!(
+            result.text.contains("red")
+                || result.text.contains("blue")
+                || result.text.contains("green")
+        );
+    }
+
+    #[test]
+    fn test_reference_with_pick_slot() {
+        // Test that pick slots in referenced prompts work with prefixed names
+        let mut lib = Library::new("Test");
+        lib.variables.push(PromptVariable::with_options(
+            "Size",
+            vec!["small", "medium", "large"],
+        ));
+        lib.prompts.push(SavedPrompt::new(
+            "SizePrompt",
+            "{{ Size: pick(@Size) | one }}",
+        ));
+
+        let ast = parse_prompt("Item: {{ Item: reference(\"SizePrompt\") }}").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
+        ctx.set_slot("Item - Size", "medium");
+
+        let result = render(&ast, &mut ctx).unwrap();
+        assert_eq!(result.text, "Item: medium");
+    }
+
+    #[test]
+    fn test_reference_empty_slot_renders_empty() {
+        // Test that slots without values render as empty strings in referenced prompts
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new(
+            "OptionalPrompt",
+            "Hello{{ Name }}!",
+        ));
+
+        let ast = parse_prompt("{{ Greeting: reference(\"OptionalPrompt\") }}").unwrap();
+        let mut ctx = EvalContext::with_seed(&lib, 42);
+        // Don't set any slot values
+
+        let result = render(&ast, &mut ctx).unwrap();
+        assert_eq!(result.text, "Hello!");
     }
 }

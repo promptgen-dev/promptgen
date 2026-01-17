@@ -73,6 +73,12 @@ pub enum SlotKind {
     Pick(PickSlot),
     /// `{{ label }}` - plain textarea for freeform user input.
     Textarea,
+    /// `{{ label: reference("PromptName") }}` - inject another prompt's content.
+    /// Slots from the referenced prompt are prefixed with this slot's label.
+    Reference {
+        /// The name of the prompt to reference.
+        prompt_name: String,
+    },
 }
 
 /// A pick slot with sources and operators.
@@ -217,6 +223,12 @@ pub enum SlotDefKind {
     },
     /// Textarea for freeform input.
     Textarea,
+    /// Reference to another prompt - injects that prompt's content.
+    /// Slots from the referenced prompt are prefixed with this slot's label.
+    Reference {
+        /// The name of the prompt to reference.
+        prompt_name: String,
+    },
 }
 
 /// Selection cardinality for pick slots.
@@ -320,6 +332,12 @@ impl SlotBlock {
             SlotKind::Pick(pick) => Ok(SlotDefinition {
                 label,
                 kind: pick.to_definition_with_defaults(defaults)?,
+            }),
+            SlotKind::Reference { prompt_name } => Ok(SlotDefinition {
+                label,
+                kind: SlotDefKind::Reference {
+                    prompt_name: prompt_name.clone(),
+                },
             }),
         }
     }

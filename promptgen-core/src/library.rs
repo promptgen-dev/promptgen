@@ -79,16 +79,101 @@ impl Library {
     /// Validate all library references in a prompt.
     fn validate_references(&self, ast: &Prompt) -> Vec<DiagnosticError> {
         let mut errors = Vec::new();
+        let mut prompt_stack = Vec::new();
 
-        for (node, span) in &ast.nodes {
-            if let Node::LibraryRef(lib_ref) = node
-                && let Err(e) = self.validate_reference(lib_ref, span.clone())
-            {
-                errors.push(e);
-            }
-        }
+        self.validate_references_recursive(ast, &mut errors, &mut prompt_stack);
 
         errors
+    }
+
+    /// Recursively validate references in a prompt, including prompt references.
+    fn validate_references_recursive(
+        &self,
+        ast: &Prompt,
+        errors: &mut Vec<DiagnosticError>,
+        prompt_stack: &mut Vec<String>,
+    ) {
+        use crate::ast::SlotKind;
+
+        for (node, span) in &ast.nodes {
+            match node {
+                Node::LibraryRef(lib_ref) => {
+                    if let Err(e) = self.validate_reference(lib_ref, span.clone()) {
+                        errors.push(e);
+                    }
+                }
+                Node::SlotBlock(slot_block) => {
+                    if let SlotKind::Reference { prompt_name } = &slot_block.kind.0 {
+                        // Check for circular reference
+                        if prompt_stack.contains(prompt_name) {
+                            let chain = prompt_stack.join(" -> ");
+                            errors.push(DiagnosticError {
+                                message: format!(
+                                    "Circular prompt reference: {} -> {}",
+                                    chain, prompt_name
+                                ),
+                                span: slot_block.kind.1.clone(),
+                                kind: ErrorKind::CircularPromptReference,
+                                suggestion: None,
+                            });
+                            continue;
+                        }
+
+                        // Check depth limit
+                        if prompt_stack.len() >= crate::eval::MAX_REFERENCE_DEPTH {
+                            errors.push(DiagnosticError {
+                                message: format!(
+                                    "Maximum prompt reference depth ({}) exceeded",
+                                    crate::eval::MAX_REFERENCE_DEPTH
+                                ),
+                                span: slot_block.kind.1.clone(),
+                                kind: ErrorKind::UnknownPromptReference,
+                                suggestion: None,
+                            });
+                            continue;
+                        }
+
+                        // Check that the referenced prompt exists
+                        match self.find_prompt(prompt_name) {
+                            Some(saved_prompt) => {
+                                // Recursively validate the referenced prompt
+                                if let Ok(ref_ast) = parse_prompt(&saved_prompt.content) {
+                                    prompt_stack.push(prompt_name.clone());
+                                    self.validate_references_recursive(&ref_ast, errors, prompt_stack);
+                                    prompt_stack.pop();
+                                }
+                            }
+                            None => {
+                                let suggestion = self.suggest_prompt_name(prompt_name);
+                                errors.push(DiagnosticError {
+                                    message: format!("Unknown prompt: {}", prompt_name),
+                                    span: slot_block.kind.1.clone(),
+                                    kind: ErrorKind::UnknownPromptReference,
+                                    suggestion,
+                                });
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Suggest a similar prompt name (for "did you mean?" errors).
+    fn suggest_prompt_name(&self, name: &str) -> Option<String> {
+        let name_lower = name.to_lowercase();
+
+        self.prompts
+            .iter()
+            .filter(|p| {
+                let prompt_lower = p.name.to_lowercase();
+                prompt_lower.contains(&name_lower)
+                    || name_lower.contains(&prompt_lower)
+                    || levenshtein_distance(&prompt_lower, &name_lower) <= 3
+            })
+            .min_by_key(|p| levenshtein_distance(&p.name.to_lowercase(), &name_lower))
+            .map(|p| format!("Did you mean \"{}\"?", p.name))
     }
 
     /// Validate a single library reference.
@@ -153,23 +238,90 @@ impl Library {
     /// Extract slot definitions from a parsed prompt.
     /// Returns normalized SlotDefinition structs with full type information.
     /// The `defaults` parameter provides fallback values for separator and suffix.
+    ///
+    /// Reference slots are expanded recursively - slots from the referenced prompt
+    /// are included with their names prefixed by the reference slot's label.
     pub fn get_slot_definitions(&self, ast: &Prompt, defaults: &SlotDefaults) -> Vec<SlotDefinition> {
         let mut slots = Vec::new();
         let mut seen_labels = std::collections::HashSet::new();
+        let mut prompt_stack = Vec::new();
+
+        self.collect_slot_definitions(
+            ast,
+            defaults,
+            None,
+            &mut slots,
+            &mut seen_labels,
+            &mut prompt_stack,
+        );
+
+        slots
+    }
+
+    /// Recursively collect slot definitions, expanding reference slots.
+    fn collect_slot_definitions(
+        &self,
+        ast: &Prompt,
+        defaults: &SlotDefaults,
+        prefix: Option<&str>,
+        slots: &mut Vec<SlotDefinition>,
+        seen_labels: &mut std::collections::HashSet<String>,
+        prompt_stack: &mut Vec<String>,
+    ) {
+        use crate::ast::SlotKind;
 
         for (node, _span) in &ast.nodes {
             if let Node::SlotBlock(slot_block) = node {
-                let label = &slot_block.label.0;
+                let raw_label = &slot_block.label.0;
+                let full_label = match prefix {
+                    Some(p) => format!("{} - {}", p, raw_label),
+                    None => raw_label.clone(),
+                };
+
                 // Only include first occurrence of each slot label
-                if seen_labels.insert(label.clone())
-                    && let Ok(def) = slot_block.to_definition_with_defaults(defaults)
-                {
-                    slots.push(def);
+                if !seen_labels.insert(full_label.clone()) {
+                    continue;
+                }
+
+                match &slot_block.kind.0 {
+                    SlotKind::Reference { prompt_name } => {
+                        // Check for circular reference
+                        if prompt_stack.contains(prompt_name) {
+                            // Skip circular references - they'll be caught during validation
+                            continue;
+                        }
+
+                        // Check depth limit
+                        if prompt_stack.len() >= crate::eval::MAX_REFERENCE_DEPTH {
+                            continue;
+                        }
+
+                        // Find and expand the referenced prompt
+                        if let Some(saved_prompt) = self.find_prompt(prompt_name) {
+                            if let Ok(ref_ast) = parse_prompt(&saved_prompt.content) {
+                                prompt_stack.push(prompt_name.clone());
+                                self.collect_slot_definitions(
+                                    &ref_ast,
+                                    defaults,
+                                    Some(&full_label),
+                                    slots,
+                                    seen_labels,
+                                    prompt_stack,
+                                );
+                                prompt_stack.pop();
+                            }
+                        }
+                    }
+                    _ => {
+                        // Regular slot - add it with the full label
+                        if let Ok(mut def) = slot_block.to_definition_with_defaults(defaults) {
+                            def.label = full_label;
+                            slots.push(def);
+                        }
+                    }
                 }
             }
         }
-
-        slots
     }
 
     /// Extract library references from a parsed prompt.
@@ -330,6 +482,8 @@ pub struct DiagnosticError {
 pub enum ErrorKind {
     Syntax,
     UnknownReference,
+    UnknownPromptReference,
+    CircularPromptReference,
     Cycle,
 }
 
@@ -573,5 +727,218 @@ mod tests {
         assert_eq!(levenshtein_distance("hair", "hiar"), 2); // swap
         assert_eq!(levenshtein_distance("hair", "har"), 1); // deletion
         assert_eq!(levenshtein_distance("hair", "hairs"), 1); // insertion
+    }
+
+    // =========================================================================
+    // Prompt Reference Validation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_validate_reference_prompt_exists() {
+        // Valid reference to an existing prompt should not produce errors
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new("HairPrompt", "{{ Color }} hair"));
+
+        let result = lib.parse_prompt("{{ Style: reference(\"HairPrompt\") }}");
+        assert!(result.is_ok(), "Expected no errors, got: {:?}", result.errors);
+    }
+
+    #[test]
+    fn test_validate_reference_prompt_not_found() {
+        // Reference to non-existent prompt should produce an error
+        let lib = Library::new("Test");
+
+        let result = lib.parse_prompt("{{ Style: reference(\"NonExistent\") }}");
+        assert!(result.has_errors());
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].kind, ErrorKind::UnknownPromptReference);
+        assert!(result.errors[0].message.contains("NonExistent"));
+    }
+
+    #[test]
+    fn test_validate_reference_prompt_with_suggestion() {
+        // Reference to similar-named prompt should suggest the correct name
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new("HairPrompt", "{{ Color }} hair"));
+
+        let result = lib.parse_prompt("{{ Style: reference(\"HiarPrompt\") }}"); // Typo
+        assert!(result.has_errors());
+        assert_eq!(result.errors[0].kind, ErrorKind::UnknownPromptReference);
+        // Should suggest "HairPrompt"
+        assert!(result.errors[0].suggestion.is_some());
+        assert!(result.errors[0].suggestion.as_ref().unwrap().contains("HairPrompt"));
+    }
+
+    #[test]
+    fn test_validate_reference_circular_a_to_b_to_a() {
+        // Circular reference: A -> B -> A should produce an error
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new(
+            "PromptA",
+            "A: {{ RefB: reference(\"PromptB\") }}",
+        ));
+        lib.prompts.push(SavedPrompt::new(
+            "PromptB",
+            "B: {{ RefA: reference(\"PromptA\") }}",
+        ));
+
+        let result = lib.parse_prompt("{{ Start: reference(\"PromptA\") }}");
+        assert!(result.has_errors());
+        // Should have a circular reference error
+        let circular_errors: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|e| e.kind == ErrorKind::CircularPromptReference)
+            .collect();
+        assert!(!circular_errors.is_empty(), "Expected circular reference error");
+    }
+
+    #[test]
+    fn test_validate_reference_self_circular() {
+        // Self-reference: A -> A should produce an error
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new(
+            "SelfRef",
+            "Self: {{ Loop: reference(\"SelfRef\") }}",
+        ));
+
+        let result = lib.parse_prompt("{{ Start: reference(\"SelfRef\") }}");
+        assert!(result.has_errors());
+        let circular_errors: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|e| e.kind == ErrorKind::CircularPromptReference)
+            .collect();
+        assert!(!circular_errors.is_empty(), "Expected circular reference error");
+    }
+
+    #[test]
+    fn test_validate_nested_reference_with_unknown_variable() {
+        // Nested prompt with unknown variable reference should produce error
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new(
+            "NestedPrompt",
+            "@UnknownVar in nested",
+        ));
+
+        let result = lib.parse_prompt("{{ Style: reference(\"NestedPrompt\") }}");
+        assert!(result.has_errors());
+        // Should have an unknown reference error for @UnknownVar
+        let unknown_errors: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|e| e.kind == ErrorKind::UnknownReference)
+            .collect();
+        assert!(!unknown_errors.is_empty(), "Expected unknown variable reference error");
+    }
+
+    // =========================================================================
+    // Slot Definition Expansion Tests
+    // =========================================================================
+
+    #[test]
+    fn test_get_slot_definitions_basic_reference() {
+        // Slots from referenced prompts should be included with prefixed names
+        use crate::ast::SlotDefaults;
+        use crate::parser::parse_prompt;
+
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new(
+            "InnerPrompt",
+            "{{ Color }} and {{ Size }}",
+        ));
+
+        let ast = parse_prompt("{{ Style: reference(\"InnerPrompt\") }}").unwrap();
+        let slots = lib.get_slot_definitions(&ast, &SlotDefaults::default());
+
+        // Should have two slots: "Style - Color" and "Style - Size"
+        assert_eq!(slots.len(), 2);
+        let labels: Vec<&str> = slots.iter().map(|s| s.label.as_str()).collect();
+        assert!(labels.contains(&"Style - Color"));
+        assert!(labels.contains(&"Style - Size"));
+    }
+
+    #[test]
+    fn test_get_slot_definitions_nested_references() {
+        // Nested references should chain prefixes: "A - B - Slot"
+        use crate::ast::SlotDefaults;
+        use crate::parser::parse_prompt;
+
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new("LevelC", "{{ Value }}"));
+        lib.prompts.push(SavedPrompt::new(
+            "LevelB",
+            "B: {{ RefC: reference(\"LevelC\") }}",
+        ));
+
+        let ast = parse_prompt("A: {{ RefB: reference(\"LevelB\") }}").unwrap();
+        let slots = lib.get_slot_definitions(&ast, &SlotDefaults::default());
+
+        // Should have one slot: "RefB - RefC - Value"
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].label, "RefB - RefC - Value");
+    }
+
+    #[test]
+    fn test_get_slot_definitions_mixed_slots_and_references() {
+        // Mix of regular slots and reference slots
+        use crate::ast::SlotDefaults;
+        use crate::parser::parse_prompt;
+
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new("SubPrompt", "{{ Inner }}"));
+
+        let ast = parse_prompt("{{ Name }} and {{ Sub: reference(\"SubPrompt\") }}").unwrap();
+        let slots = lib.get_slot_definitions(&ast, &SlotDefaults::default());
+
+        // Should have "Name" and "Sub - Inner"
+        assert_eq!(slots.len(), 2);
+        let labels: Vec<&str> = slots.iter().map(|s| s.label.as_str()).collect();
+        assert!(labels.contains(&"Name"));
+        assert!(labels.contains(&"Sub - Inner"));
+    }
+
+    #[test]
+    fn test_get_slot_definitions_circular_reference_skipped() {
+        // Circular references should be skipped in slot expansion (not cause infinite loop)
+        use crate::ast::SlotDefaults;
+        use crate::parser::parse_prompt;
+
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new(
+            "PromptA",
+            "{{ SlotA }} and {{ RefB: reference(\"PromptB\") }}",
+        ));
+        lib.prompts.push(SavedPrompt::new(
+            "PromptB",
+            "{{ SlotB }} and {{ RefA: reference(\"PromptA\") }}",
+        ));
+
+        let ast = parse_prompt("{{ Start: reference(\"PromptA\") }}").unwrap();
+        let slots = lib.get_slot_definitions(&ast, &SlotDefaults::default());
+
+        // Should get slots from A and B, but not recurse infinitely
+        // "Start - SlotA", "Start - RefB - SlotB" (the second RefA is skipped due to cycle)
+        let labels: Vec<&str> = slots.iter().map(|s| s.label.as_str()).collect();
+        assert!(labels.contains(&"Start - SlotA"));
+        assert!(labels.contains(&"Start - RefB - SlotB"));
+        // Should not contain deeply nested duplicates that would indicate infinite loop
+        assert!(slots.len() <= 4, "Too many slots, possible infinite loop");
+    }
+
+    #[test]
+    fn test_get_slot_definitions_unknown_reference_skipped() {
+        // Unknown prompt references should be skipped gracefully
+        use crate::ast::SlotDefaults;
+        use crate::parser::parse_prompt;
+
+        let lib = Library::new("Test");
+
+        let ast = parse_prompt("{{ Style: reference(\"NonExistent\") }} and {{ Name }}").unwrap();
+        let slots = lib.get_slot_definitions(&ast, &SlotDefaults::default());
+
+        // Should only have "Name" since NonExistent doesn't exist
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].label, "Name");
     }
 }

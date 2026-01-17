@@ -323,6 +323,11 @@ fn slot_block_to_source(slot_block: &crate::ast::SlotBlock, output: &mut String)
                 }
             }
         }
+        SlotKind::Reference { prompt_name } => {
+            output.push_str(": reference(\"");
+            output.push_str(&prompt_name.replace('\\', "\\\\").replace('"', "\\\""));
+            output.push_str("\")");
+        }
     }
 
     output.push_str(" }}");
