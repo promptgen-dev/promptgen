@@ -208,6 +208,10 @@ pub struct SlotDefinition {
     pub label: String,
     /// The kind of slot.
     pub kind: SlotDefKind,
+    /// The reference prefix path if this slot was expanded from a reference.
+    /// None for top-level slots, Some("Prefix") for first-level nested slots,
+    /// Some("A - B") for deeper nesting.
+    pub reference_prefix: Option<String>,
 }
 
 /// The normalized kind of a slot.
@@ -328,16 +332,19 @@ impl SlotBlock {
             SlotKind::Textarea => Ok(SlotDefinition {
                 label,
                 kind: SlotDefKind::Textarea,
+                reference_prefix: None,
             }),
             SlotKind::Pick(pick) => Ok(SlotDefinition {
                 label,
                 kind: pick.to_definition_with_defaults(defaults)?,
+                reference_prefix: None,
             }),
             SlotKind::Reference { prompt_name } => Ok(SlotDefinition {
                 label,
                 kind: SlotDefKind::Reference {
                     prompt_name: prompt_name.clone(),
                 },
+                reference_prefix: None,
             }),
         }
     }

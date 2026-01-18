@@ -39,13 +39,20 @@ enum SlotEntry {
 
 /// Build a hierarchical slot structure from flat slot definitions.
 ///
-/// Slots with prefixed names like "Style - Color" are grouped under a
-/// ReferenceGroup with label "Style". Nested prefixes create nested groups.
+/// Slots from reference expansion (with `reference_prefix` set) are grouped
+/// under ReferenceGroups. Regular slots without a reference prefix are shown
+/// at root level.
 fn build_slot_hierarchy(definitions: &[SlotDefinition]) -> Vec<SlotEntry> {
     let mut root: Vec<SlotEntry> = Vec::new();
 
     for def in definitions {
-        insert_into_hierarchy(&mut root, def, &def.label);
+        // Only create hierarchy for slots that came from reference expansion
+        if let Some(prefix) = &def.reference_prefix {
+            insert_into_hierarchy(&mut root, def, prefix);
+        } else {
+            // Top-level slot - add directly
+            root.push(SlotEntry::Slot(def.clone()));
+        }
     }
 
     root
@@ -53,22 +60,28 @@ fn build_slot_hierarchy(definitions: &[SlotDefinition]) -> Vec<SlotEntry> {
 
 /// Extract the local (display) name from a slot label.
 ///
-/// For nested slots like "Style - Color", this returns "Color".
-/// For non-nested slots like "Name", this returns "Name".
-fn local_slot_name(label: &str) -> &str {
-    label.rsplit(" - ").next().unwrap_or(label)
+/// For slots from reference expansion (has_prefix=true), extracts the local name
+/// after the last " - ". For top-level slots, returns the full label.
+fn local_slot_name(label: &str, has_prefix: bool) -> &str {
+    if has_prefix {
+        // Extract local name after the last " - "
+        label.rsplit(" - ").next().unwrap_or(label)
+    } else {
+        // Top-level slot - use full label
+        label
+    }
 }
 
-/// Insert a slot definition into the hierarchy at the appropriate position.
-fn insert_into_hierarchy(entries: &mut Vec<SlotEntry>, def: &SlotDefinition, remaining_path: &str) {
-    // Check if this path has a prefix (contains " - ")
-    if let Some(sep_pos) = remaining_path.find(" - ") {
-        let prefix = &remaining_path[..sep_pos];
-        let rest = &remaining_path[sep_pos + 3..]; // Skip " - "
+/// Insert a slot definition into the hierarchy based on its reference prefix.
+fn insert_into_hierarchy(entries: &mut Vec<SlotEntry>, def: &SlotDefinition, prefix: &str) {
+    // Check if prefix has multiple levels (contains " - ")
+    if let Some(sep_pos) = prefix.find(" - ") {
+        let group_prefix = &prefix[..sep_pos];
+        let rest = &prefix[sep_pos + 3..]; // Skip " - "
 
         // Find or create the reference group for this prefix
         let group_idx = entries.iter().position(|e| {
-            matches!(e, SlotEntry::ReferenceGroup { label, .. } if label == prefix)
+            matches!(e, SlotEntry::ReferenceGroup { label, .. } if label == group_prefix)
         });
 
         if let Some(idx) = group_idx {
@@ -81,13 +94,26 @@ fn insert_into_hierarchy(entries: &mut Vec<SlotEntry>, def: &SlotDefinition, rem
             let mut children = Vec::new();
             insert_into_hierarchy(&mut children, def, rest);
             entries.push(SlotEntry::ReferenceGroup {
-                label: prefix.to_string(),
+                label: group_prefix.to_string(),
                 children,
             });
         }
     } else {
-        // No more prefixes - this is a leaf slot
-        entries.push(SlotEntry::Slot(def.clone()));
+        // Single-level prefix - find or create the group and add slot as child
+        let group_idx = entries.iter().position(|e| {
+            matches!(e, SlotEntry::ReferenceGroup { label, .. } if label == prefix)
+        });
+
+        if let Some(idx) = group_idx {
+            if let SlotEntry::ReferenceGroup { children, .. } = &mut entries[idx] {
+                children.push(SlotEntry::Slot(def.clone()));
+            }
+        } else {
+            entries.push(SlotEntry::ReferenceGroup {
+                label: prefix.to_string(),
+                children: vec![SlotEntry::Slot(def.clone())],
+            });
+        }
     }
 }
 
@@ -201,6 +227,7 @@ impl SlotPanel {
                                 &def.label,
                                 is_focused,
                                 pending_completion,
+                                def.reference_prefix.is_some(),
                             );
                         }
                         SlotDefKind::Pick {
@@ -218,6 +245,7 @@ impl SlotPanel {
                                 sep,
                                 is_focused,
                                 pending_completion,
+                                def.reference_prefix.is_some(),
                             );
                         }
                         SlotDefKind::Reference { .. } => {
@@ -393,6 +421,7 @@ impl SlotPanel {
         label: &str,
         is_focused: bool,
         pending_completion: Option<String>,
+        from_reference: bool,
     ) {
         let label_owned = label.to_string();
         let editor_id = format!("slot_editor_{}", label_owned);
@@ -417,7 +446,7 @@ impl SlotPanel {
                 // Label and type indicator (grows and truncates)
                 flex.add_ui(FlexItem::default().grow(1.0).shrink(), |ui| {
                     ui.set_width(ui.available_width());
-                    let display_name = local_slot_name(&label_owned);
+                    let display_name = local_slot_name(&label_owned, from_reference);
                     let header_text = format!("{} {}", ICON_TEXT_AD, display_name);
                     ui.add(Label::new(header_text).truncate());
                 });
@@ -495,6 +524,7 @@ impl SlotPanel {
         sep: &str,
         is_focused: bool,
         pending_completion: Option<String>,
+        from_reference: bool,
     ) {
         let label_owned = label.to_string();
         let editor_id = format!("slot_editor_{}", label_owned);
@@ -581,7 +611,7 @@ impl SlotPanel {
                     ui.set_width(ui.available_width());
 
                     // Build the header text (without icon, since toggle button has it)
-                    let display_name = local_slot_name(&label_owned);
+                    let display_name = local_slot_name(&label_owned, from_reference);
                     let header_text = match &cardinality_clone {
                         Cardinality::One => display_name.to_string(),
                         Cardinality::Many { max: None } => display_name.to_string(),

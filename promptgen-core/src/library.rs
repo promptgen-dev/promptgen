@@ -313,9 +313,10 @@ impl Library {
                         }
                     }
                     _ => {
-                        // Regular slot - add it with the full label
+                        // Regular slot - add it with the full label and reference prefix
                         if let Ok(mut def) = slot_block.to_definition_with_defaults(defaults) {
                             def.label = full_label;
+                            def.reference_prefix = prefix.map(String::from);
                             slots.push(def);
                         }
                     }
@@ -940,5 +941,49 @@ mod tests {
         // Should only have "Name" since NonExistent doesn't exist
         assert_eq!(slots.len(), 1);
         assert_eq!(slots[0].label, "Name");
+    }
+
+    #[test]
+    fn test_slot_label_with_dash_not_treated_as_reference() {
+        // A slot label containing " - " should NOT be treated as a reference-expanded slot
+        // This tests the case: {{ name - (code-explainer) }}
+        use crate::ast::SlotDefaults;
+        use crate::parser::parse_prompt;
+
+        let lib = Library::new("Test");
+
+        let ast = parse_prompt("{{ name - (code-explainer) }}").unwrap();
+        let slots = lib.get_slot_definitions(&ast, &SlotDefaults::default());
+
+        // Should have one slot with the full label
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].label, "name - (code-explainer)");
+        // Crucially, reference_prefix should be None (this is a top-level slot)
+        assert!(
+            slots[0].reference_prefix.is_none(),
+            "Top-level slot with ' - ' in label should have reference_prefix=None"
+        );
+    }
+
+    #[test]
+    fn test_reference_expanded_slot_has_prefix() {
+        // Slots from reference expansion should have reference_prefix set
+        use crate::ast::SlotDefaults;
+        use crate::parser::parse_prompt;
+
+        let mut lib = Library::new("Test");
+        lib.prompts.push(SavedPrompt::new("InnerPrompt", "{{ Color }}"));
+
+        let ast = parse_prompt("{{ Style: reference(\"InnerPrompt\") }}").unwrap();
+        let slots = lib.get_slot_definitions(&ast, &SlotDefaults::default());
+
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].label, "Style - Color");
+        // reference_prefix should be set to "Style"
+        assert_eq!(
+            slots[0].reference_prefix,
+            Some("Style".to_string()),
+            "Reference-expanded slot should have reference_prefix set"
+        );
     }
 }
