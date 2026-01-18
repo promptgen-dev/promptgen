@@ -165,8 +165,11 @@ impl SlotPanel {
         // Build hierarchical slot structure
         let hierarchy = build_slot_hierarchy(&definitions);
 
+        // Take expand_all_slots state (consumed once per render)
+        let expand_all = state.preview.expand_all_slots.take();
+
         // Render the hierarchy (depth 0 = root level)
-        Self::render_slot_entries(ui, state, &hierarchy, 0, &slot_autocomplete_selection);
+        Self::render_slot_entries(ui, state, &hierarchy, 0, &slot_autocomplete_selection, expand_all);
 
         // Add scroll padding at the bottom so autocomplete popups have room to display
         ui.add_space(300.0);
@@ -179,6 +182,7 @@ impl SlotPanel {
         entries: &[SlotEntry],
         depth: usize,
         autocomplete_selection: &Option<(String, String)>,
+        expand_all: Option<bool>,
     ) {
         for entry in entries {
             match entry {
@@ -231,6 +235,7 @@ impl SlotPanel {
                         children,
                         depth,
                         autocomplete_selection,
+                        expand_all,
                     );
                     ui.add_space(spacing::XS);
                 }
@@ -246,6 +251,7 @@ impl SlotPanel {
         children: &[SlotEntry],
         depth: usize,
         autocomplete_selection: &Option<(String, String)>,
+        expand_all: Option<bool>,
     ) {
         let theme = theme::current(ui.ctx());
         let id = ui.make_persistent_id(format!("slot_ref_group_{}", label));
@@ -253,6 +259,11 @@ impl SlotPanel {
         // Use CollapsingState for custom header layout - default to open
         let mut collapsing_state =
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true);
+
+        // Apply expand/collapse all if requested
+        if let Some(should_expand) = expand_all {
+            collapsing_state.set_open(should_expand);
+        }
 
         // Calculate background color based on nesting depth
         let bg_color = if theme.is_light {
@@ -369,6 +380,7 @@ impl SlotPanel {
                         children,
                         depth + 1,
                         autocomplete_selection,
+                        expand_all,
                     );
                 });
             });

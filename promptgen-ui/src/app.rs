@@ -997,9 +997,20 @@ impl eframe::App for PromptGenApp {
                                 ui.separator();
 
                                 // Slots header with config
-                                ui.horizontal(|ui| {
-                                    ui.heading("Slots");
-                                    ui.add_space(16.0);
+                                use egui_flex::{Flex, FlexItem};
+                                use egui_material_icons::icons::{
+                                    ICON_COLLAPSE_ALL, ICON_EXPAND_ALL,
+                                };
+
+                                Flex::horizontal().w_full().wrap(false).show(ui, |flex| {
+                                    // Left side: heading and config
+                                    flex.add_ui(FlexItem::default(), |ui| {
+                                        ui.heading("Slots");
+                                    });
+
+                                    flex.add_ui(FlexItem::default(), |ui| {
+                                        ui.add_space(16.0);
+                                    });
 
                                     // Get current defaults from active tab
                                     let (mut sep, mut suffix) = if let Some(tab) =
@@ -1013,23 +1024,39 @@ impl eframe::App for PromptGenApp {
                                         (String::new(), String::new())
                                     };
 
-                                    ui.label("Default Separator:");
-                                    let sep_response = ui.add(
-                                        egui::TextEdit::singleline(&mut sep)
-                                            .desired_width(60.0)
-                                            .hint_text(", "),
-                                    );
+                                    let mut sep_changed = false;
+                                    let mut suffix_changed = false;
 
-                                    ui.add_space(8.0);
-                                    ui.label("Default Suffix:");
-                                    let suffix_response = ui.add(
-                                        egui::TextEdit::singleline(&mut suffix)
-                                            .desired_width(60.0)
-                                            .hint_text("none"),
-                                    );
+                                    flex.add_ui(FlexItem::default(), |ui| {
+                                        ui.label("Default Separator:");
+                                    });
+                                    flex.add_ui(FlexItem::default(), |ui| {
+                                        let sep_response = ui.add(
+                                            egui::TextEdit::singleline(&mut sep)
+                                                .desired_width(60.0)
+                                                .hint_text(", "),
+                                        );
+                                        sep_changed = sep_response.changed();
+                                    });
+
+                                    flex.add_ui(FlexItem::default(), |ui| {
+                                        ui.add_space(8.0);
+                                    });
+
+                                    flex.add_ui(FlexItem::default(), |ui| {
+                                        ui.label("Default Suffix:");
+                                    });
+                                    flex.add_ui(FlexItem::default(), |ui| {
+                                        let suffix_response = ui.add(
+                                            egui::TextEdit::singleline(&mut suffix)
+                                                .desired_width(60.0)
+                                                .hint_text("none"),
+                                        );
+                                        suffix_changed = suffix_response.changed();
+                                    });
 
                                     // Update state if changed
-                                    if sep_response.changed() || suffix_response.changed() {
+                                    if sep_changed || suffix_changed {
                                         if let Some(tab) = self.state.get_active_tab_mut() {
                                             tab.slot_defaults.sep =
                                                 if sep.is_empty() { None } else { Some(sep) };
@@ -1043,10 +1070,40 @@ impl eframe::App for PromptGenApp {
                                         self.state.request_render();
                                     }
 
-                                    ui.add_space(16.0);
-                                    if ui.button("Clear All").clicked() {
-                                        self.state.clear_all_slot_values();
-                                    }
+                                    flex.add_ui(FlexItem::default(), |ui| {
+                                        ui.add_space(16.0);
+                                    });
+
+                                    flex.add_ui(FlexItem::default(), |ui| {
+                                        if ui.button("Clear All").clicked() {
+                                            self.state.clear_all_slot_values();
+                                        }
+                                    });
+
+                                    // Spacer to push remaining buttons to the right
+                                    flex.add_ui(FlexItem::default().grow(1.0), |_ui| {});
+
+                                    // Expand all button
+                                    flex.add_ui(FlexItem::default(), |ui| {
+                                        if ui
+                                            .small_button(ICON_EXPAND_ALL)
+                                            .on_hover_text("Expand all")
+                                            .clicked()
+                                        {
+                                            self.state.preview.expand_all_slots = Some(true);
+                                        }
+                                    });
+
+                                    // Collapse all button
+                                    flex.add_ui(FlexItem::default(), |ui| {
+                                        if ui
+                                            .small_button(ICON_COLLAPSE_ALL)
+                                            .on_hover_text("Collapse all")
+                                            .clicked()
+                                        {
+                                            self.state.preview.expand_all_slots = Some(false);
+                                        }
+                                    });
                                 });
 
                                 SlotPanel::show(ui, &mut self.state);

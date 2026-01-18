@@ -21,6 +21,8 @@ pub struct PreviewState {
     pub auto_copy: bool,
     /// Whether a render is pending
     pub dirty: bool,
+    /// Slot panel expand/collapse all (consumed on next render)
+    pub expand_all_slots: Option<bool>,
 }
 
 impl Default for PreviewState {
@@ -33,6 +35,7 @@ impl Default for PreviewState {
             auto_render: true,
             auto_copy: false,
             dirty: false,
+            expand_all_slots: None,
         }
     }
 }
@@ -152,6 +155,7 @@ impl PreviewState {
         self.seed = None;
         self.slot_values.clear();
         self.dirty = false;
+        self.expand_all_slots = None;
     }
 }
 

@@ -204,7 +204,8 @@ impl Theme {
 
     // UI element colors
     pub fn chip_bg(&self) -> Color32 {
-        self.surface2
+        // Use accent color with transparency for better contrast
+        self.accent_one.gamma_multiply(0.35)
     }
     pub fn focus_bg(&self) -> Color32 {
         self.surface1
