@@ -1,0 +1,4 @@
+[alias]
+ui = "run -p promptgen-ui"
+ui-release = "run -p promptgen-ui --release"
+build-ui = "build -p promptgen-ui --release"
